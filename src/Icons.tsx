@@ -17,6 +17,15 @@ export function Icon({ name, size = 18 }: { name: string; size?: number }) {
         <path d="m16 16 5 5" />
       </>
     ),
+    users: (
+      <>
+        <circle cx="9" cy="7" r="3" />
+        <path d="M2 21v-3a7 7 0 0 1 14 0v3M16 4a3 3 0 0 1 0 6M18 14a5 5 0 0 1 4 5v2" />
+      </>
+    ),
+    priorityHigh: <path d="m6 12 6-6 6 6M6 18l6-6 6 6" />,
+    priorityMedium: <path d="M5 9h14M5 15h14" />,
+    priorityLow: <path d="M5 12h14" />,
     plus: <path d="M12 5v14M5 12h14" />,
     user: (
       <>

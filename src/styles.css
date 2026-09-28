@@ -1,13 +1,10 @@
 :root {
-  font-family:
-    Inter,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #e9ebee;
   background: #111214;
   font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   font-size: 14px;
   color-scheme: dark;
   --bg: #111214;
@@ -122,16 +119,6 @@ p {
   font-size: 37px;
   color: var(--accent);
   line-height: 1;
-}
-.workspace-name {
-  margin: 27px 12px 26px;
-  font-size: 12px;
-  color: #c4c9d0;
-  display: flex;
-  justify-content: space-between;
-}
-.workspace-name span {
-  color: #777f8b;
 }
 .nav-label {
   margin: 0 12px 10px;
@@ -873,46 +860,314 @@ footer {
   padding: 20px;
   overflow: auto;
 }
-@media (min-width: 1500px) {
-  .sidebar {
-    width: 252px;
-  }
-  .topbar {
-    height: 75px;
-  }
-  .page-title h1 {
-    font-size: 42px;
-  }
-  .main-content {
-    padding-top: 0;
-  }
-  .column {
-    min-height: 410px;
-  }
-  .task-card {
-    min-height: 164px;
-    padding: 15px;
-  }
-  .task-title {
-    font-size: 16px;
-  }
-  .column h2 {
-    font-size: 14px;
-  }
-  .card-bottom {
-    font-size: 12px;
-  }
-  .card-top {
-    font-size: 12px;
-  }
-  .label {
-    font-size: 11px;
-  }
-  .toolbar {
-    margin-top: 28px;
-  }
-  .search {
-    width: 390px;
+
+/* Desktop geometry follows the 1536 × 1024 concept. */
+.app-shell {
+  background:
+    radial-gradient(ellipse at 65% 100%, #1b1d1e66, transparent 65%), #111315;
+  border: 1px solid #393b3e;
+  border-radius: 14px;
+}
+.sidebar {
+  position: relative;
+  width: 266px;
+  padding: 60px 15px 40px;
+  background: linear-gradient(115deg, #1c1e20 0%, #17191b 60%, #191b1d 100%);
+  border-color: #292c2f;
+}
+.window-lights {
+  position: absolute;
+  top: 14px;
+  left: 19px;
+  display: flex;
+  gap: 9px;
+}
+.window-lights i {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #ff6259;
+}
+.window-lights i:nth-child(2) {
+  background: #ffc344;
+}
+.window-lights i:nth-child(3) {
+  background: #30c85a;
+}
+.brand {
+  height: 32px;
+  padding: 0 12px;
+  gap: 14px;
+  font-size: 23px;
+  font-weight: 600;
+  letter-spacing: -0.6px;
+}
+.brand-symbol {
+  color: #90e4c0;
+  flex-shrink: 0;
+}
+.nav-label {
+  margin: 39px 16px 10px;
+  font-size: 14px;
+  letter-spacing: 0;
+  color: #a8afb9;
+}
+.nav-item {
+  height: 46px;
+  padding: 0 16px;
+  gap: 18px;
+  margin-bottom: 5px;
+  font-size: 16px;
+  border-radius: 8px;
+  color: #c9ced7;
+}
+.nav-item svg {
+  width: 23px;
+  height: 23px;
+}
+.nav-item.selected {
+  background: linear-gradient(110deg, #292d30, #24282b);
+  box-shadow: inset 0 1px #ffffff03;
+}
+.workspace-status {
+  margin-top: 10px;
+  height: 61px;
+  padding: 0 13px;
+  gap: 13px;
+  font-size: 14px;
+}
+.workspace-status svg {
+  width: 23px;
+  height: 23px;
+}
+.topbar {
+  height: 66px;
+  padding: 0 20px 0 31px;
+  font-size: 15px;
+}
+.search {
+  width: 444px;
+  height: 44px;
+  border-radius: 10px;
+  padding: 0 14px;
+  gap: 12px;
+  background: linear-gradient(110deg, #202326, #1c1e20);
+  border-color: #32363a;
+  box-shadow:
+    inset 0 1px #ffffff03,
+    0 3px 8px #0002;
+}
+.search input {
+  font-size: 15px;
+}
+.search input::placeholder {
+  color: #a3abb7;
+}
+.search svg {
+  width: 19px;
+  height: 19px;
+}
+.search kbd {
+  font-size: 14px;
+  padding: 3px 6px;
+}
+.main-content {
+  padding: 0 20px 35px 26px;
+}
+.page-title {
+  margin: 0 0 8px;
+  padding-left: 5px;
+}
+.page-title h1 {
+  font-size: 46px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -1.1px;
+  color: #f5f5f6;
+}
+.page-title p {
+  font-size: 19px;
+  margin-top: 1px;
+  line-height: 28px;
+  color: #a6afbb;
+}
+.toolbar {
+  height: 58px;
+  margin: 0 0 20px;
+  gap: 15px;
+  border-color: #282b2e;
+}
+.tabs {
+  gap: 10px;
+}
+.tabs button {
+  font-size: 16px;
+  padding: 17px 15px 16px;
+  border-bottom-width: 3px;
+}
+.toolbar-actions {
+  gap: 14px;
+  padding-bottom: 10px;
+}
+.assignee-filter {
+  position: relative;
+}
+.assignee-filter > svg {
+  position: absolute;
+  left: 17px;
+  top: 14px;
+  pointer-events: none;
+}
+.toolbar-actions select {
+  width: 191px;
+  height: 46px;
+  padding-left: 47px;
+  font-size: 15px;
+  border-radius: 9px;
+  background: linear-gradient(120deg, #202326, #191c1e);
+}
+.toolbar-actions .primary {
+  height: 46px;
+  padding: 0 18px;
+  font-size: 16px;
+  gap: 10px;
+  border-radius: 9px;
+  background: linear-gradient(120deg, #9becc9, #83dfbb);
+  border-color: #a4e9cd;
+  box-shadow:
+    inset 0 1px #ffffff30,
+    0 2px 5px #0003;
+}
+.toolbar-actions .primary svg {
+  width: 22px;
+  height: 22px;
+}
+.app-shell .board {
+  gap: 16px;
+  grid-template-columns: repeat(4, minmax(230px, 1fr));
+  min-width: 968px;
+  align-items: stretch;
+}
+.app-shell .column {
+  min-height: 435px;
+  padding: 8px;
+  border-radius: 10px;
+  border-color: #292c30;
+  background: linear-gradient(115deg, #1c1f2180, #191c1e66);
+  box-shadow: inset 0 1px #ffffff02;
+}
+.app-shell .column header {
+  height: 47px;
+  padding: 0 7px 10px;
+  gap: 16px;
+}
+.app-shell .column h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.app-shell .column .status-dot {
+  display: none;
+}
+.app-shell .column .count {
+  font-size: 14px;
+  margin: 0;
+  color: #929aa6;
+}
+.app-shell .cards {
+  gap: 12px;
+}
+.app-shell .task-card {
+  padding: 17px 16px 13px;
+  min-height: 173px;
+  border-radius: 10px;
+  border-color: #34373b;
+  background: linear-gradient(115deg, #232629, #1d2022);
+  box-shadow:
+    0 3px 6px #00000024,
+    0 12px 24px #0000000a,
+    inset 0 1px #ffffff08;
+}
+.app-shell .task-card:hover {
+  border-color: #65746e;
+  background: #272c2e;
+}
+.app-shell .card-top {
+  font-size: 14px;
+  margin-bottom: 8px;
+  line-height: 18px;
+  color: #a2acb9;
+}
+.app-shell .task-title {
+  font-size: 20px;
+  line-height: 24px;
+  font-weight: 400;
+  margin-bottom: 10px;
+  color: #f1f2f4;
+}
+.app-shell .label {
+  font-size: 13px;
+  line-height: 16px;
+  padding: 3px 9px;
+  background: linear-gradient(#344452, #2b3641);
+}
+.app-shell .label.agents {
+  background: linear-gradient(#463958, #382e49);
+}
+.app-shell .label.product,
+.app-shell .label.security {
+  background: linear-gradient(#354b3c, #293d31);
+}
+.app-shell .card-bottom {
+  margin-top: 15px;
+  gap: 12px;
+  font-size: 14px;
+}
+.app-shell .avatar {
+  width: 34px;
+  height: 34px;
+  font-size: 12px;
+  background: linear-gradient(120deg, #bdd0e0, #97afc4);
+}
+.app-shell .avatar.bot {
+  background: linear-gradient(120deg, #374149, #252e35);
+}
+.app-shell .avatar.bot svg {
+  width: 21px;
+  height: 21px;
+}
+.app-shell .done-check {
+  width: 20px;
+  height: 20px;
+}
+.app-shell footer {
+  height: 68px;
+  padding: 0 31px;
+  font-size: 13px;
+  gap: 12px;
+  border-color: #292c2f;
+  background: #191c1d44;
+}
+.app-shell footer > .connection-dot {
+  width: 11px;
+  height: 11px;
+}
+.footer-keys {
+  gap: 25px;
+}
+.footer-keys span,
+.footer-keys button {
+  gap: 12px;
+  font-size: 13px;
+}
+.footer-keys kbd {
+  font-size: 13px;
+  padding: 6px 9px;
+  background: linear-gradient(#22272a, #181c1e);
+  border-color: #3a3e42;
+}
+@media (max-width: 1100px) {
+  .footer-detail {
+    display: none;
   }
 }
 @media (max-width: 800px) {
@@ -928,7 +1183,6 @@ footer {
   .brand-mark {
     font-size: 31px;
   }
-  .workspace-name,
   .nav-label,
   .nav-item span,
   .nav-item small,
@@ -1055,49 +1309,7 @@ footer {
     transition: none !important;
   }
 }
-@media (min-width: 1500px) {
-  .task-title {
-    font-size: 18px;
-  }
-  .task-card {
-    min-height: 176px;
-  }
-  .column {
-    min-height: 435px;
-  }
-  .card-top {
-    font-size: 13px;
-  }
-  .card-bottom {
-    font-size: 13px;
-  }
-  .avatar {
-    width: 30px;
-    height: 30px;
-    font-size: 11px;
-  }
-  .label {
-    font-size: 12px;
-  }
-  .nav-item {
-    font-size: 15px;
-  }
-  .tabs button,
-  .toolbar-actions select,
-  .toolbar-actions .primary {
-    font-size: 14px;
-  }
-  .page-title p {
-    font-size: 17px;
-  }
-  footer {
-    font-size: 12px;
-  }
-  .footer-keys,
-  .footer-keys button {
-    font-size: 12px;
-  }
-}
+
 @media (max-width: 600px) {
   .toolbar {
     flex-wrap: wrap;
@@ -1554,5 +1766,69 @@ footer {
   }
   .toolbar-actions select {
     width: 115px;
+  }
+}
+
+@media (max-width: 800px) {
+  .app-shell {
+    border-radius: 0;
+    border: 0;
+  }
+  .window-lights {
+    display: none;
+  }
+  .sidebar {
+    padding-bottom: 0;
+  }
+  .brand-symbol {
+    width: 25px;
+  }
+  .sidebar-bottom .standup-launch {
+    display: flex;
+  }
+  .assignee-filter > svg {
+    display: none;
+  }
+  .toolbar-actions select {
+    padding-left: 8px;
+  }
+  .app-shell footer {
+    height: 47px;
+    padding: 0 18px;
+  }
+  .app-shell .board {
+    grid-template-columns: repeat(4, 260px);
+    min-width: 1070px;
+    gap: 10px;
+  }
+  .page-title {
+    padding: 0;
+  }
+  .toolbar {
+    height: auto;
+  }
+  .page-title p {
+    line-height: 1.5;
+  }
+  .search {
+    height: 34px;
+    padding: 0 9px;
+  }
+  .search input {
+    font-size: 12px;
+  }
+  .topbar {
+    gap: 10px;
+  }
+  .toolbar-actions .primary {
+    height: 40px;
+    font-size: 12px;
+    padding: 0 12px;
+  }
+  .toolbar-actions select {
+    height: 40px;
+  }
+  .tabs button {
+    font-size: 13px;
   }
 }

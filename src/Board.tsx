@@ -41,11 +41,11 @@ export function TaskCard({
               <Icon name="check" size={13} />
             </span>
           ) : task.priority === "high" ? (
-            "⌃"
+            <Icon name="priorityHigh" size={18} />
           ) : task.priority === "medium" ? (
-            "═"
+            <Icon name="priorityMedium" size={18} />
           ) : (
-            "−"
+            <Icon name="priorityLow" size={18} />
           )}
         </span>
       </div>

@@ -122,6 +122,11 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
+        <div className="window-lights" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </div>
         <a
           className="brand"
           href="#"
@@ -130,11 +135,20 @@ export default function App() {
             setView("board");
           }}
         >
-          <span className="brand-mark">◩</span>TasknBoard
+          <svg
+            className="brand-symbol"
+            width="28"
+            height="32"
+            viewBox="0 0 28 32"
+            aria-hidden="true"
+          >
+            <path
+              fill="currentColor"
+              d="M2 9 13 2v25L2 31V9Zm13-7 10 8-10 8V2Zm0 18 10 10H15V20Z"
+            />
+          </svg>
+          TasknBoard
         </a>
-        <div className="workspace-name">
-          Studio <span>⌄</span>
-        </div>
         <span className="nav-label">Workspace</span>
         <nav>
           {[
@@ -144,24 +158,25 @@ export default function App() {
           ].map(([id, title, icon]) => (
             <button
               key={id}
+              aria-label={title}
               className={`nav-item ${view === id ? "selected" : ""}`}
               onClick={() => setView(id)}
             >
               <Icon name={icon} />
               <span>{title}</span>
-              {id === "mine" && (
-                <small>
-                  {
-                    tasks.filter(
-                      (t) => t.assignee === actor.id && t.status !== "done",
-                    ).length
-                  }
-                </small>
-              )}
             </button>
           ))}
         </nav>
         <div className="sidebar-bottom">
+          <button
+            aria-label="Stand-up"
+            className="nav-item standup-launch"
+            disabled={!loaded || !connected}
+            onClick={() => setStandup(true)}
+          >
+            <Icon name="screen" />
+            <span>Stand-up</span>
+          </button>
           <button className="nav-item" onClick={() => setSettings(true)}>
             <Icon name="settings" />
             Settings
@@ -184,7 +199,7 @@ export default function App() {
             <input
               ref={search}
               aria-label="Search tasks"
-              placeholder="Search tasks…"
+              placeholder="Search tasks, agents, or anything…"
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
@@ -306,27 +321,24 @@ export default function App() {
                   </button>
                 </div>
                 <div className="toolbar-actions">
-                  <button
-                    className="secondary standup-launch"
-                    disabled={!loaded || !connected}
-                    onClick={() => setStandup(true)}
-                  >
-                    <Icon name="screen" />
-                    Stand-up
-                  </button>
-                  <select
-                    ref={filter}
-                    aria-label="Filter by assignee"
-                    value={assignee}
-                    onChange={(e) => setAssignee(e.target.value)}
-                  >
-                    <option value="">All assignees</option>
-                    {[
-                      ...new Set(tasks.map((t) => t.assignee).filter(Boolean)),
-                    ].map((a) => (
-                      <option key={a}>{a}</option>
-                    ))}
-                  </select>
+                  <div className="assignee-filter">
+                    <Icon name="users" />
+                    <select
+                      ref={filter}
+                      aria-label="Filter by assignee"
+                      value={assignee}
+                      onChange={(e) => setAssignee(e.target.value)}
+                    >
+                      <option value="">All assignees</option>
+                      {[
+                        ...new Set(
+                          tasks.map((t) => t.assignee).filter(Boolean),
+                        ),
+                      ].map((a) => (
+                        <option key={a}>{a}</option>
+                      ))}
+                    </select>
+                  </div>
                   <button className="primary" onClick={() => setEditor(null)}>
                     <Icon name="plus" />
                     New task
@@ -376,7 +388,7 @@ export default function App() {
               <kbd>F</kbd>Filter
             </span>
             <button onClick={() => setHelp(true)}>
-              <kbd>?</kbd>Shortcuts
+              <kbd>?</kbd>Show shortcuts
             </button>
           </div>
         </footer>
