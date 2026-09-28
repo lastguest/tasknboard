@@ -175,7 +175,9 @@ export function TaskCard({
           {task.title}
         </button>
       </h3>
-      <Label label={task.label} />
+      <div className="task-labels">
+        {task.labels.map((label) => <Label key={label} label={label} />)}
+      </div>
       {task.standup?.blocker && (
         <div className="task-signal blocker">
           <strong>Blocker</strong>
@@ -274,8 +276,10 @@ export function Board({
                 <td data-label="Assignee">
                   <Assignee name={t.assignee} agent={agents.has(t.assignee)} />
                 </td>
-                <td data-label="Label">
-                  <Label label={t.label} />
+                <td data-label="Labels">
+                  <div className="task-labels">
+                    {t.labels.map((label) => <Label key={label} label={label} />)}
+                  </div>
                 </td>
               </tr>
             ))}

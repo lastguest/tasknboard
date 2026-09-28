@@ -225,7 +225,7 @@ export default function App() {
     [tasks],
   );
   const labels = useMemo(
-    () => [...new Set(tasks.map((t) => t.label).filter(Boolean))].sort(),
+    () => [...new Set(tasks.flatMap((t) => t.labels))].sort(),
     [tasks],
   );
   const q = query.trim().toLowerCase();
@@ -375,13 +375,24 @@ export default function App() {
             <svg
               className="brand-symbol"
               width="24"
-              height="28"
-              viewBox="0 0 28 32"
+              height="25"
+              viewBox="112 104 288 304"
               aria-hidden="true"
             >
-              <path
+              <mask id="brand-cutout">
+                <rect x="112" y="104" width="288" height="304" fill="#fff" />
+                <circle cx="176" cy="172" r="30" fill="#000" />
+                <rect x="148" y="244" width="216" height="28" rx="14" fill="#000" />
+                <rect x="148" y="300" width="144" height="28" rx="14" fill="#000" />
+              </mask>
+              <rect
+                x="112"
+                y="104"
+                width="288"
+                height="304"
+                rx="44"
                 fill="currentColor"
-                d="M2 9 13 2v25L2 31V9Zm13-7 10 8-10 8V2Zm0 18 10 10H15V20Z"
+                mask="url(#brand-cutout)"
               />
             </svg>
             <span>TasknBoard</span>
@@ -762,6 +773,7 @@ export default function App() {
           task={editor.mode === "edit" ? editor.task : null}
           actor={actor}
           agents={agents}
+          actors={actors}
           assignees={assignees}
           labels={labels}
           latestVersion={

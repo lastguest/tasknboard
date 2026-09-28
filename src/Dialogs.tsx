@@ -123,6 +123,141 @@ export function Dialog({
   );
 }
 
+type ChoiceOption = {
+  value: string;
+  label: string;
+  detail?: string;
+  disabled?: boolean;
+};
+
+function SearchableChoiceDialog({
+  title,
+  searchLabel,
+  options,
+  selected,
+  multiple = false,
+  allowCreate = false,
+  onSelect,
+  onToggle,
+  onCreate,
+  onClose,
+}: {
+  title: string;
+  searchLabel: string;
+  options: ChoiceOption[];
+  selected: string[];
+  multiple?: boolean;
+  allowCreate?: boolean;
+  onSelect: (value: string) => void;
+  onToggle: (value: string) => void;
+  onCreate?: (value: string) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const id = useId();
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filtered = options.filter((option) =>
+    `${option.label} ${option.detail ?? ""}`
+      .toLocaleLowerCase()
+      .includes(normalizedQuery),
+  );
+  const newLabel = query.trim();
+  const canCreate =
+    allowCreate &&
+    Boolean(newLabel) &&
+    !options.some(
+      (option) =>
+        option.value.toLocaleLowerCase() === newLabel.toLocaleLowerCase(),
+    );
+
+  return (
+    <Dialog
+      title={title}
+      onClose={onClose}
+      className="picker-dialog"
+      footer={
+        multiple ? (
+          <div className="form-actions">
+            <span className="small">{selected.length} selected</span>
+            <span className="spacer" />
+            <button type="button" className="primary" onClick={onClose}>
+              Done
+            </button>
+          </div>
+        ) : undefined
+      }
+    >
+      <div className="picker-body">
+        <label className="sr-only" htmlFor={`${id}-search`}>
+          {searchLabel}
+        </label>
+        <input
+          id={`${id}-search`}
+          className="picker-search"
+          type="search"
+          data-autofocus=""
+          autoComplete="off"
+          maxLength={allowCreate ? 40 : undefined}
+          placeholder={searchLabel}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        {filtered.length > 0 || canCreate ? (
+          <ul className="picker-options" aria-label={title}>
+            {filtered.map((option) => (
+              <li key={option.value || "unassigned"}>
+                <label className="picker-option">
+                  <input
+                    type={multiple ? "checkbox" : "radio"}
+                    name={`${id}-choice`}
+                    checked={selected.includes(option.value)}
+                    disabled={option.disabled}
+                    onClick={() => {
+                      if (!multiple && selected.includes(option.value))
+                        onSelect(option.value);
+                    }}
+                    onChange={() =>
+                      multiple
+                        ? onToggle(option.value)
+                        : onSelect(option.value)
+                    }
+                  />
+                  <span className="picker-option-copy">
+                    <span>{option.label}</span>
+                    {option.detail && (
+                      <span className="picker-option-detail">
+                        {option.detail}
+                      </span>
+                    )}
+                  </span>
+                </label>
+              </li>
+            ))}
+            {canCreate && (
+              <li>
+                <button
+                  type="button"
+                  className="picker-create"
+                  onClick={() => {
+                    onCreate?.(newLabel);
+                    setQuery("");
+                  }}
+                >
+                  Add “{newLabel}”
+                </button>
+              </li>
+            )}
+          </ul>
+        ) : (
+          <p className="picker-empty" role="status">
+            No matching options.
+          </p>
+        )}
+      </div>
+    </Dialog>
+  );
+}
+
 export function describeError(error: ApiError, kept = "") {
   const tail = kept ? ` ${kept}` : "";
   switch (error.code) {
@@ -203,7 +338,7 @@ const fieldLabels: Record<string, string> = {
   status: "status",
   priority: "priority",
   assignee: "assignee",
-  label: "label",
+  labels: "labels",
 };
 
 function eventDetail(e: TaskEvent) {
@@ -266,7 +401,7 @@ type Draft = {
   status: Status;
   priority: Priority;
   assignee: string;
-  label: string;
+  labels: string[];
 };
 const draftKeys = [
   "title",
@@ -275,7 +410,7 @@ const draftKeys = [
   "status",
   "priority",
   "assignee",
-  "label",
+  "labels",
 ] as const;
 const draftOf = (t: Task | null): Draft =>
   t
@@ -286,7 +421,7 @@ const draftOf = (t: Task | null): Draft =>
         status: t.status,
         priority: t.priority,
         assignee: t.assignee,
-        label: t.label,
+        labels: [...t.labels],
       }
     : {
         title: "",
@@ -295,8 +430,17 @@ const draftOf = (t: Task | null): Draft =>
         status: "backlog",
         priority: "medium",
         assignee: "",
-        label: "",
+        labels: ["Product"],
       };
+
+function sameValue(left: unknown, right: unknown) {
+  if (Array.isArray(left) && Array.isArray(right))
+    return (
+      left.length === right.length &&
+      left.every((value) => right.includes(value))
+    );
+  return Object.is(left, right);
+}
 
 type Pending = null | "save" | "comment" | "review" | "archive" | "reload";
 
@@ -304,6 +448,7 @@ export function TaskEditor({
   task,
   actor,
   agents,
+  actors,
   assignees,
   labels,
   latestVersion,
@@ -316,6 +461,7 @@ export function TaskEditor({
   task: Task | null;
   actor: Actor;
   agents: Set<string>;
+  actors: Actor[];
   assignees: string[];
   labels: string[];
   latestVersion?: number;
@@ -341,20 +487,75 @@ export function TaskEditor({
   const [archiveError, setArchiveError] = useState<ApiError | null>(null);
   const [discard, setDiscard] = useState(false);
   const [notice, setNotice] = useState("");
+  const [picker, setPicker] = useState<
+    "status" | "priority" | "assignee" | "labels" | null
+  >(null);
   const listId = useId();
+
+  const actorKinds = new Map(actors.map((candidate) => [candidate.id, candidate.kind]));
+  const otherAssignees = [
+    ...new Set([
+      ...actors.map((candidate) => candidate.id),
+      ...assignees,
+      current?.assignee ?? "",
+      draft.assignee,
+    ]),
+  ]
+    .filter((name) => name && name !== actor.id)
+    .sort((left, right) => left.localeCompare(right));
+  const assigneeOptions: ChoiceOption[] = [
+    {
+      value: actor.id,
+      label: actor.id,
+      detail: `You · ${actor.kind === "agent" ? "Agent" : "Human"}`,
+    },
+    { value: "", label: "Unassigned" },
+    ...otherAssignees.map((name) => {
+      const kind = actorKinds.get(name);
+      return {
+        value: name,
+        label: name,
+        ...(kind ? { detail: kind === "agent" ? "Agent" : "Human" } : {}),
+      };
+    }),
+  ];
+  const statusOptions: ChoiceOption[] = columns.map((column) => ({
+    value: column.id,
+    label:
+      column.id === "done" && current && doneLocked(current.status)
+        ? "Done (after review)"
+        : column.title,
+    disabled:
+      column.id === "done" && current
+        ? doneLocked(current.status)
+        : false,
+  }));
+  const priorityOptions: ChoiceOption[] = priorities.map((priority) => ({
+    value: priority.id,
+    label: priority.title,
+  }));
+  const labelOptions: ChoiceOption[] = [
+    ...new Set([...labels, ...draft.labels]),
+  ]
+    .sort((left, right) => left.localeCompare(right))
+    .map((label) => ({ value: label, label }));
 
   const patch = current
     ? Object.fromEntries(
         draftKeys
-          .filter((k) => draft[k] !== current[k])
+          .filter((k) => !sameValue(draft[k], current[k]))
           .map((k) => [k, draft[k]]),
       )
     : {};
   const dirty = current
     ? Object.keys(patch).length > 0
-    : draftKeys.some((k) => draft[k] !== draftOf(null)[k]);
+    : draftKeys.some((k) => !sameValue(draft[k], draftOf(null)[k]));
   const conflicted = (k: keyof Draft) =>
-    Boolean(merge?.conflicts.includes(k) && current && draft[k] !== current[k]);
+    Boolean(
+      merge?.conflicts.includes(k) &&
+        current &&
+        !sameValue(draft[k], current[k]),
+    );
   const lease = current && activeLease(current);
   const foreignLease = lease && lease.actor !== actor.id ? lease : null;
   const stale =
@@ -381,15 +582,21 @@ export function TaskEditor({
       const latest = await command<Task>("get_task", { id: current.id });
       // Three-way merge: untouched fields take the latest value; fields edited
       // on both sides are flagged so the person chooses what to keep.
-      const updated = draftKeys.filter((k) => latest[k] !== current[k]);
+      const updated = draftKeys.filter(
+        (k) => !sameValue(latest[k], current[k]),
+      );
       const conflicts = updated.filter(
-        (k) => draft[k] !== current[k] && draft[k] !== latest[k],
+        (k) =>
+          !sameValue(draft[k], current[k]) &&
+          !sameValue(draft[k], latest[k]),
       );
       setDraft((d) => {
         const next = { ...d };
         for (const k of updated)
-          if (d[k] === current[k])
-            (next as Record<string, unknown>)[k] = latest[k];
+          if (sameValue(d[k], current[k]))
+            (next as Record<string, unknown>)[k] = Array.isArray(latest[k])
+              ? [...(latest[k] as string[])]
+              : latest[k];
         return next;
       });
       setCurrent(latest);
@@ -428,16 +635,15 @@ export function TaskEditor({
         });
         onSaved(saved);
       } else {
-        // Omitted optional values take the server's defaults.
-        const args: Record<string, string> = {
+        const args: Record<string, unknown> = {
           title: draft.title,
           priority: draft.priority,
+          labels: draft.labels.map((label) => label.trim()).filter(Boolean),
         };
         for (const k of [
           "description",
           "acceptance",
           "assignee",
-          "label",
         ] as const)
           if (draft[k].trim()) args[k] = draft[k];
         onCreated(await command<Task>("create_task", args));
@@ -580,7 +786,8 @@ export function TaskEditor({
   );
 
   return (
-    <Dialog
+    <>
+      <Dialog
       title={
         current ? (
           <>
@@ -594,16 +801,6 @@ export function TaskEditor({
       footer={footer}
       wide
     >
-      <datalist id={`${listId}-assignees`}>
-        {assignees.map((a) => (
-          <option key={a} value={a} />
-        ))}
-      </datalist>
-      <datalist id={`${listId}-labels`}>
-        {labels.map((a) => (
-          <option key={a} value={a} />
-        ))}
-      </datalist>
       <div className={current ? "editor-layout" : "editor-layout create"}>
         <form
           id={`${listId}-form`}
@@ -699,113 +896,126 @@ export function TaskEditor({
               onChange={(e) => set("acceptance")(e.target.value)}
             />
           </Field>
-          <div className="form-grid">
-            {current && (
-              <Field
-                label="Status"
-                conflict={
-                  conflicted("status") ? statusTitle(current.status) : undefined
-                }
-                onUseLatest={() => set("status")(current.status)}
-              >
-                <select
-                  value={draft.status}
-                  onChange={(e) => set("status")(e.target.value as Status)}
-                >
-                  {columns.map((c) => (
-                    <option
-                      value={c.id}
-                      key={c.id}
-                      disabled={c.id === "done" && doneLocked(current.status)}
-                    >
-                      {c.id === "done" && doneLocked(current.status)
-                        ? "Done (after review)"
-                        : c.title}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            )}
-            <Field
-              label="Priority"
-              conflict={conflicted("priority") ? current?.priority : undefined}
-              onUseLatest={() => set("priority")(current!.priority)}
-            >
-              <select
-                value={draft.priority}
-                onChange={(e) => set("priority")(e.target.value as Priority)}
-              >
-                {priorities.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.title}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field
-              label="Assignee"
-              conflict={
-                conflicted("assignee")
-                  ? current?.assignee || "Unassigned"
-                  : undefined
-              }
-              onUseLatest={() => set("assignee")(current!.assignee)}
-            >
-              <input
-                maxLength={80}
-                placeholder="Unassigned"
-                list={`${listId}-assignees`}
-                value={draft.assignee}
-                onChange={(e) => set("assignee")(e.target.value)}
-              />
-            </Field>
-            <Field
-              label="Label"
-              conflict={
-                conflicted("label") ? current?.label || "None" : undefined
-              }
-              onUseLatest={() => set("label")(current!.label)}
-            >
-              <input
-                maxLength={40}
-                placeholder={current ? "None" : "Product (default)"}
-                list={`${listId}-labels`}
-                value={draft.label}
-                onChange={(e) => set("label")(e.target.value)}
-              />
-            </Field>
-          </div>
           {current && draft.status === "done" && current.status !== "done" && (
             <p className="small">Saving marks this task Done.</p>
           )}
         </form>
-        {current && (
-          <aside className="editor-side" aria-label="Task state">
-            <dl className="facts">
+        <aside
+          className="editor-side"
+          aria-label={current ? "Task state" : "New task settings"}
+        >
+          <dl className="facts">
+            {current ? (
               <div>
                 <dt>Status</dt>
-                <dd>{statusTitle(current.status)}</dd>
-              </div>
-              <div>
-                <dt>Assignee</dt>
                 <dd>
-                  <Assignee
-                    name={current.assignee}
-                    agent={agents.has(current.assignee)}
+                  <button
+                    type="button"
+                    className="sidebar-picker-trigger"
+                    aria-label={"Status: " + statusTitle(draft.status) + ". Choose status"}
+                    aria-haspopup="dialog"
+                    disabled={Boolean(pending)}
+                    onClick={() => setPicker("status")}
+                  >
+                    {statusTitle(draft.status)}
+                  </button>
+                  {conflicted("status") && (
+                    <ConflictValue
+                      value={statusTitle(current.status)}
+                      onUseLatest={() => set("status")(current.status)}
+                    />
+                  )}
+                </dd>
+              </div>
+            ) : (
+              <div>
+                <dt>Status</dt>
+                <dd>Backlog</dd>
+              </div>
+            )}
+            <div>
+              <dt>Priority</dt>
+              <dd>
+                <button
+                  type="button"
+                  className="sidebar-picker-trigger"
+                  aria-label={"Priority: " + (priorities.find((priority) => priority.id === draft.priority)?.title ?? draft.priority)}
+                  aria-haspopup="dialog"
+                  disabled={Boolean(pending)}
+                  onClick={() => setPicker("priority")}
+                >
+                  {priorities.find((priority) => priority.id === draft.priority)?.title}
+                </button>
+                {conflicted("priority") && current && (
+                  <ConflictValue
+                    value={priorities.find((priority) => priority.id === current.priority)?.title ?? current.priority}
+                    onUseLatest={() => set("priority")(current.priority)}
                   />
-                </dd>
-              </div>
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Assignee</dt>
+              <dd>
+                <button
+                  type="button"
+                  className="sidebar-picker-trigger assignee-picker-trigger"
+                  aria-label={"Assignee: " + (draft.assignee || "Unassigned") + ". Choose assignee"}
+                  aria-haspopup="dialog"
+                  disabled={Boolean(pending)}
+                  onClick={() => setPicker("assignee")}
+                >
+                  <Assignee
+                    name={draft.assignee}
+                    agent={agents.has(draft.assignee)}
+                  />
+                </button>
+                {conflicted("assignee") && current && (
+                  <ConflictValue
+                    value={current.assignee || "Unassigned"}
+                    onUseLatest={() => set("assignee")(current.assignee)}
+                  />
+                )}
+              </dd>
+            </div>
               <div>
-                <dt>Label</dt>
+                <dt>Labels</dt>
                 <dd>
-                  {current.label ? <Label label={current.label} /> : "None"}
-                </dd>
-              </div>
+                  <button
+                    type="button"
+                    className="sidebar-picker-trigger label-picker-trigger"
+                    aria-label={"Labels: " + (draft.labels.join(", ") || "None") + ". Edit labels"}
+                    aria-haspopup="dialog"
+                    disabled={Boolean(pending)}
+                    onClick={() => setPicker("labels")}
+                  >
+                    {draft.labels.length ? (
+                      <span className="task-labels">
+                      {draft.labels.map((label) => (
+                        <Label label={label} key={label} />
+                      ))}
+                      </span>
+                    ) : (
+                      <span className="small">None</span>
+                    )}
+                  </button>
+                {conflicted("labels") && current && (
+                  <ConflictValue
+                    value={current.labels.join(", ") || "None"}
+                    onUseLatest={() => set("labels")([...current.labels])}
+                  />
+                )}
+              </dd>
+            </div>
+            {current && (
               <div>
                 <dt>Version</dt>
                 <dd>{current.version}</dd>
               </div>
-            </dl>
+            )}
+          </dl>
+          {current && (
+            <>
             <section className="side-block" aria-label="Claim">
               <h3>
                 <Icon name="lock" size={14} /> Claim
@@ -955,8 +1165,9 @@ export function TaskEditor({
                 )}
               </section>
             )}
-          </aside>
-        )}
+            </>
+          )}
+        </aside>
         {current && (
           <section className="activity" aria-label="Comments and activity">
             <h3>Activity</h3>
@@ -1003,6 +1214,89 @@ export function TaskEditor({
         )}
       </div>
     </Dialog>
+    {picker && (
+      <SearchableChoiceDialog
+        key={picker}
+        title={
+          picker === "assignee"
+            ? "Choose assignee"
+            : picker === "status"
+              ? "Choose status"
+              : picker === "priority"
+                ? "Choose priority"
+                : "Choose labels"
+        }
+        searchLabel={
+          picker === "assignee"
+            ? "Search users"
+            : picker === "status"
+              ? "Search status"
+              : picker === "priority"
+                ? "Search priority"
+                : "Search labels"
+        }
+        options={
+          picker === "assignee"
+            ? assigneeOptions
+            : picker === "status"
+              ? statusOptions
+              : picker === "priority"
+                ? priorityOptions
+                : labelOptions
+        }
+        selected={
+          picker === "status"
+            ? [draft.status]
+            : picker === "priority"
+              ? [draft.priority]
+              : picker === "assignee"
+                ? [draft.assignee]
+                : draft.labels
+        }
+        multiple={picker === "labels"}
+        allowCreate={picker === "labels"}
+        onSelect={(value) => {
+          if (picker === "status") set("status")(value as Status);
+          else if (picker === "priority")
+            set("priority")(value as Priority);
+          else if (picker === "assignee") set("assignee")(value);
+          setPicker(null);
+        }}
+        onToggle={(value) =>
+          set("labels")(
+            draft.labels.includes(value)
+              ? draft.labels.filter((label) => label !== value)
+              : [...draft.labels, value],
+          )
+        }
+        onCreate={(value) => {
+          const label = value.trim();
+          if (label && label.length <= 40 && !draft.labels.includes(label))
+            set("labels")([...draft.labels, label]);
+        }}
+        onClose={() => setPicker(null)}
+      />
+    )}
+    </>
+  );
+}
+
+function ConflictValue({
+  value,
+  onUseLatest,
+}: {
+  value: string;
+  onUseLatest: () => void;
+}) {
+  return (
+    <div className="conflict-value">
+      <span>
+        Latest: <q>{value.length > 160 ? `${value.slice(0, 160)}…` : value || "empty"}</q>
+      </span>
+      <button type="button" className="quiet" onClick={onUseLatest}>
+        Use latest
+      </button>
+    </div>
   );
 }
 
@@ -1116,7 +1410,7 @@ export function Settings({
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       setExported({
         ok: true,
-        text: `Exported ${data.tasks.length} tasks and ${data.events.length} activity events to ${name}.`,
+        text: `Export requested: ${data.tasks.length} tasks and ${data.events.length} activity events. Check your downloads or save dialog for ${name}.`,
       });
     } catch (e) {
       setExported({ ok: false, text: `Export failed: ${errorOf(e).message}` });

@@ -18,7 +18,7 @@ assignee ID matches an agent in the roster. Unknown assignees remain neutral.
 Names and lease ownership must not determine actor kind.
 
 `export_workspace` includes the actor roster. `workspace_info` and exports use
-`schemaVersion: 2` for this contract. No import or restore command is added.
+`schemaVersion: 3` for this contract. No import or restore command is added.
 
 ## Comment counts
 
@@ -35,3 +35,12 @@ Detail responses and mutation responses agree with the list response.
 All writes retain version checks, lease checks, and server authorization.
 This change adds no commands and no task restoration.
 Existing task and event records remain intact.
+
+## Labels
+
+Tasks use `labels: string[]` in create, update, list, detail, and export responses.
+Each label contains 1–40 characters after trimming. Duplicate labels are removed.
+An empty array clears the labels. New tasks default to `["Product"]`.
+The old `label` command field is rejected. Stored single labels convert once to
+arrays when the database opens. Task versions and activity remain unchanged.
+Status remains a single workflow state.

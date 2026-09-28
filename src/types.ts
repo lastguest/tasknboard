@@ -15,7 +15,7 @@ export type Task = {
   status: Status;
   priority: Priority;
   assignee: string;
-  label: string;
+  labels: string[];
   version: number;
   commentCount: number;
   lease: null | { actor: string; expiresAt: number };
@@ -29,7 +29,7 @@ export type WorkspaceInfo = {
   name: string;
   actor: Actor;
   actors: Actor[];
-  schemaVersion: 2;
+  schemaVersion: 3;
 };
 export const columns: { id: Status; title: string; color: string }[] = [
   { id: "backlog", title: "Backlog", color: "#88909e" },

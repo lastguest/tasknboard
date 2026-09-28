@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TasknBoard",
+  "version": "0.1.0",
+  "identifier": "app.tasknboard.desktop",
+  "build": {
+    "beforeDevCommand": { "script": "npm run desktop:prepare", "wait": true },
+    "beforeBuildCommand": "npm run desktop:prepare"
+  },
+  "app": {
+    "windows": [],
+    "security": { "capabilities": [] }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "category": "Productivity",
+    "shortDescription": "A Kanban workspace for people and coding agents",
+    "icon": ["icons/icon.png", "icons/icon.icns"],
+    "resources": { "resources/": "resources/" },
+    "macOS": { "minimumSystemVersion": "13.5", "signingIdentity": "-" }
+  }
+}

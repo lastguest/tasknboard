@@ -76,6 +76,85 @@ test("Status menu saves and the server rejects an invalid drag", async ({ page }
   expect((await command("get_task", { id: task.id })).status).toBe("in_progress");
 });
 
+test("Task sidebar pickers search, stage changes, and save label arrays", async ({ page }) => {
+  const task = await command("create_task", {
+    title: `Picker ${key()}`,
+    priority: "medium",
+    labels: ["Existing"],
+  });
+  await connect(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await card(page, task.id).click();
+
+  let details = page.getByRole("dialog", { name: /Task details/ });
+  let status = details.getByRole("button", { name: "Status: Backlog. Choose status" });
+  await status.click();
+  let picker = page.getByRole("dialog", { name: "Choose status" });
+  const statusSearch = picker.getByRole("searchbox", { name: "Search status" });
+  await expect(statusSearch).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(picker).toBeHidden();
+  await expect(status).toBeFocused();
+  await status.click();
+  picker = page.getByRole("dialog", { name: "Choose status" });
+  await expect(statusSearch).toBeFocused();
+  await statusSearch.fill("in review");
+  await picker.getByLabel("In review").click();
+  await expect(picker).toBeHidden();
+  status = details.getByRole("button", { name: "Status: In review. Choose status" });
+  await expect(status).toBeFocused();
+
+  let assignee = details.getByRole("button", { name: "Assignee: Unassigned. Choose assignee" });
+  await assignee.click();
+  picker = page.getByRole("dialog", { name: "Choose assignee" });
+  const userSearch = picker.getByRole("searchbox", { name: "Search users" });
+  await expect(userSearch).toBeFocused();
+  await expect(picker.locator(".picker-option").first()).toContainText("reviewer");
+  await userSearch.fill("browser-agent");
+  await picker.locator(".picker-option").filter({ hasText: "browser-agent" }).click();
+  await expect(picker).toBeHidden();
+  assignee = details.getByRole("button", { name: "Assignee: browser-agent. Choose assignee" });
+  await expect(assignee).toBeFocused();
+
+  await details.getByRole("button", { name: "Priority: Medium" }).click();
+  picker = page.getByRole("dialog", { name: "Choose priority" });
+  await expect(picker.getByRole("searchbox", { name: "Search priority" })).toBeFocused();
+  await picker.getByLabel("High").click();
+  await expect(details.getByRole("button", { name: "Priority: High" })).toBeVisible();
+
+  const labels = details.getByRole("button", { name: "Labels: Existing. Edit labels" });
+  await labels.click();
+  picker = page.getByRole("dialog", { name: "Choose labels" });
+  const labelSearch = picker.getByRole("searchbox", { name: "Search labels" });
+  await expect(labelSearch).toBeFocused();
+  const box = await picker.boundingBox();
+  expect(box?.width).toBeLessThanOrEqual(390);
+  expect(box?.height).toBeLessThan(844);
+  await labelSearch.fill("Second label");
+  await picker.getByRole("button", { name: "Add “Second label”" }).click();
+  await picker.getByRole("button", { name: "Done" }).click();
+
+  details = page.getByRole("dialog", { name: /Task details/ });
+  await expect(details.getByRole("button", { name: "Labels: Existing, Second label. Edit labels" })).toBeVisible();
+  await details.getByRole("button", { name: "Save changes" }).click();
+  const saved = await command("get_task", { id: task.id });
+  expect(saved.status).toBe("in_review");
+  expect(saved.priority).toBe("high");
+  expect(saved.assignee).toBe("browser-agent");
+  expect(saved.labels).toEqual(["Existing", "Second label"]);
+
+  await card(page, task.id).click();
+  details = page.getByRole("dialog", { name: /Task details/ });
+  await details.getByRole("button", { name: "Labels: Existing, Second label. Edit labels" }).click();
+  picker = page.getByRole("dialog", { name: "Choose labels" });
+  await picker.getByLabel("Existing").uncheck();
+  await picker.getByLabel("Second label").uncheck();
+  await picker.getByRole("button", { name: "Done" }).click();
+  await expect(details.getByRole("button", { name: "Labels: None. Edit labels" })).toBeVisible();
+  await details.getByRole("button", { name: "Save changes" }).click();
+  expect((await command("get_task", { id: task.id })).labels).toEqual([]);
+});
+
 test("A stale save keeps the draft and merges untouched fields", async ({ page }) => {
   const task = await create(`Stale ${key()}`);
   await connect(page);

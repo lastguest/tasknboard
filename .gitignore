@@ -8,3 +8,7 @@ data/
 coverage/
 playwright-report/
 test-results/
+src-tauri/target/
+src-tauri/resources/
+src-tauri/gen/
+.desktop-cache/

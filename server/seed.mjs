@@ -26,7 +26,7 @@ for (const [title, label, priority, assignee, status] of samples) {
     "create_task",
     {
       title,
-      label,
+      labels: [label],
       priority,
       assignee,
       description:

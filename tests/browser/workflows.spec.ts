@@ -39,7 +39,7 @@ async function apiTask(title: string, assignee = "") {
     assignee,
     description: `${title} context`,
     acceptance: "Browser regression fixture",
-    label: "Browser tests",
+    labels: ["Browser tests"],
   });
 }
 
@@ -70,8 +70,13 @@ test("Settings, task workflow, agent review, archive, and export", async ({ page
   await createDialog.getByLabel("Title").fill(title);
   await createDialog.getByLabel("Context").fill("Created through the browser regression suite.");
   await createDialog.getByLabel("Acceptance criteria").fill("An agent reviews it before completion.");
-  await createDialog.getByLabel("Priority").selectOption("high");
-  await createDialog.getByLabel("Assignee").fill("reviewer");
+  await createDialog.getByRole("button", { name: "Priority: Medium" }).click();
+  let picker = page.getByRole("dialog", { name: "Choose priority" });
+  await picker.getByLabel("High").click();
+  await expect(createDialog.getByRole("button", { name: "Priority: High" })).toBeFocused();
+  await createDialog.getByRole("button", { name: "Assignee: Unassigned. Choose assignee" }).click();
+  picker = page.getByRole("dialog", { name: "Choose assignee" });
+  await picker.locator(".picker-option").first().click();
   await createDialog.getByRole("button", { name: "Create task" }).click();
 
   const card = page.getByRole("button", { name: new RegExp(`TNB-\\d+: ${title}`) });
@@ -137,7 +142,7 @@ test("Settings, task workflow, agent review, archive, and export", async ({ page
   const exported = JSON.parse(await readFile(exportPath, "utf8"));
   expect(exported.tasks.find((task: any) => task.id === taskId)?.archived).toBe(true);
   expect(exported.events.some((event: any) => event.task_id === taskId && event.kind === "archive_task")).toBe(true);
-  await expect(exportDialog.getByRole("status")).toContainText("Exported");
+  await expect(exportDialog.getByRole("status")).toContainText("Export requested");
   await expect(exportDialog).not.toContainText(humanToken);
   await expect(exportDialog).not.toContainText(agentToken);
 });

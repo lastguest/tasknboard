@@ -56,4 +56,4 @@ Do not retry stale writes automatically or add an offline queue.
 Render task text, comments, and review evidence as untrusted text.
 Keep tokens in sessionStorage. Exclude them from screenshots and diagnostic output.
 Do not add billing, organizations, invitations, custom workflows, notifications,
-attachments, dependencies between tasks, or a native shell.
+attachments, or dependencies between tasks.

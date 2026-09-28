@@ -4,6 +4,8 @@ const text = z.string().trim().min(1).max(300);
 const long = z.string().max(20000);
 const version = z.number().int().positive();
 const id = z.string().regex(/^TNB-\d+$/);
+const labels = z.array(z.string().trim().min(1).max(40))
+  .transform((values) => [...new Set(values)]);
 const patch = z
   .object({
     title: text.optional(),
@@ -12,7 +14,7 @@ const patch = z
     status: z.enum(statuses).optional(),
     priority: z.enum(["low", "medium", "high"]).optional(),
     assignee: z.string().max(80).optional(),
-    label: z.string().max(40).optional(),
+    labels: labels.optional(),
   })
   .strict()
   .refine((v) => Object.keys(v).length > 0, "Empty patch");
@@ -34,7 +36,7 @@ export const schemas = {
       acceptance: long.default(""),
       priority: z.enum(["low", "medium", "high"]).default("medium"),
       assignee: z.string().max(80).default(""),
-      label: z.string().max(40).default("Product"),
+      labels: labels.default(["Product"]),
     })
     .strict(),
   update_task: z.object({ id, expectedVersion: version, patch }).strict(),

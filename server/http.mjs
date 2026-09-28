@@ -6,6 +6,7 @@ import { createStore } from "./store.mjs";
 import { dbPath, localActor, tokensFromEnvironment } from "./config.mjs";
 const host = process.env.HOST || "127.0.0.1",
   port = Number(process.env.PORT || 4310);
+const desktop = process.env.TASKNBOARD_DESKTOP === "1";
 const tokens = tokensFromEnvironment();
 if (
   !["127.0.0.1", "localhost", "::1"].includes(host) &&
@@ -13,7 +14,7 @@ if (
 )
   throw new Error("Remote binding requires TASKNBOARD_TOKENS");
 const store = createStore(dbPath),
-  root = resolve("dist");
+  root = resolve(process.env.TASKNBOARD_STATIC_DIR || "dist");
 store.registerActors(
   Object.keys(tokens).length ? Object.values(tokens) : [localActor],
 );
@@ -35,7 +36,7 @@ const server = createServer(async (req, res) => {
     const requestHost = req.headers.host || "";
     const allowedHosts = (
       process.env.TASKNBOARD_ALLOWED_HOSTS ||
-      `${host}:${port},localhost:${port},127.0.0.1:${port},localhost:5173,127.0.0.1:5173`
+      `${host}:${server.address().port},localhost:${server.address().port},127.0.0.1:${server.address().port}${desktop ? "" : ",localhost:5173,127.0.0.1:5173"}`
     ).split(",");
     if (!allowedHosts.includes(requestHost)) {
       json(res, 403, { code: "HOST_REJECTED", message: "Host not allowed" });
@@ -134,13 +135,24 @@ const server = createServer(async (req, res) => {
     if (!e.status) console.error(e);
   }
 });
-server.listen(port, host, () =>
-  console.error(`TasknBoard listening on http://${host}:${port}`),
-);
-for (const sig of ["SIGINT", "SIGTERM"])
-  process.on(sig, () =>
-    server.close(() => {
-      store.close();
-      process.exit(0);
-    }),
-  );
+server.listen(port, host, () => {
+  const url = `http://${host.includes(":") ? `[${host}]` : host}:${server.address().port}`;
+  console.error(`TasknBoard listening on ${url}`);
+  if (desktop) console.log(JSON.stringify({ url }));
+});
+let stopping = false;
+function stop() {
+  if (stopping) return;
+  stopping = true;
+  server.close(() => {
+    store.close();
+    process.exit(0);
+  });
+  // A renderer or local client must not keep an orphan service alive.
+  server.closeAllConnections();
+}
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, stop);
+if (desktop) {
+  process.stdin.resume();
+  process.stdin.once("end", stop);
+}

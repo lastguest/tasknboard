@@ -100,3 +100,34 @@ alternative to dragging.
 VoiceOver requires a manual screen-reader pass. DOM names, keyboard focus
 checks, and live-region attributes do not establish the spoken experience.
 These two checks remain open.
+
+## Tauri desktop verification — 2026-09-28
+
+Target: macOS on Apple Silicon. The packaged runtime is official Node 24.14.0.
+
+- `npm test`: 14 tests passed, including the new desktop lifecycle test.
+- `npm run test:ui`: all 13 Chromium browser tests passed.
+- `npm run desktop:build`: produced `TasknBoard.app` in the macOS bundle directory.
+- `npm run desktop:dev`: compiled the debug host and started its bundled workspace service.
+- `codesign --verify --deep --strict`: the ad-hoc app signature passed verification.
+- The lifecycle test also passed against the Node executable and service inside the finished app bundle.
+- `otool -L` showed only Apple system libraries for the bundled Node executable.
+- The app launched from `/tmp` with `PATH=/usr/bin:/bin`.
+- The native interface created a task and changed its status through the status menu.
+- Export opened a native Save dialog. The saved JSON contained the task, its status, and its activity events.
+- A delayed Save and a cancelled Save both returned control to the app.
+- After Quit and relaunch, the task retained its status.
+- Quit stopped the loopback service. Killing the host also stopped the bundled Node process.
+- A review artifact link opened one Safari tab. The app stayed on its task view.
+- The generated smoke-test database was moved to ignored `test-results/desktop-smoke.sqlite` after the app stopped.
+  The desktop workspace starts empty. Existing web workspace data was not changed.
+
+The native drag attempts did not produce an observable task move through automation.
+The status menu passed, but manual desktop drag verification remains open.
+Windows, Linux, Intel macOS, public signing, and notarization are outside the packaged target.
+Local builds use ad-hoc signing.
+
+Release builds disable stripping because the macOS 27 toolchain can produce unloadable procedural-macro libraries.
+See the [upstream Rust issue](https://github.com/rust-lang/rust/issues/157750).
+
+The sections above document the earlier web verification.

@@ -29,6 +29,20 @@ export function createStore(path, { clock = Date.now } = {}) {
       throw e;
     }
   };
+  // Upgrade stored records once so every execution path uses the same contract.
+  transaction(() => {
+    if (!db.prepare("SELECT version FROM migrations WHERE version=3").get()) {
+      const rows = db.prepare("SELECT number, data FROM tasks").all();
+      const update = db.prepare("UPDATE tasks SET data=? WHERE number=?");
+      for (const row of rows) {
+        const task = JSON.parse(row.data);
+        task.labels = task.label?.trim() ? [task.label.trim()] : [];
+        delete task.label;
+        update.run(JSON.stringify(task), row.number);
+      }
+      db.prepare("INSERT INTO migrations VALUES(3)").run();
+    }
+  });
   const readTransaction = (fn) => {
     db.exec("BEGIN");
     try {
@@ -157,7 +171,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         actor: identity,
         actors: actorRoster(),
         leaseSeconds: 900,
-        schemaVersion: 2,
+        schemaVersion: 3,
       };
     if (command === "list_tasks") {
       return readTransaction(() => {
@@ -186,7 +200,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       if (identity.kind !== "human")
         fail("FORBIDDEN", "Human access required", 403);
       return transaction(() => ({
-        schemaVersion: 2,
+        schemaVersion: 3,
         exportedAt: new Date(clock()).toISOString(),
         actors: actorRoster(),
         tasks: all(),

@@ -48,7 +48,7 @@ Show the corresponding tasks as rows in List view.
 Both views must use the same filters and open the same task details.
 Column counts must reflect the tasks currently displayed.
 
-Expose task ID, title, priority, assignee, and label.
+Expose task ID, title, priority, assignee, and labels.
 Show an unassigned state when a task has no assignee.
 Distinguish human and agent assignments without implying that an agent is connected or active.
 Expose claim information where relevant.
@@ -80,8 +80,8 @@ The form includes:
 - Context: up to 20,000 characters.
 - Acceptance criteria: up to 20,000 characters.
 - Priority: Low, Medium, or High.
-- Assignee: optional text, up to 80 characters.
-- Label: up to 40 characters.
+- Assignee: a searchable user picker, with the current user first.
+- Labels: multiple tags, up to 40 characters each.
 
 Use the server's defaults when optional values are omitted.
 Prevent duplicate submissions while saving.
@@ -94,7 +94,11 @@ Retain entered values after a failed request.
 Open the current task from either Board or List.
 Load the full task before editing, including its latest version, activity, claim, and review information.
 
-Allow editing of title, context, acceptance criteria, priority, assignee, label, and permitted status changes.
+Allow editing of title, context, acceptance criteria, priority, assignee, labels, and permitted status changes.
+Keep Status, Priority, Assignee, and Labels controls only in the right sidebar.
+Open a searchable picker when a metadata control is clicked. Focus its search field immediately.
+Status, Priority, and Assignee each select one value. Labels select multiple tags.
+Keep selections in the draft until Save.
 Provide Save and Cancel actions.
 Do not overwrite an unsaved draft when the background task collection refreshes.
 
@@ -274,7 +278,7 @@ Document a required contract change before expanding backend scope.
 The accepted [task metadata contract](docs/contracts/task-metadata.md) defines
 the explicit actor roster and comment counts for the follow-up implementation.
 
-Do not add billing, organizations, invitations, custom workflows, notifications, attachments, dependencies, or a native shell.
+Do not add billing, organizations, invitations, custom workflows, notifications, attachments, or dependencies.
 Remove obsolete code when replacing an implementation.
 
 ## Work plan

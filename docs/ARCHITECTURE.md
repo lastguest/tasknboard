@@ -17,8 +17,11 @@ file (separate processes, SQLite serializes transactions). Works without interne
 Centralized: one service is the writer authority; agent stdio bridges use
 TASKNBOARD_SERVER_URL and personal TASKNBOARD_TOKEN. Browser authenticates with a human
 bearer token in sessionStorage. No offline replica or silent fallback when disconnected.
-Native future: host the web bundle in a shell, start a local service or implement
-an IPC adapter. Shell packaging is not included in this version.
+Desktop: Tauri starts the bundled Node service on an available loopback port.
+The webview loads the interface from that service, so assets and API calls share
+one origin. The service uses SQLite in the application data directory.
+The Rust host owns the service lifecycle. Domain rules stay in the existing Node core.
+The packaged runtime removes the need for a separate Node installation.
 
 ## Agent lifecycle
 
@@ -39,7 +42,7 @@ keyboard shortcuts, persisted comments/events, MCP tools, lease coordination,
 version conflicts, minimal actor tokens, server polling, backup export.
 Not implemented: organization membership UI, OAuth/SSO, remote Streamable HTTP
 MCP endpoint, granular per-project roles, offline replica sync, notification
-service, attachments storage, dependencies, custom workflows, native shell.
+service, attachments storage, dependencies, custom workflows.
 Remote MCP currently means a local stdio bridge to the shared authenticated API.
 For public deployment, terminate HTTPS and configure tokens. Token rotation is
 by process configuration. Database must be on local disk, not NFS.

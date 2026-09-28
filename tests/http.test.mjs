@@ -65,14 +65,14 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   const infoResponse = await post("workspace_info");
   assert.equal(infoResponse.status, 200);
   const info = await infoResponse.json();
-  assert.equal(info.schemaVersion, 2);
+  assert.equal(info.schemaVersion, 3);
   assert.deepEqual(info.actors, [
     { id: "remote-agent", kind: "agent" },
     { id: "reviewer", kind: "human" },
   ]);
   assert.ok(!JSON.stringify(info).includes(token));
   assert.ok(!JSON.stringify(info).includes(agentToken));
-  let task = await (await post("create_task", { title: "Shared task" })).json();
+  let task = await (await post("create_task", { title: "Shared task", labels: ["Product", "UX"] })).json();
   const client = new Client({ name: "remote-test", version: "1" });
   t.after(() => client.close());
   await client.connect(
@@ -100,6 +100,7 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   assert.notEqual(claimed.isError, true);
   task = JSON.parse(claimed.content[0].text);
   assert.equal(task.assignee, "remote-agent");
+  assert.deepEqual(task.labels, ["Product", "UX"]);
   assert.equal(
     (
       await post("update_task", {
@@ -129,7 +130,7 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   assert.equal(completed.status, 200);
   assert.equal((await completed.json()).status, "done");
   const backup = await (await post("export_workspace")).json();
-  assert.equal(backup.schemaVersion, 2);
+  assert.equal(backup.schemaVersion, 3);
   assert.ok(backup.actors.some((actor) => actor.id === "remote-agent"));
   const databaseBytes = Buffer.concat([
     readFileSync(dbPath),

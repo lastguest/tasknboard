@@ -4,7 +4,7 @@ A lightweight Kanban workspace for small teams and coding agents. **Version 0.1 
 
 ![Stand-up mode showing the team board](docs/images/tasknboard-standup-team.png)
 
-React + Vite, Node.js 24, SQLite and an MCP stdio server. One application core owns validation, leases, optimistic concurrency and activity events. No cloud AI dependency.
+React + Vite, Node.js, SQLite, a Tauri desktop shell, and an MCP stdio server. One application core owns validation, leases, optimistic concurrency and activity events. No cloud AI dependency.
 
 ## Run locally
 
@@ -40,6 +40,44 @@ when the tests finish. It does not use the user's workspace database.
 Keyboard: **N** new task, **Cmd/Ctrl K** search, **F** assignee filter, **?** shortcuts, **Esc** close dialog. Drag between columns, or use the Status menu on each card or list row (the keyboard and touch alternative). Every move is validated by the server; a rejected move stays in place with an explanation. Human review is required before Done: an In review task shows **Mark Done** and **Needs changes** in its details. The interface is English in this version.
 
 Editing uses the task's latest version. If the task changed elsewhere, the save is rejected, your draft is kept, and **Load latest** merges: fields you did not touch take the new values, and fields changed on both sides are highlighted so you can choose. Nothing is retried automatically. Unsaved drafts ask before they are discarded.
+
+## Desktop app
+
+The Tauri app currently builds for macOS on Apple Silicon.
+It includes the interface, the service, and a Node runtime.
+The installed app does not require Node or a separate server process.
+The shell starts its service on an available loopback port and stops it when the app exits.
+Desktop data stays in `~/Library/Application Support/app.tasknboard.desktop/tasknboard.sqlite`, outside the app bundle.
+The desktop workspace is separate from `data/tasknboard.sqlite` used by the web development server.
+
+Build prerequisites: Node.js 24 or later, npm, Rust, and the platform's
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
+On macOS, install the Xcode command line tools.
+
+```bash
+npm ci
+npm run desktop:dev
+```
+
+To build the desktop app:
+
+```bash
+npm run desktop:build
+```
+
+The first build downloads the Rust dependencies and the pinned official Node 24.14.0 runtime.
+Later builds reuse the cached archive and check it against Node's published SHA-256 checksum.
+Build on an Apple Silicon Mac. Other platforms are not packaged by this version.
+The app requires macOS 13.5 or later.
+Packaged output is `src-tauri/target/release/bundle/macos/TasknBoard.app`.
+Local builds use ad-hoc signing. They are not notarized for public distribution.
+
+`desktop:dev` rebuilds the interface before launch. Restart it after frontend changes.
+Use `npm run dev` for the ordinary web interface with hot reload.
+
+The desktop app uses the same command validation, SQLite store, and task interface as the web app.
+For local MCP access, set `TASKNBOARD_DB` to the desktop database's absolute path.
+WebMCP tools register only when the embedded webview supports the native browser API.
 
 ## Stand-up mode
 
@@ -192,18 +230,18 @@ No direct remote Streamable HTTP MCP endpoint is included yet. The bridge requir
 - Task assignees are free text. The server roster records explicit human and agent identities from trusted configuration and authenticated commands. Unknown assignees remain neutral. The roster is not live telemetry.
 - Cards and list rows show counts from persisted comment events. See the [task metadata contract](docs/contracts/task-metadata.md).
 - Shared timestamps use an explicit English format and UTC. Review evidence stays available when a task needs changes, with an explanation that it belongs to the earlier submission.
-- No native shell is included; the frontend/backend boundary is ready for a shell integration.
+- The Tauri shell packages a local workspace. It does not add cloud synchronization or a remote workspace selector.
 
 ## Repository
 
 `src/` interface and API adapter; `server/domain.mjs` shared schemas;
 `server/store.mjs` transactional commands; `server/http.mjs` HTTP/auth/static files;
 `server/mcp.mjs` MCP adapter; `tests/` integration and domain coverage;
-`docs/ARCHITECTURE.md` decisions and follow-up scope.
+`src-tauri/` desktop host and packaging; `docs/ARCHITECTURE.md` decisions and follow-up scope.
 
 ## Why Vite instead of Next.js?
 
-This implementation keeps the interactive client independent of its host and transport. That fits a future native shell and a local service. Server rendering is not a core requirement. Next.js could host the client, but would not replace the command core, SQLite coordination or MCP adapter.
+This implementation keeps the interactive client independent of its host and transport. The web server and Tauri shell use the same local service. Server rendering is not a core requirement. Next.js could host the client, but would not replace the command core, SQLite coordination or MCP adapter.
 
 ## License and contributions
 

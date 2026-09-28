@@ -187,7 +187,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
     { id: "TasknBoard Agent", kind: "human", token: "must-not-be-kept" },
   ]);
   const info = s.execute("workspace_info", {}, human);
-  assert.equal(info.schemaVersion, 2);
+  assert.equal(info.schemaVersion, 3);
   assert.deepEqual(info.actor, human);
   assert.deepEqual(info.actors, [
     { id: "Morgan", kind: "agent" },
@@ -205,7 +205,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
   );
   assert.equal(s.execute("list_tasks", {}, human).total, 0);
   const backup = s.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 2);
+  assert.equal(backup.schemaVersion, 3);
   assert.deepEqual(backup.actors, info.actors);
 });
 test("comment counts include only persisted comments and agree across task reads", (t) => {
@@ -382,4 +382,48 @@ test("stand-up notes preserve claims, validate input and enforce versions/agent 
     s.execute("get_task", { id: task.id }, human).standup,
     task.standup,
   );
+});
+
+test("labels support multiple tags, normalization, clearing and strict validation", (t) => {
+  const s = fixture(t);
+  let task = s.execute("create_task", { title: "Tagged task", labels: [" UX ", "Product", "UX"] }, human);
+  assert.deepEqual(task.labels, ["UX", "Product"]);
+  assert.equal(Object.hasOwn(task, "label"), false);
+  assert.deepEqual(s.execute("list_tasks", {}, human).tasks[0].labels, task.labels);
+  assert.deepEqual(s.execute("get_task", { id: task.id }, human).labels, task.labels);
+  for (const labels of [[" "], ["x".repeat(41)], "Product"]) {
+    assert.throws(() => s.execute("update_task", {
+      id: task.id, expectedVersion: task.version, patch: { labels },
+    }, human), { code: "VALIDATION" });
+  }
+  assert.throws(() => s.execute("create_task", { title: "Old field", label: "UX" }, human), { code: "VALIDATION" });
+  task = s.execute("update_task", { id: task.id, expectedVersion: task.version, patch: { labels: [] } }, human);
+  assert.deepEqual(task.labels, []);
+  assert.deepEqual(s.execute("export_workspace", {}, human).tasks[0].labels, []);
+});
+
+test("stored single labels upgrade once without changing task history", async (t) => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const dir = mkdtempSync(join(tmpdir(), "tasknboard-labels-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "workspace.sqlite");
+  let store = createStore(path);
+  const task = store.execute("create_task", { title: "Existing task" }, human);
+  store.close();
+  const db = new DatabaseSync(path);
+  const { labels, events, commentCount, ...legacy } = task;
+  db.prepare("UPDATE tasks SET data=? WHERE number=1").run(JSON.stringify({ ...legacy, label: "Product" }));
+  db.exec("DELETE FROM migrations WHERE version=3");
+  db.close();
+  store = createStore(path);
+  const upgraded = store.execute("get_task", { id: task.id }, human);
+  assert.deepEqual(upgraded.labels, ["Product"]);
+  assert.equal(Object.hasOwn(upgraded, "label"), false);
+  assert.equal(upgraded.version, task.version);
+  assert.deepEqual(upgraded.events, events);
+  store.execute("update_task", { id: task.id, expectedVersion: task.version, patch: { labels: ["UX", "Data"] } }, human);
+  store.close();
+  store = createStore(path);
+  assert.deepEqual(store.execute("get_task", { id: task.id }, human).labels, ["UX", "Data"]);
+  store.close();
 });
