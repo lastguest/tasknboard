@@ -26,7 +26,9 @@ npm run seed
 
 Development: keep `npm start` running and run `npm run dev` in another terminal; open http://127.0.0.1:5173. The Vite proxy uses the same API. `npm test` runs domain, persistence, MCP protocol and authenticated HTTP tests.
 
-Keyboard: **N** new task, **Cmd/Ctrl K** search, **F** assignee filter, **?** shortcuts, **Esc** close dialog. Drag between columns or use the task's Status select. Human review is required before Done. The interface is English in this version.
+Keyboard: **N** new task, **Cmd/Ctrl K** search, **F** assignee filter, **?** shortcuts, **Esc** close dialog. Drag between columns, or use the Status menu on each card or list row (the keyboard and touch alternative). Every move is validated by the server; a rejected move stays in place with an explanation. Human review is required before Done: an In review task shows **Mark Done** and **Needs changes** in its details. The interface is English in this version.
+
+Editing uses the task's latest version. If the task changed elsewhere, the save is rejected, your draft is kept, and **Load latest** merges: fields you did not touch take the new values, and fields changed on both sides are highlighted so you can choose. Nothing is retried automatically. Unsaved drafts ask before they are discarded.
 
 ## Stand-up mode
 

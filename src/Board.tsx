@@ -1,58 +1,178 @@
-import { columns, type Task, type Status } from "./types";
+import { useState } from "react";
+import {
+  activeLease,
+  columns,
+  doneLocked,
+  labelTone,
+  priorities,
+  relativeTime,
+  statusTitle,
+  type Status,
+  type Task,
+} from "./types";
 import { Icon } from "./Icons";
-export function Avatar({ name }: { name: string }) {
-  const bot = /agent|codex|claude|bot/i.test(name);
+
+export function Avatar({ name, agent }: { name: string; agent: boolean }) {
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => [...part][0])
+    .join("")
+    .toUpperCase();
   return (
-    <span className={`avatar ${bot ? "bot" : ""}`}>
-      {bot ? (
-        <Icon name="bot" size={16} />
-      ) : name ? (
-        name.slice(0, 2).toUpperCase()
-      ) : (
-        "—"
-      )}
+    <span className={`avatar ${agent ? "bot" : ""} ${name ? "" : "none"}`}>
+      {agent ? <Icon name="bot" size={15} /> : initials || "—"}
     </span>
   );
 }
-export function TaskCard({
+
+export function Assignee({ name, agent }: { name: string; agent: boolean }) {
+  return (
+    <span className="assignee">
+      <Avatar name={name} agent={agent} />
+      <span className={name ? "assignee-name" : "assignee-name unassigned"}>
+        {name || "Unassigned"}
+      </span>
+      {agent && <span className="kind-tag">Agent</span>}
+    </span>
+  );
+}
+
+function PriorityMark({ task }: { task: Task }) {
+  const title = `${priorities.find((p) => p.id === task.priority)?.title} priority`;
+  return (
+    <span className={`priority ${task.priority}`} title={title}>
+      <Icon
+        name={
+          task.priority === "high"
+            ? "priorityHigh"
+            : task.priority === "medium"
+              ? "priorityMedium"
+              : "priorityLow"
+        }
+        size={17}
+      />
+      <span className="sr-only">{title}</span>
+    </span>
+  );
+}
+
+export function Label({ label }: { label: string }) {
+  if (!label) return null;
+  return <span className={`label tone-${labelTone(label)}`}>{label}</span>;
+}
+
+export function ClaimChip({ task }: { task: Task }) {
+  const lease = activeLease(task);
+  if (!lease) return null;
+  return (
+    <span
+      className="claim-chip"
+      title={`Claimed by ${lease.actor} until ${new Date(lease.expiresAt).toLocaleTimeString()}`}
+    >
+      <Icon name="lock" size={12} />
+      <span>
+        Claimed by {lease.actor} · expires {relativeTime(lease.expiresAt)}
+      </span>
+    </span>
+  );
+}
+
+/** The keyboard and touch alternative to drag and drop. */
+export function StatusSelect({
   task,
-  onOpen,
-  presentation = false,
+  pending,
+  onMove,
 }: {
   task: Task;
-  onOpen: (t: Task) => void;
-  presentation?: boolean;
+  pending?: Status;
+  onMove: (t: Task, s: Status) => void;
 }) {
   return (
-    <button
-      className={`task-card ${task.standup?.blocker ? "has-blocker" : task.standup?.highlight ? "has-highlight" : ""}`}
-      draggable={!presentation}
-      onDragStart={(e) => e.dataTransfer.setData("text/plain", task.id)}
-      onClick={() => onOpen(task)}
+    <label className="status-select">
+      <span className="sr-only">Status of {task.id}</span>
+      <select
+        aria-label={`Status of ${task.id}`}
+        value={pending ?? task.status}
+        disabled={Boolean(pending)}
+        onChange={(e) => onMove(task, e.target.value as Status)}
+      >
+        {columns.map((c) => (
+          <option
+            key={c.id}
+            value={c.id}
+            disabled={c.id === "done" && doneLocked(task.status)}
+          >
+            {c.id === "done" && doneLocked(task.status)
+              ? "Done (after review)"
+              : c.title}
+          </option>
+        ))}
+      </select>
+      {pending && <span className="moving">Moving…</span>}
+    </label>
+  );
+}
+
+type BoardProps = {
+  tasks: Task[];
+  agents: Set<string>;
+  onOpen: (t: Task) => void;
+  onMove?: (t: Task, s: Status) => void;
+  onNew?: () => void;
+  pending?: Map<string, Status>;
+  list?: boolean;
+  presentation?: boolean;
+};
+
+export function TaskCard({
+  task,
+  agents,
+  onOpen,
+  onMove,
+  pending,
+  presentation,
+}: Omit<BoardProps, "tasks" | "pending" | "list" | "onNew"> & {
+  task: Task;
+  pending?: Status;
+}) {
+  const signal = task.standup?.blocker
+    ? "has-blocker"
+    : task.standup?.highlight
+      ? "has-highlight"
+      : "";
+  return (
+    <article
+      className={`task-card ${signal} ${pending ? "is-pending" : ""}`}
+      draggable={Boolean(onMove) && !pending}
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", task.id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
     >
       <div className="card-top">
-        <span>{task.id}</span>
-        <span
-          className={`priority ${task.priority}`}
-          aria-label={`${task.priority} priority`}
-        >
-          {task.status === "done" ? (
-            <span className="done-check">
-              <Icon name="check" size={13} />
-            </span>
-          ) : task.priority === "high" ? (
-            <Icon name="priorityHigh" size={18} />
-          ) : task.priority === "medium" ? (
-            <Icon name="priorityMedium" size={18} />
-          ) : (
-            <Icon name="priorityLow" size={18} />
-          )}
-        </span>
+        <span className="task-id">{task.id}</span>
+        {task.status === "done" ? (
+          <span className="done-check" title="Done">
+            <Icon name="check" size={12} />
+            <span className="sr-only">Done</span>
+          </span>
+        ) : (
+          <PriorityMark task={task} />
+        )}
       </div>
-      <div className="task-title">{task.title}</div>
-      <span className={`label ${task.label.toLowerCase()}`}>
-        {task.label || "Product"}
-      </span>
+      <h3 className="task-title">
+        <button
+          type="button"
+          className="card-open"
+          onClick={() => onOpen(task)}
+          aria-label={`${task.id}: ${task.title}${presentation ? ", edit stand-up notes" : ""}`}
+        >
+          {task.title}
+        </button>
+      </h3>
+      <Label label={task.label} />
       {task.standup?.blocker && (
         <div className="task-signal blocker">
           <strong>Blocker</strong>
@@ -66,114 +186,156 @@ export function TaskCard({
         </div>
       )}
       <div className="card-bottom">
-        <Avatar name={task.assignee} />
-        <span>{task.assignee || "Unassigned"}</span>
-        {task.lease && task.lease.expiresAt > Date.now() && (
-          <span
-            className="lease-dot"
-            title={`Claimed by ${task.lease.actor}`}
-          />
-        )}
+        <Assignee name={task.assignee} agent={agents.has(task.assignee)} />
       </div>
-    </button>
+      <ClaimChip task={task} />
+      {onMove && !presentation && (
+        <StatusSelect task={task} pending={pending} onMove={onMove} />
+      )}
+    </article>
   );
 }
+
 export function Board({
   tasks,
+  agents,
   onOpen,
   onMove,
   onNew,
-  list,
+  pending = new Map(),
+  list = false,
   presentation = false,
-}: {
-  tasks: Task[];
-  onOpen: (t: Task) => void;
-  onMove: (t: Task, s: Status) => void;
-  onNew: () => void;
-  list: boolean;
-  presentation?: boolean;
-}) {
-  if (list)
+}: BoardProps) {
+  const [dropTarget, setDropTarget] = useState<Status | null>(null);
+  const canDrag = Boolean(onMove) && !presentation;
+  if (list) {
+    const rows = [...tasks].sort(
+      (a, b) =>
+        columns.findIndex((c) => c.id === a.status) -
+        columns.findIndex((c) => c.id === b.status),
+    );
     return (
-      <div className="task-list">
-        <div className="list-head">
-          <span>Task</span>
-          <span>Status</span>
-          <span>Assignee</span>
-        </div>
-        {tasks.map((t) => (
-          <button className="list-row" key={t.id} onClick={() => onOpen(t)}>
-            <span>
-              <small>{t.id}</small>
-              {t.title}
-            </span>
-            <span>{columns.find((c) => c.id === t.status)?.title}</span>
-            <span>
-              <Avatar name={t.assignee} />
-              {t.assignee || "Unassigned"}
-            </span>
-          </button>
-        ))}
-        {!tasks.length && (
-          <div className="empty">
-            No tasks here. Create one or change your filters.
-          </div>
-        )}
+      <div className="task-list" role="region" aria-label="Task list">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Task</th>
+              <th scope="col">Status</th>
+              <th scope="col">Priority</th>
+              <th scope="col">Assignee</th>
+              <th scope="col">Label</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((t) => (
+              <tr key={t.id} className={pending.has(t.id) ? "is-pending" : ""}>
+                <td className="list-task">
+                  <span className="task-id">{t.id}</span>
+                  <button
+                    type="button"
+                    className="list-open"
+                    onClick={() => onOpen(t)}
+                  >
+                    {t.title}
+                  </button>
+                  <ClaimChip task={t} />
+                </td>
+                <td data-label="Status">
+                  {onMove ? (
+                    <StatusSelect
+                      task={t}
+                      pending={pending.get(t.id)}
+                      onMove={onMove}
+                    />
+                  ) : (
+                    statusTitle(t.status)
+                  )}
+                </td>
+                <td data-label="Priority">
+                  <span className="priority-cell">
+                    <PriorityMark task={t} />
+                    {priorities.find((p) => p.id === t.priority)?.title}
+                  </span>
+                </td>
+                <td data-label="Assignee">
+                  <Assignee name={t.assignee} agent={agents.has(t.assignee)} />
+                </td>
+                <td data-label="Label">
+                  <Label label={t.label} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     );
+  }
   return (
-    <div className="board">
-      {columns.map((col) => (
-        <section
-          className="column"
-          key={col.id}
-          onDragOver={(e) => {
-            if (presentation) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "move";
-          }}
-          onDrop={(e) => {
-            if (presentation) return;
-            e.preventDefault();
-            const t = tasks.find(
-              (t) => t.id === e.dataTransfer.getData("text/plain"),
-            );
-            if (t && t.status !== col.id) onMove(t, col.id);
-          }}
-        >
-          <header>
-            <span className="status-dot" style={{ background: col.color }} />
-            <h2>{col.title}</h2>
-            <span className="count">
-              {tasks.filter((t) => t.status === col.id).length}
-            </span>
-            {!presentation && (
-              <button
-                className="icon-button column-add"
-                aria-label={`Create task from ${col.title}`}
-                onClick={onNew}
-              >
-                <Icon name="plus" size={16} />
-              </button>
-            )}
-          </header>
-          <div className="cards">
-            {tasks
-              .filter((t) => t.status === col.id)
-              .map((t) => (
+    <div className="board" role="region" aria-label="Kanban board">
+      {columns.map((col) => {
+        const cards = tasks.filter((t) => t.status === col.id);
+        return (
+          <section
+            className={`column ${dropTarget === col.id ? "drop-target" : ""}`}
+            key={col.id}
+            aria-labelledby={`column-${col.id}`}
+            onDragOver={(e) => {
+              if (!canDrag) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              if (dropTarget !== col.id) setDropTarget(col.id);
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node))
+                setDropTarget(null);
+            }}
+            onDrop={(e) => {
+              setDropTarget(null);
+              if (!canDrag) return;
+              e.preventDefault();
+              const t = tasks.find(
+                (t) => t.id === e.dataTransfer.getData("text/plain"),
+              );
+              if (t && t.status !== col.id) onMove?.(t, col.id);
+            }}
+          >
+            <header>
+              <span className="status-dot" style={{ background: col.color }} />
+              <h2 id={`column-${col.id}`}>{col.title}</h2>
+              <span className="count" aria-label={`${cards.length} tasks`}>
+                {cards.length}
+              </span>
+              {onNew && col.id === "backlog" && (
+                <button
+                  type="button"
+                  className="icon-button column-add"
+                  aria-label="New task in Backlog"
+                  title="New task in Backlog"
+                  onClick={onNew}
+                >
+                  <Icon name="plus" size={16} />
+                </button>
+              )}
+            </header>
+            <div className="cards">
+              {cards.map((t) => (
                 <TaskCard
-                  task={t}
-                  onOpen={onOpen}
                   key={t.id}
+                  task={t}
+                  agents={agents}
+                  onOpen={onOpen}
+                  onMove={canDrag ? onMove : undefined}
+                  pending={pending.get(t.id)}
                   presentation={presentation}
                 />
               ))}
-            {!tasks.some((t) => t.status === col.id) && (
-              <div className="empty-column">Nothing here yet</div>
-            )}
-          </div>
-        </section>
-      ))}
+              {!cards.length && (
+                <div className="empty-column">No tasks in {col.title}</div>
+              )}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }
