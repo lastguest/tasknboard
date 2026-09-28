@@ -14,10 +14,23 @@ export function createStore(path, { clock = Date.now } = {}) {
  CREATE TABLE IF NOT EXISTS migrations(version INTEGER PRIMARY KEY);
  CREATE TABLE IF NOT EXISTS tasks(number INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS events(sequence INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, actor TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS actors(id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('human','agent')));
  CREATE INDEX IF NOT EXISTS events_by_task ON events(task_id, sequence);
- INSERT OR IGNORE INTO migrations VALUES(1); COMMIT;`);
+ INSERT OR IGNORE INTO migrations VALUES(1);
+ INSERT OR IGNORE INTO migrations VALUES(2); COMMIT;`);
   const transaction = (fn) => {
     db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = fn();
+      db.exec("COMMIT");
+      return result;
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
+  };
+  const readTransaction = (fn) => {
+    db.exec("BEGIN");
     try {
       const result = fn();
       db.exec("COMMIT");
@@ -43,24 +56,89 @@ export function createStore(path, { clock = Date.now } = {}) {
     db
       .prepare("UPDATE tasks SET data=? WHERE number=?")
       .run(JSON.stringify(t), Number(t.id.slice(4)));
+  const actorRoster = () =>
+    db
+      .prepare("SELECT id, kind FROM actors ORDER BY id")
+      .all()
+      .map(({ id, kind }) => ({ id, kind }));
+  const addActor = (actor) => {
+    const existing = db
+      .prepare("SELECT kind FROM actors WHERE id=?")
+      .get(actor.id);
+    if (existing && existing.kind !== actor.kind)
+      fail(
+        "ACTOR_KIND_CONFLICT",
+        `Actor ${actor.id} is already registered as ${existing.kind}`,
+      );
+    if (!existing)
+      db.prepare("INSERT INTO actors(id,kind) VALUES(?,?)").run(
+        actor.id,
+        actor.kind,
+      );
+  };
+  const validActor = (actor) => {
+    if (
+      typeof actor?.id !== "string" ||
+      actor.id.length === 0 ||
+      !["human", "agent"].includes(actor.kind)
+    )
+      fail("UNAUTHORIZED", "Valid actor required", 401);
+    return { id: actor.id, kind: actor.kind };
+  };
+  const registerActors = (actors) => {
+    const identities = actors.map(validActor);
+    let needsWrite = false;
+    for (const identity of identities) {
+      const existing = db
+        .prepare("SELECT kind FROM actors WHERE id=?")
+        .get(identity.id);
+      if (existing && existing.kind !== identity.kind)
+        fail(
+          "ACTOR_KIND_CONFLICT",
+          `Actor ${identity.id} is already registered as ${existing.kind}`,
+        );
+      if (!existing) needsWrite = true;
+    }
+    if (!needsWrite) return;
+    transaction(() => {
+      for (const identity of identities) addActor(identity);
+    });
+  };
+  const commentCounts = (ids) => {
+    if (!ids.length) return new Map();
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = db
+      .prepare(
+        `SELECT task_id, COUNT(*) AS count FROM events WHERE kind='add_comment' AND task_id IN (${placeholders}) GROUP BY task_id`,
+      )
+      .all(...ids);
+    return new Map(rows.map((row) => [row.task_id, Number(row.count)]));
+  };
+  const withCommentCount = (t, count) => ({ ...t, commentCount: count });
   const event = (id, actor, kind, body = "") =>
     db
       .prepare(
         "INSERT INTO events(task_id,actor,kind,body,created_at) VALUES(?,?,?,?,?)",
       )
       .run(id, actor.id, kind, body, new Date(clock()).toISOString());
-  const detail = (t) => ({
-    ...t,
-    events: db
+  const detail = (t) => {
+    const events = db
       .prepare(
         "SELECT sequence, actor, kind, body, created_at AS createdAt FROM events WHERE task_id=? ORDER BY sequence",
       )
-      .all(t.id),
-  });
+      .all(t.id);
+    return {
+      ...withCommentCount(
+        t,
+        events.filter((event) => event.kind === "add_comment").length,
+      ),
+      events,
+    };
+  };
   const active = (t) => t.lease && t.lease.expiresAt > clock();
   function execute(command, input, actor) {
-    if (!actor?.id || !["human", "agent"].includes(actor.kind))
-      fail("UNAUTHORIZED", "Valid actor required", 401);
+    const identity = validActor(actor);
+    registerActors([identity]);
     const schema = schemas[command];
     if (!schema) fail("UNKNOWN_COMMAND", "Unknown command", 404);
     const parsed = schema.safeParse(input);
@@ -74,29 +152,43 @@ export function createStore(path, { clock = Date.now } = {}) {
       );
     const p = parsed.data;
     if (command === "workspace_info")
-      return { name: "Studio", actor, leaseSeconds: 900, schemaVersion: 1 };
-    if (command === "list_tasks") {
-      const q = p.query?.toLowerCase();
-      const rows = all().filter(
-        (t) =>
-          !t.archived &&
-          (!q ||
-            `${t.id} ${t.title} ${t.description}`.toLowerCase().includes(q)) &&
-          (!p.status || t.status === p.status) &&
-          (!p.assignee || t.assignee === p.assignee),
-      );
       return {
-        tasks: rows.slice(p.offset, p.offset + p.limit),
-        total: rows.length,
+        name: "Studio",
+        actor: identity,
+        actors: actorRoster(),
+        leaseSeconds: 900,
+        schemaVersion: 2,
       };
+    if (command === "list_tasks") {
+      return readTransaction(() => {
+        const q = p.query?.toLowerCase();
+        const rows = all().filter(
+          (t) =>
+            !t.archived &&
+            (!q ||
+              `${t.id} ${t.title} ${t.description}`
+                .toLowerCase()
+                .includes(q)) &&
+            (!p.status || t.status === p.status) &&
+            (!p.assignee || t.assignee === p.assignee),
+        );
+        const page = rows.slice(p.offset, p.offset + p.limit);
+        const counts = commentCounts(page.map((t) => t.id));
+        return {
+          tasks: page.map((t) => withCommentCount(t, counts.get(t.id) ?? 0)),
+          total: rows.length,
+        };
+      });
     }
-    if (command === "get_task") return detail(get(p.id));
+    if (command === "get_task")
+      return readTransaction(() => detail(get(p.id)));
     if (command === "export_workspace") {
-      if (actor.kind !== "human")
+      if (identity.kind !== "human")
         fail("FORBIDDEN", "Human access required", 403);
       return transaction(() => ({
-        schemaVersion: 1,
+        schemaVersion: 2,
         exportedAt: new Date(clock()).toISOString(),
+        actors: actorRoster(),
         tasks: all(),
         events: db.prepare("SELECT * FROM events ORDER BY sequence").all(),
       }));
@@ -116,7 +208,7 @@ export function createStore(path, { clock = Date.now } = {}) {
           archived: false,
         };
         save(t);
-        event(t.id, actor, "created");
+        event(t.id, identity, "created");
         return detail(t);
       }
       const t = get(p.id);
@@ -126,7 +218,7 @@ export function createStore(path, { clock = Date.now } = {}) {
           "VERSION_CONFLICT",
           `Task changed. Read it again. Current version: ${t.version}`,
         );
-      if (command === "set_standup_notes" && actor.kind === "human") {
+      if (command === "set_standup_notes" && identity.kind === "human") {
         // Presentation annotations do not change execution ownership or status.
         // They still advance the version so concurrent edits cannot be lost.
         t.standup = { highlight: p.highlight, blocker: p.blocker };
@@ -138,26 +230,26 @@ export function createStore(path, { clock = Date.now } = {}) {
             "INVALID_TRANSITION",
             "Only backlog or in-progress tasks can be claimed",
           );
-        t.lease = { actor: actor.id, expiresAt: clock() + 900000 };
-        t.assignee = actor.id;
+        t.lease = { actor: identity.id, expiresAt: clock() + 900000 };
+        t.assignee = identity.id;
         t.status = "in_progress";
       } else {
-        if (active(t) && t.lease.actor !== actor.id)
+        if (active(t) && t.lease.actor !== identity.id)
           fail("LEASE_CONFLICT", `Task is claimed by ${t.lease.actor}`);
         if (
-          actor.kind === "agent" &&
-          (!active(t) || t.lease.actor !== actor.id)
+          identity.kind === "agent" &&
+          (!active(t) || t.lease.actor !== identity.id)
         )
           fail("LEASE_REQUIRED", "Claim this task before changing it");
         if (command === "heartbeat" || command === "release_task") {
-          if (!active(t) || t.lease.actor !== actor.id)
+          if (!active(t) || t.lease.actor !== identity.id)
             fail("LEASE_REQUIRED", "An active owned claim is required");
           if (command === "heartbeat") t.lease.expiresAt = clock() + 900000;
           else t.lease = null;
         }
         if (command === "update_task") {
           if (
-            actor.kind === "agent" &&
+            identity.kind === "agent" &&
             (p.patch.assignee !== undefined ||
               (p.patch.status !== undefined &&
                 p.patch.status !== "in_progress"))
@@ -189,11 +281,11 @@ export function createStore(path, { clock = Date.now } = {}) {
           t.review = {
             summary: p.summary,
             artifactUrl: p.artifactUrl,
-            actor: actor.id,
+            actor: identity.id,
           };
         }
         if (command === "archive_task") {
-          if (actor.kind !== "human")
+          if (identity.kind !== "human")
             fail("FORBIDDEN", "Only humans may archive", 403);
           t.archived = true;
         }
@@ -203,7 +295,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       save(t);
       event(
         t.id,
-        actor,
+        identity,
         command,
         p.body ??
           (command === "submit_review"
@@ -217,5 +309,5 @@ export function createStore(path, { clock = Date.now } = {}) {
       return detail(t);
     });
   }
-  return { execute, close: () => db.close() };
+  return { execute, registerActors, close: () => db.close() };
 }

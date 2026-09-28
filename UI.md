@@ -173,12 +173,12 @@ Stand-up is a local presentation mode, not a synchronized meeting or video-call 
 
 ## 9. Agents
 
-Show the existing agent roster inferred from assignments and claims.
+Show the explicit agent roster returned by the workspace service.
 Show counts for work in progress and active claims where the current data provides them.
 Allow users to open an agent's assigned tasks.
 
 Keep the existing MCP connection instructions accessible.
-Do not present inferred task ownership as live agent connection telemetry.
+Do not present roster membership or task ownership as live agent connection telemetry.
 Do not add an agent chat, execution console, or remote control system.
 
 ## 10. Settings and export
@@ -271,6 +271,8 @@ Use existing components and dependencies before adding packages.
 Keep domain rules on the server.
 Preserve API contracts, optimistic concurrency, leases, identity, and persistence behavior.
 Document a required contract change before expanding backend scope.
+The accepted [task metadata contract](docs/contracts/task-metadata.md) defines
+the explicit actor roster and comment counts for the follow-up implementation.
 
 Do not add billing, organizations, invitations, custom workflows, notifications, attachments, dependencies, or a native shell.
 Remove obsolete code when replacing an implementation.

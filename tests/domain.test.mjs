@@ -180,6 +180,75 @@ test("archive hides from queries, preserves export and activity", (t) => {
     code: "FORBIDDEN",
   });
 });
+test("actor roster uses explicit kinds and rejects conflicting identities", (t) => {
+  const s = fixture(t);
+  s.registerActors([
+    { id: "Morgan", kind: "agent" },
+    { id: "TasknBoard Agent", kind: "human", token: "must-not-be-kept" },
+  ]);
+  const info = s.execute("workspace_info", {}, human);
+  assert.equal(info.schemaVersion, 2);
+  assert.deepEqual(info.actor, human);
+  assert.deepEqual(info.actors, [
+    { id: "Morgan", kind: "agent" },
+    { id: "TasknBoard Agent", kind: "human" },
+    human,
+  ]);
+  assert.ok(!JSON.stringify(info).includes("must-not-be-kept"));
+  assert.throws(
+    () =>
+      s.execute("create_task", { title: "Should not be created" }, {
+        id: "Morgan",
+        kind: "human",
+      }),
+    { code: "ACTOR_KIND_CONFLICT", status: 409 },
+  );
+  assert.equal(s.execute("list_tasks", {}, human).total, 0);
+  const backup = s.execute("export_workspace", {}, human);
+  assert.equal(backup.schemaVersion, 2);
+  assert.deepEqual(backup.actors, info.actors);
+});
+test("comment counts include only persisted comments and agree across task reads", (t) => {
+  const s = fixture(t);
+  let task = s.make();
+  assert.equal(task.commentCount, 0);
+  task = s.execute("claim_task", { id: task.id, expectedVersion: task.version }, a);
+  assert.equal(task.commentCount, 0);
+  task = s.execute(
+    "update_task",
+    {
+      id: task.id,
+      expectedVersion: task.version,
+      patch: { description: "Changed without a comment" },
+    },
+    a,
+  );
+  assert.equal(task.commentCount, 0);
+  task = s.execute(
+    "add_comment",
+    { id: task.id, expectedVersion: task.version, body: "First comment" },
+    a,
+  );
+  assert.equal(task.commentCount, 1);
+  task = s.execute(
+    "update_task",
+    { id: task.id, expectedVersion: task.version, patch: { title: "Still one" } },
+    a,
+  );
+  assert.equal(task.commentCount, 1);
+  assert.throws(
+    () =>
+      s.execute(
+        "add_comment",
+        { id: task.id, expectedVersion: task.version - 1, body: "Rejected" },
+        a,
+      ),
+    { code: "VERSION_CONFLICT" },
+  );
+  assert.equal(s.execute("get_task", { id: task.id }, human).commentCount, 1);
+  assert.equal(s.execute("list_tasks", {}, human).tasks[0].commentCount, 1);
+  assert.equal(task.events.filter((event) => event.kind === "add_comment").length, 1);
+});
 test("database persistence and independent connections enforce version checks", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "tasknboard-"));
   const path = join(dir, "test.sqlite");
@@ -196,6 +265,15 @@ test("database persistence and independent connections enforce version checks", 
     () => second.execute("claim_task", { id: task.id, expectedVersion: 1 }, b),
     { code: "VERSION_CONFLICT" },
   );
+  assert.throws(
+    () => second.execute("list_tasks", {}, { id: a.id, kind: "human" }),
+    { code: "ACTOR_KIND_CONFLICT", status: 409 },
+  );
+  assert.ok(
+    first
+      .execute("workspace_info", {}, human)
+      .actors.some((actor) => actor.id === b.id && actor.kind === b.kind),
+  );
   assert.equal(
     second.execute("get_task", { id: task.id }, human).lease.actor,
     a.id,
@@ -204,6 +282,11 @@ test("database persistence and independent connections enforce version checks", 
   assert.equal(
     reopened.execute("get_task", { id: task.id }, human).title,
     "Persist me",
+  );
+  assert.ok(
+    reopened
+      .execute("workspace_info", {}, human)
+      .actors.some((actor) => actor.id === a.id && actor.kind === a.kind),
   );
   reopened.close();
 });

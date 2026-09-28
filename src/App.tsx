@@ -10,14 +10,15 @@ import {
 import { Icon } from "./Icons";
 import { ApiError, command, errorOf, loadTasks } from "./api";
 import { Standup } from "./Standup";
-import { registerWebMCP, type ModelContext } from "./webmcp";
+import type { ModelContext } from "./webmcp";
+import { formatUtcTimestamp } from "./formatting";
 import {
   activeLease,
-  agentNames,
   statusTitle,
   type Actor,
   type Status,
   type Task,
+  type WorkspaceInfo,
 } from "./types";
 
 type View = "board" | "mine" | "agents";
@@ -38,6 +39,8 @@ const viewTitles: Record<View, string> = {
 export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [actor, setActor] = useState<Actor>({ id: "you", kind: "human" });
+  const [actors, setActors] = useState<Actor[]>([]);
+  const [workspaceInfoLoaded, setWorkspaceInfoLoaded] = useState(false);
   const [workspace, setWorkspace] = useState("Workspace");
   const [view, setView] = useState<View>("board");
   const [list, setList] = useState(false);
@@ -67,16 +70,18 @@ export default function App() {
     try {
       const [next, info] = await Promise.all([
         loadTasks(),
-        command<{ name: string; actor: Actor }>("workspace_info"),
+        command<WorkspaceInfo>("workspace_info"),
       ]);
       setTasks(next);
       setActor(info.actor);
+      setActors(info.actors);
       setWorkspace(info.name);
+      setWorkspaceInfoLoaded(true);
       setSync({
         loaded: true,
         connected: true,
         error: null,
-        lastSync: new Date().toLocaleTimeString(),
+        lastSync: formatUtcTimestamp(Date.now()),
       });
       return { ok: true };
     } catch (e) {
@@ -111,24 +116,52 @@ export default function App() {
   }, [load]);
 
   useEffect(() => {
-    const controller = new AbortController();
     const context = (document as Document & { modelContext?: ModelContext })
       .modelContext;
-    void registerWebMCP(
-      context,
-      command,
-      async () => {
-        await refresh();
-      },
-      controller.signal,
-    ).catch((error) => console.error("WebMCP tool registration failed", error));
+    if (!context) return;
+
+    const controller = new AbortController();
+    void import("./webmcp")
+      .then(({ registerWebMCP }) =>
+        registerWebMCP(
+          context,
+          command,
+          async () => {
+            await refresh();
+          },
+          controller.signal,
+        ),
+      )
+      .catch((error) => {
+        if (!controller.signal.aborted)
+          console.error("WebMCP tool registration failed", error);
+      });
     return () => controller.abort();
   }, [refresh]);
 
   useEffect(() => {
-    void refresh();
-    const timer = setInterval(() => void refresh(), 5000);
-    return () => clearInterval(timer);
+    let timer: number | undefined;
+    const startPolling = () => {
+      void refresh();
+      timer = window.setInterval(() => {
+        if (!document.hidden) void refresh();
+      }, 5000);
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        if (timer !== undefined) window.clearInterval(timer);
+        timer = undefined;
+      } else if (timer === undefined) {
+        startPolling();
+      }
+    };
+
+    if (!document.hidden) startPolling();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (timer !== undefined) window.clearInterval(timer);
+    };
   }, [refresh]);
 
   const notify = useCallback((next: Omit<Toast, "id">) => {
@@ -180,7 +213,10 @@ export default function App() {
     wasPresenting.current = standup;
   }, [standup]);
 
-  const agents = useMemo(() => agentNames(tasks, actor), [tasks, actor]);
+  const agents = useMemo(
+    () => new Set(actors.filter((a) => a.kind === "agent").map((a) => a.id)),
+    [actors],
+  );
   const assignees = useMemo(
     () =>
       [...new Set(tasks.map((t) => t.assignee).filter(Boolean))].sort((a, b) =>
@@ -195,12 +231,15 @@ export default function App() {
   const q = query.trim().toLowerCase();
   const filtersActive = Boolean(q || assignee);
   const matches = (t: Task, scope: View = view) =>
-    (scope !== "mine" || t.assignee === actor.id) &&
+    (scope !== "mine" ||
+      (workspaceInfoLoaded && t.assignee === actor.id)) &&
     (!assignee ||
       (assignee === UNASSIGNED ? !t.assignee : t.assignee === assignee)) &&
     (!q || `${t.id} ${t.title} ${t.description}`.toLowerCase().includes(q));
   const scoped = tasks.filter(
-    (t) => view !== "mine" || t.assignee === actor.id,
+    (t) =>
+      view !== "mine" ||
+      (workspaceInfoLoaded && t.assignee === actor.id),
   );
   const visible = tasks.filter((t) => matches(t));
 
@@ -367,7 +406,7 @@ export default function App() {
               >
                 <Icon name={icon} />
                 <span>{viewTitles[id]}</span>
-                {id === "mine" && (
+                {id === "mine" && workspaceInfoLoaded && (
                   <small
                     aria-label={`${tasks.filter((t) => t.assignee === actor.id).length} tasks`}
                   >
@@ -414,7 +453,7 @@ export default function App() {
                 className={`connection-dot ${sync.connected ? "online" : ""}`}
               />
               <span>
-                {actor.id} · {actor.kind}
+                {workspaceInfoLoaded ? `${actor.id} · ${actor.kind}` : ""}
               </span>
             </div>
           </div>
@@ -455,9 +494,11 @@ export default function App() {
               </h1>
               <p>
                 {view === "agents"
-                  ? "Agents inferred from task assignments and claims."
+                  ? "Known agents from the workspace roster. A listed agent is not necessarily connected or running."
                   : view === "mine"
-                    ? `Tasks assigned to ${actor.id}.`
+                    ? workspaceInfoLoaded
+                      ? `Tasks assigned to ${actor.id}.`
+                      : ""
                     : `All active tasks in ${workspace}.`}
               </p>
             </header>

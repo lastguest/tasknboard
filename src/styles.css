@@ -733,6 +733,12 @@ footer {
   width: 100%;
   margin-top: 2px;
 }
+.comment-count {
+  margin-left: auto;
+  color: var(--subtle);
+  font-size: 11px;
+  white-space: nowrap;
+}
 .assignee {
   display: inline-flex;
   align-items: center;

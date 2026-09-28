@@ -61,3 +61,15 @@ is mounted. Participant order is frozen on entry; task data remains live.
 The shared Board hides creation controls and disables drag/drop in this mode.
 Highlights and blockers are optional task metadata, validated and audited by the
 same transactional store; exposed through HTTP and MCP as `set_standup_notes`.
+
+## Task metadata
+
+The [task metadata contract](contracts/task-metadata.md) defines the server actor
+roster and derived comment counts. SQLite stores explicit actor kinds; assignee
+names remain free text. The UI never guesses kinds from names or claims.
+Comment counts come from persisted comment events. Existing version, lease,
+and authorization checks still apply.
+
+The UI loads WebMCP validation only when the browser exposes
+`document.modelContext`. Ordinary browsers do not download that chunk. Polling
+pauses while the document is hidden and resumes with an immediate refresh.

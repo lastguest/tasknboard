@@ -30,7 +30,13 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
     assert.notEqual(r.isError, true, JSON.stringify(r));
     return JSON.parse(r.content[0].text);
   };
+  const info = await call("workspace_info", {});
+  assert.equal(info.schemaVersion, 2);
+  assert.ok(
+    info.actors.some((entry) => entry.id === "test-agent" && entry.kind === "agent"),
+  );
   let task = await call("create_task", { title: "Real protocol test" });
+  assert.equal(task.commentCount, 0);
   task = await call("claim_task", {
     id: task.id,
     expectedVersion: task.version,
@@ -49,6 +55,9 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
     expectedVersion: task.version,
     body: "Implementation ready",
   });
+  assert.equal(task.commentCount, 1);
+  assert.equal((await call("get_task", { id: task.id })).commentCount, 1);
+  assert.equal((await call("list_tasks", {})).tasks[0].commentCount, 1);
   task = await call("submit_review", {
     id: task.id,
     expectedVersion: task.version,

@@ -5,12 +5,12 @@ import {
   doneLocked,
   labelTone,
   priorities,
-  relativeTime,
   statusTitle,
   type Status,
   type Task,
 } from "./types";
 import { Icon } from "./Icons";
+import { formatUtcTimestamp } from "./formatting";
 
 export function Avatar({ name, agent }: { name: string; agent: boolean }) {
   const initials = name
@@ -66,14 +66,15 @@ export function Label({ label }: { label: string }) {
 export function ClaimChip({ task }: { task: Task }) {
   const lease = activeLease(task);
   if (!lease) return null;
+  const expiry = formatUtcTimestamp(lease.expiresAt);
   return (
     <span
       className="claim-chip"
-      title={`Claimed by ${lease.actor} until ${new Date(lease.expiresAt).toLocaleTimeString()}`}
+      title={`Claimed by ${lease.actor} until ${expiry}`}
     >
       <Icon name="lock" size={12} />
       <span>
-        Claimed by {lease.actor} · expires {relativeTime(lease.expiresAt)}
+        Claimed by {lease.actor} · expires {expiry}
       </span>
     </span>
   );
@@ -137,6 +138,7 @@ export function TaskCard({
   task: Task;
   pending?: Status;
 }) {
+  const commentLabel = `${task.commentCount} ${task.commentCount === 1 ? "comment" : "comments"}`;
   const signal = task.standup?.blocker
     ? "has-blocker"
     : task.standup?.highlight
@@ -145,6 +147,7 @@ export function TaskCard({
   return (
     <article
       className={`task-card ${signal} ${pending ? "is-pending" : ""}`}
+      aria-label={`${task.id}: ${task.title}, ${commentLabel}`}
       draggable={Boolean(onMove) && !pending}
       onDragStart={(e) => {
         e.dataTransfer.setData("text/plain", task.id);
@@ -167,7 +170,7 @@ export function TaskCard({
           type="button"
           className="card-open"
           onClick={() => onOpen(task)}
-          aria-label={`${task.id}: ${task.title}${presentation ? ", edit stand-up notes" : ""}`}
+          aria-label={`${task.id}: ${task.title}, ${commentLabel}${presentation ? ", edit stand-up notes" : ""}`}
         >
           {task.title}
         </button>
@@ -187,6 +190,9 @@ export function TaskCard({
       )}
       <div className="card-bottom">
         <Assignee name={task.assignee} agent={agents.has(task.assignee)} />
+        <span className="comment-count" aria-hidden="true">
+          {commentLabel}
+        </span>
       </div>
       <ClaimChip task={task} />
       {onMove && !presentation && (
@@ -220,6 +226,7 @@ export function Board({
           <thead>
             <tr>
               <th scope="col">Task</th>
+              <th scope="col">Comments</th>
               <th scope="col">Status</th>
               <th scope="col">Priority</th>
               <th scope="col">Assignee</th>
@@ -235,10 +242,17 @@ export function Board({
                     type="button"
                     className="list-open"
                     onClick={() => onOpen(t)}
+                    aria-label={`${t.id}: ${t.title}, ${t.commentCount} ${t.commentCount === 1 ? "comment" : "comments"}`}
                   >
                     {t.title}
                   </button>
                   <ClaimChip task={t} />
+                </td>
+                <td
+                  data-label="Comments"
+                  aria-label={`${t.commentCount} ${t.commentCount === 1 ? "comment" : "comments"}`}
+                >
+                  {t.commentCount}
                 </td>
                 <td data-label="Status">
                   {onMove ? (

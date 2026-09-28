@@ -1,101 +1,102 @@
-# Verification — TasknBoard 0.1
+# TasknBoard verification
 
-The original Relay 0.1 package supplied the checks below. The final section records the GitHub import and name change.
+Date: 2026-09-28. Branch: `ui-workflows`.
 
-## Automated checks
+## Scope and isolation
 
-`npm run build` passes (TypeScript and Vite).
-`npm test`: **9 passed, 0 failed**.
+This record covers the UI workflows and follow-up work in `TODO.md`.
+Tests use temporary SQLite databases outside `data/`. They do not seed or reset
+an existing workspace. No deployment or merge is part of this work.
 
-Covered: exclusive claims; actor ownership; renewal and review lifecycle;
-lease expiration/takeover; stale versions; rollback/event consistency;
-input validation and unsafe artifact URLs; archive/export rules;
-persistence across connections and reopen; real MCP SDK initialization,
-discovery and tool calls; authenticated HTTP, origin rejection,
-remote MCP bridge and human completion.
+## Automated results
 
-UI production build: 248.19 kB JavaScript, 76.80 kB gzip;
-20.00 kB CSS, 5.24 kB gzip. These are build output sizes, not memory benchmarks.
+| Command | Result |
+| --- | --- |
+| `npm test` | 13 passed, 0 failed |
+| `npm run build` | TypeScript and Vite passed |
+| `npm run test:ui` | 13 passed, 0 failed |
+| `git diff --check` | Passed |
 
-## Browser checks
+Node.js: 26.8.1. Playwright: 1.63.0. Chromium: 153.0.8010.12.
+Browser tests use the production bundle through `server/http.mjs`.
+Desktop tests use 1280 × 720. The phone test uses 375 × 812.
 
-The integrated cloud browser could not access localhost (`ERR_BLOCKED_BY_CLIENT`).
-Used local Playwright with Chromium distributed through @sparticuz/chromium.
-The ordinary Playwright browser download failed; no authentication or network
-policy was bypassed. Browser and service ran in the same isolated test process
-network environment.
+The backend suite checks authorization, version conflicts, leases, rollback,
+review, archives, persistence, stand-up notes, HTTP, real stdio MCP, and WebMCP.
+New checks cover explicit actor kinds, kind conflicts, cross-connection roster
+persistence, schema version 2 exports, token exclusion, and event-derived counts.
 
-Desktop 1536 × 1024 and mobile 390 × 844. Verified real create → edit status →
-comment → reload persistence → search → list → archive flow, and mobile task
-dialog access. No JavaScript runtime errors observed. Mobile New task clipping
-was found and fixed by wrapping the toolbar. A test's exact label selector was
-corrected to match the native select's accessible name.
+The browser suite checks:
 
-## Visual comparison
+- Wrong and valid Settings tokens; task creation, search, editing, comments,
+  agent review, human completion, archiving, and JSON export.
+- Matching Board/List/My tasks filters and counts. An unknown assignee named
+  "Helpful bot" receives no agent badge. Visible comment counts agree.
+- Status-menu updates and a server-rejected drag to Done.
+- A stale save that keeps the draft and merges untouched fields.
+- A claimed task that rejects an edit and keeps the draft.
+- Stand-up participant order, arrow keys, Home, filter reset, claimed-task
+  notes, fixed order after a new assignee appears, and workspace restoration.
+- Escape closing the notes dialog before exiting stand-up.
+- Seven injected-registry WebMCP tools and a write during an in-flight read.
+  The board refreshes again and shows the new task.
+- Hidden-tab polling pause and immediate refresh on visibility change.
+  This test controls document visibility and the browser clock.
+- No placeholder My tasks identity before the workspace response.
+- No WebMCP chunk request in an unsupported browser.
+- Phone bottom navigation, full-screen dialogs, and no page-wide horizontal
+  scroll. Tab stays in the dialog; Escape restores focus.
+- Keyboard-only access to the main views and task, notes, Settings, and help
+  dialogs. This found and fixed native-dialog focus escape at the Tab boundary.
+- Retained review evidence explained after Needs changes.
 
-Concept inspected with view_image:
-`generated_images/exec-6551cf39-e8ce-4a72-a8d7-bde0e69987c7.png`
-(in the conversation workspace, also shown in the conversation).
-Latest actual screenshots inspected with view_image: `relay-desktop.png`,
-`relay-detail.png` and `relay-mobile.png`.
+## Bundle results
 
-Five checked relationships:
+| Asset | Before | After | After gzip |
+| --- | ---: | ---: | ---: |
+| Main JavaScript | 368.36 kB | 278.05 kB | 85.17 kB |
+| Optional WebMCP JavaScript | Included in main | 92.65 kB | 26.73 kB |
+| CSS | 24.62 kB | 24.71 kB | 6.02 kB |
 
-1. Dark sidebar, light active navigation and lower workspace settings.
-2. Four-column kanban anatomy and open lower canvas.
-3. Task identifier/title/label/assignee hierarchy.
-4. Charcoal surfaces, quiet borders, mint primary action and status colors.
-5. Product heading, board/list tabs, assignee filter and toolbar spacing.
+The main bundle previously compressed to 111.44 kB. Ordinary browsers now avoid
+the optional WebMCP validation chunk. These are build sizes, not memory metrics.
 
-Increased desktop card typography, avatar size and card height after comparison.
-Main heading, subtitle, navigation and column labels preserve the concept copy.
-Intentional differences: simplified geometric brand mark; no fake macOS window
-controls; added Studio workspace identity; real connection status instead of a
-hardcoded local-mode claim; real demo actor names; no invented comment counts;
-column creation buttons instead of inert ellipses. Native select treatment and
-system font rendering differ from the raster concept. Mobile uses horizontal
-kanban scrolling and a two-row toolbar.
+## Review
 
-The implementation was compared directly with the concept and preserves its
-core layout and visual direction. It is not a pixel-identical reproduction,
-and the concept has not been separately approved by the user.
+The independent source review found a missing visible Board comment count.
+That issue is fixed. The review also reproduced a concurrent database write and
+confirmed that task versions and comment events use one read snapshot.
 
-## Limits of verification
+## Native browser evidence and screenshots
 
-No production load/latency benchmark, accessibility audit, penetration test,
-third-party desktop MCP host test, deployment or native shell test was performed.
-The shared-server tests used loopback and disposable credentials; external TLS
-termination remains deployment configuration. Drag/drop uses native HTML DnD;
-the tested keyboard-accessible status select provides the same server command.
+The production app ran in Chromium 153.0.8010.12 with
+`--enable-blink-features=WebMCP,WebMCPTesting`, on a secure loopback origin.
+No registry was injected for this check. Native `document.modelContext.getTools()`
+returned all seven tools. Native `executeTool` created a task, and the board
+showed it. Chrome 153 accepted a JSON string as the tool input.
 
-## Stand-up mode verification
+Fullscreen entry succeeded. Escape left fullscreen and stand-up. A rapid Escape
+initially exposed a pending-entry race. The fix exits fullscreen when a pending
+request finishes after stand-up closes. A regression test checks both paths.
+The controlled race test uses the real fullscreen operation and delays its
+completion notification. No JavaScript page errors appeared in the live check.
 
-Production build tested at http://127.0.0.1:14320 with a disposable SQLite
-workspace, on Chromium/Playwright at 1536×960 and 390×844. The integrated browser
-localhost blocker from the original verification still determines the local
-fallback. No new browser dependency was installed for this change.
+Current screenshots use an isolated workspace populated through real commands.
+Desktop captures are 1440 × 900; the phone capture is 375 × 812. All five were
+visually inspected. Board scrolling stays inside the phone workspace.
 
-Verified: entry ignores prior search and opens the whole team; sidebar, search,
-footer and creation buttons are absent; drag/drop is disabled; participant
-navigation filters tasks; highlight/blocker filters reset on turn change;
-notes save and survive reload; stale notes are rejected without losing the
-newer server version; arrows and Home navigate; Escape closes a dialog before
-exiting; exit restores prior board filters; mobile exit/navigation stay visible;
-connection loss shows a stale-data warning. No JavaScript runtime errors observed.
+- [Board](images/tasknboard-board.png)
+- [Task details](images/tasknboard-details.png)
+- [Stand-up team](images/tasknboard-standup-team.png)
+- [Stand-up participant](images/tasknboard-standup-person.png)
+- [Phone](images/tasknboard-mobile.png)
 
-Screenshots inspected: relay-standup-team.png, relay-standup-person.png, and
-relay-standup-mobile.png (delivered separately from source). Native textarea
-accessible names were made explicit after the first browser check.
+## Remaining manual checks
 
-Domain tests cover note validation, clearing, audit events, preserving agent
-claims, stale writes, and agent authorization. The real MCP client test includes
-set_standup_notes and discovery of all 11 tools.
+Physical touch dragging requires a phone or tablet. Browser touch emulation
+cannot establish physical device behavior. The Status menu remains the tested
+alternative to dragging.
 
-Google Meet screen capture and browser fullscreen behavior were not exercised
-in an actual meeting. No meeting synchronization is implemented.
-
-## GitHub import and name change
-
-The source package was imported into `lastguest/tasknboard` without its generated `dist/` files. The supplied concept, desktop, and stand-up images are in `docs/images/`. Active product names, environment variables, storage keys, and new task IDs use TasknBoard and `TNB-`.
-
-On 2026-09-28, `npm ci` found no vulnerabilities. `npm test` passed all 9 tests. `npm run build` passed. A local production server served the renamed board from a disposable SQLite database. In Safari, the board showed all 7 seeded tasks, stand-up opened the team overview, the next button selected Alex, and exit returned to the normal board.
+VoiceOver requires a manual screen-reader pass. DOM names, keyboard focus
+checks, and live-region attributes do not establish the spoken experience.
+These two checks remain open.

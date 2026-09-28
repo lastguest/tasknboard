@@ -14,6 +14,9 @@ if (
   throw new Error("Remote binding requires TASKNBOARD_TOKENS");
 const store = createStore(dbPath),
   root = resolve("dist");
+store.registerActors(
+  Object.keys(tokens).length ? Object.values(tokens) : [localActor],
+);
 const json = (res, status, value) => {
   res.writeHead(status, {
     "Content-Type": "application/json",

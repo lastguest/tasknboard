@@ -17,6 +17,7 @@ export type Task = {
   assignee: string;
   label: string;
   version: number;
+  commentCount: number;
   lease: null | { actor: string; expiresAt: number };
   updatedAt: string;
   standup?: { highlight: string; blocker: string };
@@ -24,6 +25,12 @@ export type Task = {
   events?: TaskEvent[];
 };
 export type Actor = { id: string; kind: "human" | "agent" };
+export type WorkspaceInfo = {
+  name: string;
+  actor: Actor;
+  actors: Actor[];
+  schemaVersion: 2;
+};
 export const columns: { id: Status; title: string; color: string }[] = [
   { id: "backlog", title: "Backlog", color: "#88909e" },
   { id: "in_progress", title: "In progress", color: "#e8bd5a" },
@@ -41,22 +48,6 @@ export const priorities: { id: Priority; title: string }[] = [
 export const activeLease = (t: Task, now = Date.now()) =>
   t.lease && t.lease.expiresAt > now ? t.lease : null;
 
-/**
- * Assignees are free text, so agent identity is inferred: names that hold or
- * held a claim, or that look like an agent. This is not connection telemetry.
- */
-export function agentNames(tasks: Task[], actor: Actor) {
-  const names = new Set<string>();
-  for (const t of tasks) {
-    if (t.lease && !(actor.kind === "human" && t.lease.actor === actor.id))
-      names.add(t.lease.actor);
-    if (/\b(agent|codex|claude|bot|gpt|copilot)\b/i.test(t.assignee))
-      names.add(t.assignee);
-  }
-  if (actor.kind === "agent") names.add(actor.id);
-  return names;
-}
-
 /** Only render review artifacts that are plain web links. */
 export function safeUrl(value: string | undefined) {
   if (!value) return "";
@@ -66,13 +57,6 @@ export function safeUrl(value: string | undefined) {
   } catch {
     return "";
   }
-}
-
-export function relativeTime(ms: number, now = Date.now()) {
-  const diff = Math.round((ms - now) / 60000);
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-  if (Math.abs(diff) < 60) return rtf.format(diff, "minute");
-  return rtf.format(Math.round(diff / 60), "hour");
 }
 
 /** A stable colour slot for free-text labels, never used as a class name. */

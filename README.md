@@ -2,7 +2,7 @@
 
 A lightweight Kanban workspace for small teams and coding agents. **Version 0.1 is a working foundation**, not a finished Linear replacement.
 
-![Stand-up mode showing the team board](docs/images/relay-standup-team.png)
+![Stand-up mode showing the team board](docs/images/tasknboard-standup-team.png)
 
 React + Vite, Node.js 24, SQLite and an MCP stdio server. One application core owns validation, leases, optimistic concurrency and activity events. No cloud AI dependency.
 
@@ -25,6 +25,17 @@ npm run seed
 ```
 
 Development: keep `npm start` running and run `npm run dev` in another terminal; open http://127.0.0.1:5173. The Vite proxy uses the same API. `npm test` runs domain, persistence, MCP protocol and authenticated HTTP tests.
+
+Browser regression tests use Playwright and the production HTTP service:
+
+```bash
+npx playwright install chromium
+npm run build
+npm run test:ui
+```
+
+The browser suite creates temporary SQLite files outside `data/` and removes them
+when the tests finish. It does not use the user's workspace database.
 
 Keyboard: **N** new task, **Cmd/Ctrl K** search, **F** assignee filter, **?** shortcuts, **Esc** close dialog. Drag between columns, or use the Status menu on each card or list row (the keyboard and touch alternative). Every move is validated by the server; a rejected move stays in place with an explanation. Human review is required before Done: an In review task shows **Mark Done** and **Needs changes** in its details. The interface is English in this version.
 
@@ -50,7 +61,8 @@ uses the available screen, with larger cards and independent column scrolling.
 The speaking order is an alphabetical snapshot of assignees when the session starts,
 including coding agents, with Unassigned last. There is no membership directory yet:
 people with no tasks are absent. Re-enter stand-up to include newly assigned owners.
-Task content still refreshes every five seconds, without changing the selected turn.
+Task content refreshes every five seconds while the tab is visible. Returning to
+the tab refreshes it immediately, without changing the selected turn.
 A lost connection is shown explicitly instead of presenting a stale board as current.
 Stand-up is a local presentation view, not a synchronized meeting or Google Meet integration.
 
@@ -172,12 +184,14 @@ No direct remote Streamable HTTP MCP endpoint is included yet. The bridge requir
 - Transactions keep each task mutation and its activity event together.
 - Optimistic task versions reject stale updates.
 - Claims serialize across independent SQLite connections.
-- Polling refreshes the board every five seconds; an open editor retains its version and can encounter a conflict.
+- Polling refreshes the visible board every five seconds and pauses in hidden tabs. Returning to the tab refreshes immediately. An open editor retains its draft and version.
 - No offline mutation queue. Disconnected edits fail visibly.
 - Archive hides a task from normal lists without deleting it. No restore UI yet.
 - Settings exports all tasks and activity as JSON. JSON import is not implemented. For full recovery, stop the service and MCP clients and copy the SQLite file, or use SQLite's online backup mechanism. Never copy only a live `.sqlite` file while WAL writes are active.
 - Credentials are workspace-wide human/agent roles. No SSO, OAuth, project permissions, invitations or multi-workspace tenancy yet.
-- Task assignees are free text. Agent roster is inferred from assignments/claims, not live telemetry.
+- Task assignees are free text. The server roster records explicit human and agent identities from trusted configuration and authenticated commands. Unknown assignees remain neutral. The roster is not live telemetry.
+- Cards and list rows show counts from persisted comment events. See the [task metadata contract](docs/contracts/task-metadata.md).
+- Shared timestamps use an explicit English format and UTC. Review evidence stays available when a task needs changes, with an explanation that it belongs to the earlier submission.
 - No native shell is included; the frontend/backend boundary is ready for a shell integration.
 
 ## Repository
@@ -197,4 +211,4 @@ TasknBoard is **source available** under the [PolyForm Noncommercial License 1.0
 
 Issues and pull requests are welcome. Code contributions must be offered under the project license.
 
-The images in `docs/images/` show the original Relay v0.1 design and implementation before the TasknBoard name change.
+The images in `docs/images/` show the current interface using an isolated test workspace. See [verification evidence](docs/VERIFICATION.md) for checks and remaining manual tests.

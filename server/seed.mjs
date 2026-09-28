@@ -4,6 +4,14 @@ const store = createStore(dbPath),
   actor = { id: "you", kind: "human" };
 if (store.execute("list_tasks", {}, actor).total)
   throw new Error("Demo seed only works on an empty workspace");
+store.registerActors([
+  actor,
+  { id: "Morgan", kind: "human" },
+  { id: "Priya", kind: "human" },
+  { id: "Alex", kind: "human" },
+  { id: "Taylor", kind: "human" },
+  { id: "TasknBoard Agent", kind: "agent" },
+]);
 const samples = [
   ["Define workspace architecture", "Infrastructure", "high", "you", "backlog"],
   ["Add keyboard navigation", "UX", "medium", "Morgan", "in_progress"],

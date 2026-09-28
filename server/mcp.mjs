@@ -21,6 +21,7 @@ const actor = {
   kind: "agent",
 };
 const store = remote ? null : createStore(dbPath);
+store?.registerActors([actor]);
 const descriptions = {
   workspace_info:
     "Read workspace identity, authenticated actor and lease duration.",

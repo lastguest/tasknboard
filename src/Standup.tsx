@@ -200,6 +200,7 @@ export function Standup({
     Boolean(document.fullscreenElement),
   );
   const content = useRef<HTMLDivElement>(null);
+  const exitRequested = useRef(false);
   const stage = stages[index];
   const scope = tasks.filter(
     (t) => stage.assignee === undefined || t.assignee === stage.assignee,
@@ -233,6 +234,7 @@ export function Standup({
     setError("");
   }, [index]);
   function exit() {
+    exitRequested.current = true;
     if (document.fullscreenElement)
       void document.exitFullscreen().catch(() => {});
     onExit();
@@ -294,11 +296,17 @@ export function Standup({
   async function toggleFullscreen() {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
-      else await document.documentElement.requestFullscreen();
+      else {
+        await document.documentElement.requestFullscreen();
+        // Escape can close stand-up before the browser finishes entering fullscreen.
+        if (exitRequested.current && document.fullscreenElement)
+          await document.exitFullscreen();
+      }
     } catch {
-      setError(
-        "Fullscreen is unavailable here. Stand-up mode is still active.",
-      );
+      if (!exitRequested.current)
+        setError(
+          "Fullscreen is unavailable here. Stand-up mode is still active.",
+        );
     }
   }
 

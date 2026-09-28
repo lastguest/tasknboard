@@ -4,7 +4,6 @@ import {
   columns,
   doneLocked,
   priorities,
-  relativeTime,
   safeUrl,
   statusTitle,
   type Actor,
@@ -14,6 +13,7 @@ import {
   type TaskEvent,
 } from "./types";
 import { ApiError, command, errorOf, token } from "./api";
+import { formatUtcTimestamp } from "./formatting";
 import { Assignee, Label } from "./Board";
 import { Icon } from "./Icons";
 
@@ -65,6 +65,32 @@ export function Dialog({
       aria-labelledby={titleId}
       className={`dialog ${wide ? "wide" : ""} ${className}`}
       onKeyDown={(e) => {
+        if (e.key === "Tab" && !e.defaultPrevented) {
+          const dialog = e.currentTarget;
+          const controls = Array.from(
+            dialog.querySelectorAll<HTMLElement>(
+              'a[href],button,input,select,textarea,[tabindex],[contenteditable="true"]',
+            ),
+          ).filter(
+            (element) =>
+              element.tabIndex >= 0 &&
+              !element.matches(":disabled") &&
+              !element.closest("[hidden],[inert]") &&
+              element.closest("dialog") === dialog &&
+              element.getClientRects().length > 0 &&
+              getComputedStyle(element).visibility === "visible",
+          );
+          const first = controls[0];
+          const last = controls[controls.length - 1];
+          const active = document.activeElement;
+          if (
+            !controls.includes(active as HTMLElement) ||
+            (e.shiftKey ? active === first : active === last)
+          ) {
+            e.preventDefault();
+            (e.shiftKey ? last : first)?.focus();
+          }
+        }
         // Handle Escape ourselves so a draft can ask before it is discarded.
         if (e.key === "Escape") {
           e.preventDefault();
@@ -222,7 +248,7 @@ function Activity({ events }: { events: TaskEvent[] }) {
               <strong>{e.actor}</strong>
               <span>{kindText[e.kind] ?? e.kind.replaceAll("_", " ")}</span>
               <time dateTime={e.createdAt}>
-                {new Date(e.createdAt).toLocaleString()}
+                {formatUtcTimestamp(e.createdAt)}
               </time>
             </div>
             {detail && <p className="event-body">{detail}</p>}
@@ -790,8 +816,7 @@ export function TaskEditor({
                 <>
                   <p>
                     Claimed by <strong>{lease.actor}</strong>, expires{" "}
-                    {relativeTime(lease.expiresAt)} (
-                    {new Date(lease.expiresAt).toLocaleTimeString()}).
+                    {formatUtcTimestamp(lease.expiresAt)}.
                   </p>
                   {foreignLease && (
                     <p className="small warn">
@@ -804,7 +829,7 @@ export function TaskEditor({
               ) : (
                 <p className="small">
                   Claim by {current.lease.actor} expired at{" "}
-                  {new Date(current.lease.expiresAt).toLocaleTimeString()}.
+                  {formatUtcTimestamp(current.lease.expiresAt)}.
                 </p>
               )}
             </section>
@@ -814,6 +839,12 @@ export function TaskEditor({
               </h3>
               {current.review ? (
                 <>
+                  {current.status === "in_progress" && (
+                    <p className="small">
+                      Needs changes keeps this review evidence on the task. It
+                      records the earlier submission for context.
+                    </p>
+                  )}
                   <p className="small">Submitted by {current.review.actor}</p>
                   <p className="review-summary">{current.review.summary}</p>
                   {artifact ? (
