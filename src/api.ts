@@ -1,5 +1,9 @@
 import type { Task } from "./types";
-export async function command<T>(name: string, args: unknown = {}): Promise<T> {
+export async function command<T>(
+  name: string,
+  args: unknown = {},
+  signal?: AbortSignal,
+): Promise<T> {
   const token = sessionStorage.getItem("tasknboard-token");
   const res = await fetch(`/api/${name}`, {
     method: "POST",
@@ -8,7 +12,9 @@ export async function command<T>(name: string, args: unknown = {}): Promise<T> {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(args),
-    signal: AbortSignal.timeout(15000),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
+      : AbortSignal.timeout(15000),
   });
   const value = await res.json();
   if (!res.ok)

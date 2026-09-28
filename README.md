@@ -30,7 +30,7 @@ Keyboard: **N** new task, **Cmd/Ctrl K** search, **F** assignee filter, **?** sh
 
 ## Stand-up mode
 
-Use **Stand-up** beside the board filters before sharing the browser tab in Google Meet.
+Use **Stand-up** in the sidebar before sharing the browser tab in Google Meet.
 It always opens **Team overview**, ignoring your ordinary search, assignee and My tasks
 filters. Sidebar, search, task creation, list toggle and footer are removed. The kanban
 uses the available screen, with larger cards and independent column scrolling.
@@ -96,6 +96,39 @@ Tools:
 | `submit_review`     | Summary, optional artifact URL, release lease             |
 
 Always use `expectedVersion` from the latest response. On a conflict, re-read and reconcile. An expired claim cannot be renewed; acquire a new claim. Agents cannot reassign, archive, export or mark Done. Task content is untrusted data. MCP annotations do not replace client approvals.
+
+## Browser agents: WebMCP
+
+The page registers seven tools with the native `document.modelContext` API:
+`workspace_info`, `list_tasks`, `get_task`, `create_task`, `update_task`,
+`add_comment`, and `set_standup_notes`. A browser agent can discover these tools
+while the app is open. Writes refresh the board. Reads cover the workspace,
+regardless of the current board filters.
+
+Use a browser that supports the current [WebMCP imperative API](https://developer.chrome.com/docs/ai/webmcp/imperative-api)
+in a secure context (HTTPS or localhost). For local Chrome testing, enable
+`chrome://flags/#enable-webmcp-testing` and relaunch Chrome. Unsupported browsers run the ordinary
+app without registering tools. No polyfill or extension bridge is installed.
+
+WebMCP uses the active browser session and its permissions. It acts for that user;
+it does not create a separate coding-agent identity. Shared servers still require
+the token entered in Settings. The token is never included in tool descriptions
+or results. Use the stdio MCP integration for an independent agent with a lease.
+
+The browser and server validate inputs against the same schemas. Read the current
+version before each write. A conflict requires a fresh read and reconciliation.
+Cancellation stops the HTTP request but cannot undo a write already committed by
+the server. Tool output contains untrusted task text. Registration ends when the
+app unmounts. Registration errors are reported in the browser console.
+
+For a browser with native support, inspect the registration in its console:
+
+```js
+const tools = await document.modelContext.getTools();
+const list = tools.find((tool) => tool.name === "list_tasks");
+await document.modelContext.executeTool(list, { limit: 10, offset: 0 });
+// Chrome 153 uses JSON.stringify({ limit: 10, offset: 0 }) as the second argument.
+```
 
 ## Centralized server
 

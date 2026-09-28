@@ -4,6 +4,7 @@ import { Dialog, Settings, TaskEditor } from "./Dialogs";
 import { Icon } from "./Icons";
 import { command, loadTasks } from "./api";
 import { Standup } from "./Standup";
+import { registerWebMCP, type ModelContext } from "./webmcp";
 import type { Actor, Task, Status } from "./types";
 export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]),
@@ -22,28 +23,43 @@ export default function App() {
     [lastSync, setLastSync] = useState("");
   const search = useRef<HTMLInputElement>(null),
     filter = useRef<HTMLSelectElement>(null),
-    running = useRef(false);
-  const refresh = useCallback(async () => {
-    if (running.current) return;
-    running.current = true;
-    try {
-      const [next, info] = await Promise.all([
-        loadTasks(),
-        command<{ actor: Actor }>("workspace_info"),
-      ]);
-      setTasks(next);
-      setActor(info.actor);
-      setConnected(true);
-      setLastSync(new Date().toLocaleTimeString());
-      setError("");
-    } catch (e) {
-      setConnected(false);
-      setError((e as Error).message);
-    } finally {
-      setLoaded(true);
-      running.current = false;
-    }
+    running = useRef<Promise<void> | null>(null);
+  const refresh = useCallback(() => {
+    const next = (running.current ?? Promise.resolve()).then(async () => {
+      try {
+        const [next, info] = await Promise.all([
+          loadTasks(),
+          command<{ actor: Actor }>("workspace_info"),
+        ]);
+        setTasks(next);
+        setActor(info.actor);
+        setConnected(true);
+        setLastSync(new Date().toLocaleTimeString());
+        setError("");
+      } catch (e) {
+        setConnected(false);
+        setError((e as Error).message);
+      } finally {
+        setLoaded(true);
+      }
+    });
+    running.current = next;
+    void next.finally(() => {
+      if (running.current === next) running.current = null;
+    });
+    return next;
   }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    const context = (document as Document & { modelContext?: ModelContext })
+      .modelContext;
+    void registerWebMCP(context, command, refresh, controller.signal).catch(
+      (error) => {
+        console.error("WebMCP tool registration failed", error);
+      },
+    );
+    return () => controller.abort();
+  }, [refresh]);
   useEffect(() => {
     refresh();
     const timer = setInterval(refresh, 5000);
