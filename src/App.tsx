@@ -66,10 +66,10 @@ import {
 } from "./types";
 
 type View = "board" | "mine" | "agents" | "epics" | "epic" | "views" | "saved" | "pulls";
-type Editor =
-  | null
-  | { mode: "create"; boardId: string; epic?: string }
-  | { mode: "edit"; task: Task };
+/** The new-task dialog. Existing tasks open in tabs. */
+type Editor = null | { boardId: string; epic?: string };
+/** An open task tab. A new closeRequest value asks its editor to close. */
+type TaskTab = { task: Task; closeRequest: number };
 type EpicDialog = null | { epic: Epic | null };
 type ViewDialog =
   | null
@@ -144,6 +144,14 @@ export default function App() {
   const [assignee, setAssignee] = useState("");
   const [conditions, setConditions] = useState<ViewCondition[]>([]);
   const [editor, setEditor] = useState<Editor>(null);
+  const [tabs, setTabs] = useState<TaskTab[]>([]);
+  /** The task ID of the active tab; empty for the page tab. */
+  const [activeTab, setActiveTab] = useState("");
+  // Archiving closes a tab after an await, so read the latest tabs here.
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
   const [opening, setOpening] = useState("");
   const [settings, setSettings] = useState(false);
   const [settingsPage, setSettingsPage] = useState<SettingsPage>();
@@ -187,6 +195,7 @@ export default function App() {
       setViewError(null);
     }
     setPage(next);
+    setActiveTab("");
   };
   const saveAsRef = useRef<() => void>(() => {});
   const search = useRef<HTMLInputElement>(null);
@@ -408,9 +417,10 @@ export default function App() {
         e.preventDefault();
         const boardId = selectedBoardRef.current;
         if (boardId)
-          setEditor({ mode: "create", boardId, epic: view === "epic" ? epicId : undefined });
+          setEditor({ boardId, epic: view === "epic" ? epicId : undefined });
       } else if (e.key === "f" || e.key === "F") {
         e.preventDefault();
+        setActiveTab("");
         if (overviews.includes(view)) setView("board");
         requestAnimationFrame(() => filter.current?.focus());
       } else if (e.key === "?") {
@@ -524,7 +534,6 @@ export default function App() {
   const newTask = () => {
     if (!currentBoard) return;
     setEditor({
-      mode: "create",
       boardId: currentBoard.id,
       epic: view === "epic" ? epicId : undefined,
     });
@@ -701,6 +710,10 @@ export default function App() {
 
   async function openTaskById(id: string) {
     if (opening) return;
+    if (tabs.some((tab) => tab.task.id === id)) {
+      setActiveTab(id);
+      return;
+    }
     const request = ++boardSelectionEpoch.current;
     const generation = boardDataGeneration.current;
     setOpening(id);
@@ -728,12 +741,13 @@ export default function App() {
           "BOARD_NOT_FOUND",
           404,
         );
-      if (selectedBoardRef.current !== task.boardId) selectBoard(task.boardId);
-      setView("board");
-      setEditor({
-        mode: "edit",
-        task,
-      });
+      // A former key resolves to the task's current ID, which may be open already.
+      setTabs((list) =>
+        list.some((tab) => tab.task.id === task.id)
+          ? list
+          : [...list, { task, closeRequest: 0 }],
+      );
+      setActiveTab(task.id);
     } catch (e) {
       if (request === boardSelectionEpoch.current)
         notify({
@@ -749,6 +763,31 @@ export default function App() {
 
   async function openTask(task: Task) {
     return openTaskById(task.id);
+  }
+
+  function closeTab(id: string) {
+    const list = tabsRef.current;
+    const index = list.findIndex((tab) => tab.task.id === id);
+    if (index < 0) return;
+    setTabs((current) => current.filter((tab) => tab.task.id !== id));
+    if (activeTabRef.current !== id) return;
+    const next = (list[index + 1] ?? list[index - 1])?.task.id ?? "";
+    setActiveTab(next);
+    requestAnimationFrame(() =>
+      document
+        .querySelector<HTMLElement>(`[data-tab="${next}"]`)
+        ?.focus(),
+    );
+  }
+
+  function requestTabClose(id: string) {
+    setTabs((list) =>
+      list.map((tab) =>
+        tab.task.id === id
+          ? { ...tab, closeRequest: tab.closeRequest + 1 }
+          : tab,
+      ),
+    );
   }
 
   async function move(task: Task, status: Status) {
@@ -813,7 +852,6 @@ export default function App() {
   }
 
   function saved(task: Task) {
-    setEditor(null);
     setTasks((ts) => ts.map((t) => (t.id === task.id ? task : t)));
     void refresh();
     notify({
@@ -824,7 +862,7 @@ export default function App() {
   }
 
   function archived(task: Task) {
-    setEditor(null);
+    closeTab(task.id);
     setTasks((ts) => ts.filter((t) => t.id !== task.id));
     void refresh();
     notify({
@@ -1075,7 +1113,7 @@ export default function App() {
                     label: "New task in this epic",
                     icon: <Icon name="plus" size={14} />,
                     onSelect: () =>
-                      setEditor({ mode: "create", boardId: currentBoard.id, epic: epic.id }),
+                      setEditor({ boardId: currentBoard.id, epic: epic.id }),
                   },
                 ]),
             ...(isHuman && !epic.archived
@@ -1198,6 +1236,9 @@ export default function App() {
       ]),
     );
   }
+
+  const boardName = (id: string) =>
+    boards.find((board) => board.id === id)?.name ?? "Unavailable board";
 
   const openStandup = () => {
     setEditor(null);
@@ -1486,6 +1527,7 @@ export default function App() {
                     return;
                   }
                   setQuery(e.target.value);
+                  setActiveTab("");
                   if (overviews.includes(view)) setView("board");
                 }}
               />
@@ -1500,7 +1542,82 @@ export default function App() {
               <Icon name="help" />
             </button>
           </div>
-          <div className="main-content" onContextMenu={pageMenu}>
+          {tabs.length > 0 && (
+            <nav className="task-tabs" aria-label="Open tasks">
+              <button
+                type="button"
+                data-tab=""
+                className={`task-tab page-tab ${activeTab === "" ? "selected" : ""}`}
+                aria-current={activeTab === "" ? "page" : undefined}
+                onClick={() => setActiveTab("")}
+              >
+                {title}
+              </button>
+              {tabs.map(({ task }) => {
+                const selected = activeTab === task.id;
+                const label =
+                  tasks.find((t) => t.id === task.id)?.title ?? task.title;
+                return (
+                  <div
+                    key={task.id}
+                    className={`task-tab ${selected ? "selected" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      data-tab={task.id}
+                      className="task-tab-open"
+                      aria-current={selected ? "page" : undefined}
+                      title={label}
+                      onClick={() => setActiveTab(task.id)}
+                    >
+                      <span className="task-id">{task.id}</span>
+                      <span className="task-tab-title">{label}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="task-tab-close"
+                      aria-label={`Close ${task.id}`}
+                      onClick={() => requestTabClose(task.id)}
+                    >
+                      <Icon name="close" size={12} />
+                    </button>
+                  </div>
+                );
+              })}
+            </nav>
+          )}
+          {tabs.map(({ task, closeRequest }) => (
+            <div
+              key={task.id}
+              className="task-tab-panel"
+              hidden={activeTab !== task.id}
+            >
+              <TaskEditor
+                task={task}
+                boardId={task.boardId}
+                boardName={boardName(task.boardId)}
+                actor={actor}
+                agents={agents}
+                actors={actors}
+                assignees={assignees}
+                labels={labels}
+                epics={epics}
+                latestVersion={tasks.find((t) => t.id === task.id)?.version}
+                closeRequest={closeRequest}
+                onReveal={() => setActiveTab(task.id)}
+                onClose={() => closeTab(task.id)}
+                onCreated={created}
+                onSaved={saved}
+                onChanged={() => void refresh()}
+                onArchived={archived}
+              />
+            </div>
+          ))}
+          <div
+            className="main-content"
+            hidden={activeTab !== ""}
+            onContextMenu={pageMenu}
+          >
             <header className="page-title">
               <h1 tabIndex={-1} data-focus-fallback="">
                 {currentEpic && (
@@ -1903,28 +2020,16 @@ export default function App() {
       )}
       {editor && (
         <TaskEditor
-          key={editor.mode === "edit" ? editor.task.id : "create"}
-          task={editor.mode === "edit" ? editor.task : null}
-          boardId={editor.mode === "edit" ? editor.task.boardId : editor.boardId}
-          boardName={
-            boards.find(
-              (board) =>
-                board.id ===
-                (editor.mode === "edit" ? editor.task.boardId : editor.boardId),
-            )?.name ?? "Unavailable board"
-          }
+          task={null}
+          boardId={editor.boardId}
+          boardName={boardName(editor.boardId)}
           actor={actor}
           agents={agents}
           actors={actors}
           assignees={assignees}
           labels={labels}
           epics={epics}
-          initialEpic={editor.mode === "create" ? editor.epic : undefined}
-          latestVersion={
-            editor.mode === "edit"
-              ? tasks.find((t) => t.id === editor.task.id)?.version
-              : undefined
-          }
+          initialEpic={editor.epic}
           onClose={() => setEditor(null)}
           onCreated={created}
           onSaved={saved}

@@ -92,6 +92,7 @@ Retain entered values after a failed request.
 ## 5. Task details and editing
 
 Open the current task from either Board or List.
+Open each task in its own tab in a horizontal strip above the page. Keep each tab's draft while the user switches tabs.
 Load the full task before editing, including its latest version, activity, claim, and review information.
 
 Allow editing of title, context, acceptance criteria, priority, assignee, labels, and permitted status changes.

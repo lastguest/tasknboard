@@ -101,8 +101,10 @@ test("boards scope task keys, persist selection, and own task deep links", async
   await expect(page.locator(".task-card").filter({ hasText: taskTitle })).toHaveCount(0);
   expect((await command<any>("get_task", { id: original.id })).boardId).toBe("BOARD-1");
 
-  // A link with the former key opens the renamed task on its board.
+  // A link with the former key opens the renamed task in a tab; the board stays.
   await page.goto(`${baseURL}/#task/${prefix}-001`);
-  await expect(page.getByRole("dialog", { name: /Task details/ })).toContainText(task.id);
-  await expect(boardSelect).toHaveValue(board.id);
+  await expect(page.getByRole("region", { name: /Task details/ })).toContainText(task.id);
+  await expect(page.getByRole("navigation", { name: "Open tasks" })).toContainText(task.id);
+  await page.getByRole("navigation", { name: "Open tasks" }).getByRole("button", { name: "Board" }).click();
+  await expect(boardSelect).toHaveValue("BOARD-1");
 });

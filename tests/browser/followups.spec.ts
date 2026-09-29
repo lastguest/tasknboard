@@ -102,7 +102,7 @@ test("Task sidebar pickers search, stage changes, and save label arrays", async 
   await page.setViewportSize({ width: 390, height: 844 });
   await card(page, task.id).click();
 
-  let details = page.getByRole("dialog", { name: /Task details/ });
+  let details = page.getByRole("region", { name: /Task details/ });
   let status = details.getByRole("button", { name: "Status: Backlog. Choose status" });
   await status.click();
   let picker = page.getByRole("dialog", { name: "Choose status" });
@@ -150,7 +150,7 @@ test("Task sidebar pickers search, stage changes, and save label arrays", async 
   await picker.getByRole("button", { name: "Add “Second label”" }).click();
   await picker.getByRole("button", { name: "Done" }).click();
 
-  details = page.getByRole("dialog", { name: /Task details/ });
+  details = page.getByRole("region", { name: /Task details/ });
   await expect(details.getByRole("button", { name: "Labels: Existing, Second label. Edit labels" })).toBeVisible();
   await details.getByRole("button", { name: "Save changes" }).click();
   const saved = await command("get_task", { id: task.id });
@@ -159,8 +159,8 @@ test("Task sidebar pickers search, stage changes, and save label arrays", async 
   expect(saved.assignee).toBe("browser-agent");
   expect(saved.labels).toEqual(["Existing", "Second label"]);
 
-  await card(page, task.id).click();
-  details = page.getByRole("dialog", { name: /Task details/ });
+  // The tab stays open on the saved version.
+  await expect(details.getByRole("button", { name: "Save changes" })).toBeDisabled();
   await details.getByRole("button", { name: "Labels: Existing, Second label. Edit labels" }).click();
   picker = page.getByRole("dialog", { name: "Choose labels" });
   await picker.getByLabel("Existing").uncheck();
@@ -171,11 +171,43 @@ test("Task sidebar pickers search, stage changes, and save label arrays", async 
   expect((await command("get_task", { id: task.id })).labels).toEqual([]);
 });
 
+test("Tasks open in tabs that keep drafts and ask before a draft is discarded", async ({ page }) => {
+  const first = await create(`Tab one ${key()}`);
+  const second = await create(`Tab two ${key()}`);
+  await connect(page);
+  const strip = page.getByRole("navigation", { name: "Open tasks" });
+  const details = page.getByRole("region", { name: /Task details/ });
+
+  await card(page, first.id).click();
+  await expect(details).toContainText(first.id);
+  await details.getByLabel("Title", { exact: true }).fill("Unsaved tab draft");
+  await strip.getByRole("button", { name: "Board" }).click();
+  await expect(details).toBeHidden();
+  await card(page, second.id).click();
+  await expect(details).toContainText(second.id);
+  await expect(strip.getByRole("button", { name: new RegExp(`^${first.id}`) })).toBeVisible();
+
+  // Switching tabs keeps the draft; closing a tab with a draft asks first.
+  await strip.getByRole("button", { name: new RegExp(`^${first.id}`) }).click();
+  await expect(details.getByLabel("Title", { exact: true })).toHaveValue("Unsaved tab draft");
+  await strip.getByRole("button", { name: `Close ${second.id}` }).click();
+  await expect(strip.getByRole("button", { name: new RegExp(`^${second.id}`) })).toHaveCount(0);
+  await expect(details).toContainText(first.id);
+  await strip.getByRole("button", { name: `Close ${first.id}` }).click();
+  await details.getByRole("button", { name: "Keep editing" }).click();
+  await expect(details.getByLabel("Title", { exact: true })).toHaveValue("Unsaved tab draft");
+  await strip.getByRole("button", { name: `Close ${first.id}` }).click();
+  await details.getByRole("button", { name: "Discard" }).click();
+  await expect(strip).toBeHidden();
+  await expect(card(page, first.id)).toBeVisible();
+  expect((await command("get_task", { id: first.id })).title).toBe(first.title);
+});
+
 test("A stale save keeps the draft and merges untouched fields", async ({ page }) => {
   const task = await create(`Stale ${key()}`);
   await connect(page);
   await card(page, task.id).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("region", { name: /Task details/ });
   await dialog.getByLabel("Title", { exact: true }).fill("My unsaved title");
   await command("update_task", { id: task.id, expectedVersion: task.version, patch: { description: "Remote context" } });
   await dialog.getByRole("button", { name: "Save changes" }).click();
@@ -185,7 +217,7 @@ test("A stale save keeps the draft and merges untouched fields", async ({ page }
   await expect(dialog.getByLabel("Context", { exact: true })).toHaveValue("Remote context");
   await expect(dialog.getByLabel("Title", { exact: true })).toHaveValue("My unsaved title");
   await dialog.getByRole("button", { name: "Save changes" }).click();
-  await expect(dialog).toBeHidden();
+  await expect(dialog.getByRole("button", { name: "Save changes" })).toBeDisabled();
   const saved = await command("get_task", { id: task.id });
   expect(saved.title).toBe("My unsaved title");
   expect(saved.description).toBe("Remote context");
@@ -196,7 +228,7 @@ test("An active agent claim rejects edits and keeps the draft", async ({ page })
   task = await command("claim_task", { id: task.id, expectedVersion: task.version }, agentToken);
   await connect(page);
   await card(page, task.id).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("region", { name: /Task details/ });
   await dialog.getByLabel("Title", { exact: true }).fill("Blocked draft");
   await dialog.getByRole("button", { name: "Save changes" }).click();
   await expect(dialog.getByRole("alert")).toContainText("claimed by browser-agent");
@@ -389,7 +421,7 @@ test("Needs changes explains retained review evidence", async ({ page }) => {
   task = await command("submit_review", { id: task.id, expectedVersion: task.version, summary: "Earlier submission" }, agentToken);
   await connect(page);
   await card(page, task.id).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("region", { name: /Task details/ });
   await dialog.getByRole("button", { name: "Needs changes" }).click();
   await expect(dialog).toContainText("earlier submission for context");
   await expect(dialog.locator(".review-summary")).toHaveText("Earlier submission");
@@ -420,14 +452,17 @@ test("Keyboard-only actions reach each view and the task, notes, settings and he
   await expect(open).toBeVisible();
   await tabTo(page, open);
   await page.keyboard.press("Enter");
-  await expect(dialog).toBeVisible();
-  await tabTo(page, dialog.getByLabel("Add a comment"));
+  const details = page.getByRole("region", { name: /Task details/ });
+  await expect(details).toBeVisible();
+  await tabTo(page, details.getByLabel("Add a comment"));
   await page.keyboard.type("Keyboard comment");
-  await tabTo(page, dialog.getByRole("button", { name: "Post comment" }));
+  await tabTo(page, details.getByRole("button", { name: "Post comment" }));
   await page.keyboard.press("Enter");
-  await expect(dialog.locator(".event-body")).toContainText(["Keyboard comment"]);
-  await page.keyboard.press("Escape");
-  await expect(open).toBeFocused();
+  await expect(details.locator(".event-body")).toContainText(["Keyboard comment"]);
+  await tabTo(page, details.getByRole("button", { name: /^Close / }));
+  await page.keyboard.press("Enter");
+  await expect(details).toBeHidden();
+  await expect(open).toBeVisible();
   await tabTo(page, nav(page, "Agents"));
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Agents", exact: true })).toBeVisible();
@@ -535,7 +570,7 @@ test("Profiles show display names and pictures, and IDs stay unchanged", async (
     expect(info.actors.find((a: { id: string }) => a.id === "reviewer").avatar).toMatch(/^data:image\/jpeg;base64,/);
 
     await card(page, task.id).click();
-    const details = page.getByRole("dialog", { name: /Task details/ });
+    const details = page.getByRole("region", { name: /Task details/ });
     await details.getByRole("button", { name: "Assignee: Build Bot. Choose assignee" }).click();
     const picker = page.getByRole("dialog", { name: "Choose assignee" });
     await picker.getByRole("searchbox").fill("reviewer");
@@ -558,7 +593,7 @@ test("Markdown descriptions format, upload pasted images, and render safely", as
   });
   await connect(page);
   await card(page, task.id).click();
-  const dialog = page.getByRole("dialog", { name: /Task details/ });
+  const dialog = page.getByRole("region", { name: /Task details/ });
   const preview = dialog.locator(".md-preview");
   // Existing descriptions open rendered; raw HTML and script URLs stay inert text.
   await expect(preview).toContainText("<img src=x onerror=alert(1)>");
@@ -593,7 +628,7 @@ test("Markdown descriptions format, upload pasted images, and render safely", as
   const image = preview.getByRole("img", { name: "shot" });
   await expect(image).toHaveJSProperty("naturalWidth", 1);
   await dialog.getByRole("button", { name: "Save changes" }).click();
-  await expect(dialog).toBeHidden();
+  await expect(dialog.getByRole("button", { name: "Save changes" })).toBeDisabled();
   const saved = await command("get_task", { id: task.id });
   expect(saved.description).toMatch(/^\*\*Ship it\*\*\n1\. One\n2\. \n!\[shot\]\(\/files\/[0-9a-f]{32}\)$/);
 });
@@ -629,10 +664,12 @@ test("Epics group tasks: create, file, filter, progress and guarded archive", as
   await nav(page, "Board").click();
   await search(page).fill(loose.id);
   await card(page, loose.id).click();
-  const details = page.getByRole("dialog", { name: /Task details/ });
+  const details = page.getByRole("region", { name: /Task details/ });
   await details.getByRole("button", { name: "Epic: None. Choose epic" }).click();
   await page.getByRole("dialog", { name: "Choose epic" }).getByText(name, { exact: true }).click();
   await details.getByRole("button", { name: "Save changes" }).click();
+  await expect(details.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  await details.getByRole("button", { name: `Close ${loose.id}` }).click();
   await expect(details).toBeHidden();
   await expect(page.locator(".task-card .epic-tag")).toContainText(name);
   expect((await command("get_task", { id: loose.id })).epic).toBe(epic.id);
