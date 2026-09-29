@@ -1646,7 +1646,7 @@ export default function App() {
                   : view === "epics"
                   ? "Projects that group related tasks. Open one to see its board."
                   : view === "agents"
-                  ? "Known agents from the workspace roster. A listed agent is not necessarily connected or running."
+                  ? "Coding agents that work on tasks in this workspace."
                   : view === "mine"
                     ? workspaceInfoLoaded
                       ? `Tasks assigned to ${displayName(people, actor.id)} on ${currentBoard?.name ?? "the selected board"}.`
@@ -2168,10 +2168,6 @@ function AgentsPage({
         <h2 id="roster-title" className="section-title">
           Roster
         </h2>
-        <p className="small">
-          Inferred from assignees and claims. A listed agent is not necessarily
-          connected or running.
-        </p>
         {roster.length ? (
           <ul className="agents-table">
             {roster.map((name) => {
@@ -2206,8 +2202,7 @@ function AgentsPage({
           </ul>
         ) : (
           <p className="empty-state compact">
-            No agent assignments or claims yet. Connect a coding agent below and
-            let it claim a task.
+            No agents yet. Connect one below.
           </p>
         )}
       </section>
@@ -2215,20 +2210,13 @@ function AgentsPage({
         <h2 id="mcp-title" className="section-title">
           Connect a coding agent
         </h2>
-        {mcpStatus?.mode === "local" ? (
+        {mcpStatus?.mode === "shared" && (
           <p>
-            This configuration uses the active runtime and SQLite file for this
-            workspace. Give each concurrent agent its own identity.
+            Run the MCP bridge on the agent host with{" "}
+            <code>TASKNBOARD_SERVER_URL={window.location.origin}</code> and an
+            agent token in <code>TASKNBOARD_TOKEN</code>.
           </p>
-        ) : mcpStatus?.mode === "shared" ? (
-          <p>
-            This workspace uses authenticated server mode. Configure a local
-            stdio bridge with <code>TASKNBOARD_SERVER_URL</code> set to{" "}
-            <code>{window.location.origin}</code> and{" "}
-            <code>TASKNBOARD_TOKEN</code> set to a dedicated agent token. The
-            server keeps local runtime paths private.
-          </p>
-        ) : null}
+        )}
         {mcpStatus?.mode === "local" && (
           <ConnectionHelpers runtime={mcpStatus} />
         )}
@@ -2242,19 +2230,6 @@ function AgentsPage({
             {mcpError}
           </p>
         )}
-        {mcpStatus?.mode === "shared" && (
-          <p className="small">
-            Install the MCP bridge on the agent host. The local runtime paths
-            depend on that host and stay private to it.
-          </p>
-        )}
-        <p className="small">
-          The agent workflow: read and claim a task, keep the lease alive with
-          heartbeats while recording progress, then submit review evidence,
-          which releases the claim. A person reviews the work and marks it Done.
-          For a shared server, use TASKNBOARD_SERVER_URL and an agent token; see
-          the README.
-        </p>
       </section>
     </div>
   );
