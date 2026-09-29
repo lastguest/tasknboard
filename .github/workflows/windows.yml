@@ -27,7 +27,9 @@ jobs:
         with:
           path: src-tauri/target
           key: windows-rust-${{ hashFiles('src-tauri/Cargo.lock') }}-${{ hashFiles('src-tauri/src/**', 'src-tauri/tauri*.json') }}
-          restore-keys: windows-rust-${{ hashFiles('src-tauri/Cargo.lock') }}-
+          restore-keys: |
+            windows-rust-${{ hashFiles('src-tauri/Cargo.lock') }}-
+            windows-rust-
       - name: Build Windows installer
         run: npm run desktop:build:windows
       - name: Save Rust build cache

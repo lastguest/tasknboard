@@ -57,6 +57,8 @@ fn start_service(app: &tauri::App) -> Result<(Service, tauri::Url), Box<dyn std:
     } else {
         app.path().resource_dir()?.join("resources")
     };
+    // Node's main-module resolver rejects Windows verbatim drive paths.
+    let resources = dunce::simplified(&resources).to_path_buf();
     let data = app.path().app_data_dir()?;
     std::fs::create_dir_all(&data)?;
     let node = resources.join(if cfg!(windows) { "node.exe" } else { "node" });
