@@ -540,6 +540,8 @@ export function TaskEditor({
   epics,
   initialEpic = "",
   latestVersion,
+  closeRequest = 0,
+  onReveal,
   onClose,
   onCreated,
   onSaved,
@@ -557,6 +559,10 @@ export function TaskEditor({
   epics: Epic[];
   initialEpic?: string;
   latestVersion?: number;
+  /** Tab only: a new value asks the tab to close, after a discard check. */
+  closeRequest?: number;
+  /** Tab only: the tab needs attention before it can close. */
+  onReveal?: () => void;
   onClose: () => void;
   onCreated: (t: Task) => void;
   onSaved: (t: Task) => void;
@@ -577,7 +583,9 @@ export function TaskEditor({
   const [reviewError, setReviewError] = useState<ApiError | null>(null);
   const [archiveStep, setArchiveStep] = useState(false);
   const [archiveError, setArchiveError] = useState<ApiError | null>(null);
-  const [discard, setDiscard] = useState(false);
+  /** What the discard confirmation leads to: closing, or a revert to the saved task. */
+  const [discard, setDiscard] = useState<false | "close" | "revert">(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const [notice, setNotice] = useState("");
   const [picker, setPicker] = useState<
     "status" | "priority" | "assignee" | "labels" | "epic" | null
@@ -690,9 +698,34 @@ export function TaskEditor({
     if (pending) return;
     // Only the explicit Discard button drops a draft; Escape backs out.
     if (discard) setDiscard(false);
-    else if (dirty) setDiscard(true);
+    else if (dirty) setDiscard("close");
     else onClose();
   }
+
+  function revert() {
+    if (!current) return;
+    setDraft(draftOf(current));
+    setMerge(null);
+    setError(null);
+    setNotice("");
+    setDiscard(false);
+  }
+
+  // An existing task opens in a tab: focus its heading, and close on request.
+  useEffect(() => {
+    if (task) headingRef.current?.focus();
+  }, []);
+  const closeRequested = useRef(closeRequest);
+  useEffect(() => {
+    if (closeRequest === closeRequested.current) return;
+    closeRequested.current = closeRequest;
+    if (pending) {
+      onReveal?.();
+    } else if (dirty) {
+      setDiscard("close");
+      onReveal?.();
+    } else onClose();
+  }, [closeRequest]);
 
   async function reload() {
     if (!current) return;
@@ -739,10 +772,7 @@ export function TaskEditor({
       setError(new ApiError("Title is required", "VALIDATION", 400));
       return;
     }
-    if (current && !dirty) {
-      onClose();
-      return;
-    }
+    if (current && !dirty) return;
     setPending("save");
     setError(null);
     try {
@@ -752,6 +782,11 @@ export function TaskEditor({
           expectedVersion: current.version,
           patch,
         });
+        // The tab stays open on the saved version.
+        setCurrent(saved);
+        setDraft(draftOf(saved));
+        setMerge(null);
+        setPending(null);
         onSaved(saved);
       } else {
         const args: Record<string, unknown> = {
@@ -836,7 +871,7 @@ export function TaskEditor({
   }
 
   const artifact = safeUrl(current?.review?.artifactUrl);
-  const footer = discard ? (
+  const discardBar = (
     <div
       className="discard-bar"
       role="alertdialog"
@@ -852,13 +887,16 @@ export function TaskEditor({
       >
         Keep editing
       </button>
-      <button type="button" className="danger-button" onClick={onClose}>
+      <button
+        type="button"
+        className="danger-button"
+        onClick={discard === "revert" ? revert : onClose}
+      >
         Discard
       </button>
     </div>
-  ) : (
-    <>
-      {error && (
+  );
+  const errorNote = error && (
         <ErrorNote
           error={error}
           kept={
@@ -876,7 +914,8 @@ export function TaskEditor({
           }
           busy={Boolean(pending)}
         />
-      )}
+  );
+  const actions = (
       <div className="form-actions">
         {current && dirty && !pending && (
           <span className="small dirty-note">Unsaved changes</span>
@@ -885,8 +924,8 @@ export function TaskEditor({
         <button
           type="button"
           className="secondary"
-          onClick={requestClose}
-          disabled={pending === "save"}
+          onClick={current ? () => setDiscard("revert") : requestClose}
+          disabled={current ? Boolean(pending) : pending === "save"}
         >
           Cancel
         </button>
@@ -903,25 +942,9 @@ export function TaskEditor({
               : "Create task"}
         </button>
       </div>
-    </>
   );
 
-  return (
-    <>
-      <Dialog
-      title={
-        current ? (
-          <>
-            <span className="task-id">{current.id}</span> Task details
-          </>
-        ) : (
-          "New task"
-        )
-      }
-      onClose={requestClose}
-      footer={footer}
-      wide
-    >
+  const layout = (
       <div className={current ? "editor-layout" : "editor-layout create"}>
         <form
           id={`${listId}-form`}
@@ -1220,9 +1243,8 @@ export function TaskEditor({
                   {artifact && parsePullRef(artifact) && (
                     <a
                       className="artifact-link"
+                      // The link shows the pull request; this tab stays open.
                       href={pullHash(parsePullRef(artifact)!)}
-                      // The board shows the pull request once this dialog closes.
-                      onClick={requestClose}
                     >
                       <Icon name="pull" size={13} /> Review pull request
                     </a>
@@ -1383,7 +1405,54 @@ export function TaskEditor({
           </section>
         )}
       </div>
-    </Dialog>
+  );
+
+  return (
+    <>
+    {current ? (
+      <section className="task-panel" aria-labelledby={`${listId}-title`}>
+        {/* Actions sit in the sticky header, clear of the toasts in the bottom corner. */}
+        <div className="task-panel-top">
+        <div className="dialog-head">
+          <h2 id={`${listId}-title`} ref={headingRef} tabIndex={-1}>
+            <span className="task-id">{current.id}</span> Task details
+          </h2>
+          {/* Save and Cancel show only while there is a draft to act on. */}
+          {discard
+            ? discardBar
+            : (dirty || pending === "save") && actions}
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={`Close ${current.id}`}
+            onClick={requestClose}
+          >
+            <Icon name="close" />
+          </button>
+        </div>
+        {errorNote && <div className="task-panel-error">{errorNote}</div>}
+        </div>
+        <div className="dialog-body">{layout}</div>
+      </section>
+    ) : (
+      <Dialog
+        title="New task"
+        onClose={requestClose}
+        footer={
+          discard ? (
+            discardBar
+          ) : (
+            <>
+              {errorNote}
+              {actions}
+            </>
+          )
+        }
+        wide
+      >
+        {layout}
+      </Dialog>
+    )}
     {picker && (
       <SearchableChoiceDialog
         key={picker}

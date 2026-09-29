@@ -405,6 +405,118 @@ main {
   overflow: auto;
   overscroll-behavior: contain;
 }
+/* Task tabs: open tasks sit in a horizontal strip above the page. */
+.task-tabs {
+  flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.task-tab {
+  flex-shrink: 0;
+  max-width: 240px;
+  display: flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  margin-bottom: -1px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.task-tab.selected {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text-strong);
+}
+.task-tab:not(.selected):hover {
+  color: var(--text);
+}
+.page-tab,
+.task-tab-open {
+  min-height: 34px;
+  padding: 0 10px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.task-tab-open {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 4px;
+}
+.task-tab-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.task-tab-close {
+  width: 22px;
+  height: 22px;
+  margin-right: 6px;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  color: inherit;
+  cursor: pointer;
+}
+.task-tab-close:hover {
+  background: var(--surface-3);
+}
+.task-tab-panel {
+  flex: 1;
+  min-height: 0;
+  /* No top padding: content would show above the stuck header. */
+  padding: 0 28px 24px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+/* The tab panel scrolls the whole task; clip keeps the header sticky. */
+.task-panel {
+  margin-top: 16px;
+  background: #191b1f;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: clip;
+}
+.task-panel-top {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.task-panel .dialog-body {
+  overflow: visible;
+}
+.task-panel .dialog-head {
+  min-height: 57px;
+}
+.task-panel h2:focus {
+  outline: none;
+}
+.task-panel .dialog-head h2 {
+  flex-shrink: 0;
+}
+.task-panel .dialog-head .form-actions,
+.task-panel .dialog-head .discard-bar {
+  flex: 1;
+  justify-content: flex-end;
+}
+.task-panel-error {
+  flex-shrink: 0;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: #1b1d21;
+}
 .page-title {
   margin-bottom: 18px;
 }
@@ -3031,6 +3143,20 @@ footer {
   .main-content {
     padding: 4px 14px 24px;
   }
+  .task-tabs {
+    padding: 0 14px;
+  }
+  .task-tab {
+    max-width: 180px;
+  }
+  .task-tab-panel {
+    padding: 0;
+  }
+  .task-panel {
+    margin-top: 10px;
+    border-radius: 0;
+    border-width: 1px 0 0;
+  }
   .page-title h1 {
     font-size: 24px;
   }
@@ -3205,6 +3331,14 @@ footer {
   }
   .dialog-foot {
     padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px);
+  }
+  .task-panel .dialog-head {
+    flex-wrap: wrap;
+  }
+  .task-panel .dialog-head .form-actions,
+  .task-panel .dialog-head .discard-bar {
+    order: 3;
+    flex-basis: 100%;
   }
 }
 @media (prefers-reduced-motion: reduce) {

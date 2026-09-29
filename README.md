@@ -46,6 +46,8 @@ Views save filters (status, priority, assignee, label, epic, and search) and dis
 
 Keyboard: **N** new task, **Cmd/Ctrl K** search, **F** assignee filter, **⌥/Alt V** save as view, **?** shortcuts, **Esc** close dialog. Drag between columns, or use the Status menu on each card or list row (the keyboard and touch alternative). Right-click a card, list row, epic, agent, or empty page area for a context menu, or press **Shift F10** on the focused item. The task menu changes status, priority, and assignee, filters by assignee, copies the ID, and archives after a second confirmation. Every move is validated by the server; a rejected move stays in place with an explanation. Human review is required before Done: an In review task shows **Mark Done** and **Needs changes** in its details. The interface is English in this version.
 
+A task opens in its own tab in a horizontal strip above the page. The first tab returns to the page. Each tab keeps its draft while you switch tabs, stays open after **Save changes**, and asks before it discards a draft on close. **Cancel** reverts the draft to the saved task. A new task still opens in a dialog.
+
 Editing uses the task's latest version. If the task changed elsewhere, the save is rejected, your draft is kept, and **Load latest** merges: fields you did not touch take the new values, and fields changed on both sides are highlighted so you can choose. Nothing is retried automatically. Unsaved drafts ask before they are discarded.
 
 ## Desktop app

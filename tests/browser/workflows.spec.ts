@@ -110,16 +110,20 @@ test("Settings, task workflow, agent review, archive, and export", async ({ page
   await page.getByLabel("Search tasks by ID, title, or context").fill(key);
   await expect(card).toBeVisible();
   await card.click();
-  let details = page.getByRole("dialog", { name: /Task details/ });
+  let details = page.getByRole("region", { name: /Task details/ });
   await expect(details).toBeVisible();
 
   const taskId = await details.locator(".task-id").first().textContent();
   if (!taskId) throw new Error("Task details did not show the task ID");
   await details.getByLabel("Title").fill(`Edited ${title}`);
   await details.getByRole("button", { name: "Save changes" }).click();
-  await expect(page.getByRole("button", { name: new RegExp(`^${taskId}: Edited ${title}`) })).toBeVisible();
+  // The task stays open in its tab; closing the tab shows the board again.
+  await expect(details.getByRole("button", { name: "Save changes" })).toBeHidden();
+  await expect(page.getByRole("navigation", { name: "Open tasks" })).toContainText(`Edited ${title}`);
+  await details.getByRole("button", { name: `Close ${taskId}` }).click();
+  await expect(details).toBeHidden();
   await page.getByRole("button", { name: new RegExp(`^${taskId}: Edited ${title}`) }).click();
-  details = page.getByRole("dialog", { name: /Task details/ });
+  details = page.getByRole("region", { name: /Task details/ });
   const comment = `Browser comment ${key}`;
   await details.getByLabel("Add a comment").fill(comment);
   await details.getByRole("button", { name: "Post comment" }).click();
@@ -142,7 +146,7 @@ test("Settings, task workflow, agent review, archive, and export", async ({ page
   await page.reload();
   await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
   await page.getByRole("button", { name: new RegExp(`^${taskId}: Edited ${title}`) }).click();
-  details = page.getByRole("dialog", { name: /Task details/ });
+  details = page.getByRole("region", { name: /Task details/ });
   await expect(details).toContainText(`Reviewed in browser suite ${key}`);
   await expect(details.getByRole("link", { name: /Open artifact/ })).toHaveAttribute(
     "href",
