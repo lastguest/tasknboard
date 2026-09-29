@@ -28,6 +28,13 @@ The webview stays on that origin and opens other links in the system browser.
 The shell injects `window.tasknboardShell.changeServer()`. Settings uses it to
 return to the setup page. Remote pages have no Tauri IPC access.
 
+CLI: `server/client.mjs` owns the choice between the local store and the
+authenticated HTTP API. MCP and the terminal client both use it. The CLI is an
+Ink interface in `cli/`: pure command planning (`commands.ts`), a line editor
+(`editor.ts`), and the view (`App.tsx`). It holds no business rules. Each write
+sends the last read version, and the CLI never retries a rejected write.
+Task text is stripped of control characters before it reaches the terminal.
+
 ## Agent lifecycle
 
 List → get → claim (expected version, 15-minute lease) → heartbeat → update /

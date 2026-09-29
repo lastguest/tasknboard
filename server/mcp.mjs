@@ -1,27 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { schemas } from "./domain.mjs";
-import { createStore } from "./store.mjs";
-import { dbPath } from "./config.mjs";
-const remote = process.env.TASKNBOARD_SERVER_URL;
-if (remote) {
-  const url = new URL(remote);
-  const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  if (url.protocol !== "https:" && !(local && url.protocol === "http:")) {
-    throw new Error(
-      "Remote credentials require HTTPS (HTTP allowed only on loopback)",
-    );
-  }
-}
-
-if (remote && !process.env.TASKNBOARD_TOKEN)
-  throw new Error("Remote MCP requires TASKNBOARD_TOKEN");
-const actor = {
-  id: process.env.TASKNBOARD_AGENT_ID || "coding-agent",
-  kind: "agent",
-};
-const store = remote ? null : createStore(dbPath);
-store?.registerActors([actor]);
+import { connect } from "./client.mjs";
+const client = connect({
+  actor: {
+    id: process.env.TASKNBOARD_AGENT_ID || "coding-agent",
+    kind: "agent",
+  },
+});
 const descriptions = {
   workspace_info:
     "Read workspace identity, authenticated actor and lease duration.",
@@ -71,23 +57,7 @@ for (const [name, description] of Object.entries(descriptions)) {
     },
     async (args) => {
       try {
-        let output;
-        if (remote) {
-          const res = await fetch(`${remote.replace(/\/$/, "")}/api/${name}`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${process.env.TASKNBOARD_TOKEN}`,
-            },
-            body: JSON.stringify(args),
-            signal: AbortSignal.timeout(15000),
-          });
-          output = await res.json();
-          if (!res.ok)
-            throw Object.assign(new Error(output.message), {
-              code: output.code,
-            });
-        } else output = store.execute(name, args, actor);
+        const output = await client.execute(name, args);
         return {
           content: [{ type: "text", text: JSON.stringify(output) }],
           structuredContent: output,
@@ -110,4 +80,4 @@ for (const [name, description] of Object.entries(descriptions)) {
   );
 }
 await server.connect(new StdioServerTransport());
-process.stdin.on("end", () => store?.close());
+process.stdin.on("end", () => client.close());

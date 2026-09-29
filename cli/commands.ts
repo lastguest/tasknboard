@@ -1,0 +1,241 @@
+import type { Status, Task } from "../src/types.ts";
+import { columns, priorities, statusTitle } from "../src/types.ts";
+
+export type Request = { name: string; args: Record<string, unknown> };
+
+/** What a slash command asks the interface to do. */
+export type Action =
+  | { kind: "request"; request: Request; message: (task: Task) => string }
+  | { kind: "mine" }
+  | { kind: "refresh" }
+  | { kind: "help" }
+  | { kind: "quit" };
+
+export type Command = {
+  name: string;
+  usage: string;
+  summary: string;
+  plan: (arg: string, task: Task | undefined) => Action;
+};
+
+/** A mistake in the typed command. Nothing was sent to the workspace. */
+export class UsageError extends Error {}
+
+function selected(task: Task | undefined) {
+  if (!task) throw new UsageError("Select a task first.");
+  return task;
+}
+
+function required(arg: string, usage: string) {
+  if (!arg) throw new UsageError(`Usage: ${usage}`);
+  return arg;
+}
+
+function update(task: Task, patch: object, message: string): Action {
+  return {
+    kind: "request",
+    request: {
+      name: "update_task",
+      args: { id: task.id, expectedVersion: task.version, patch },
+    },
+    message: () => message,
+  };
+}
+
+function versioned(
+  name: string,
+  task: Task,
+  args: object,
+  message: string,
+): Action {
+  return {
+    kind: "request",
+    request: {
+      name,
+      args: { id: task.id, expectedVersion: task.version, ...args },
+    },
+    message: () => message,
+  };
+}
+
+/** Matches a status by id or title, for example "review" or "in progress". */
+export function findStatus(arg: string): Status {
+  const key = arg.trim().toLowerCase().replace(/\s+/g, "_");
+  const matches = columns.filter(
+    (c) =>
+      c.id === key || c.title.toLowerCase().replace(/\s+/g, "_").includes(key),
+  );
+  if (!key || matches.length !== 1)
+    throw new UsageError(
+      `Choose a status: ${columns.map((c) => c.id).join(", ")}.`,
+    );
+  return matches[0].id;
+}
+
+export const commands: Command[] = [
+  {
+    name: "new",
+    usage: "/new <title>",
+    summary: "Create a backlog task",
+    plan: (arg) => ({
+      kind: "request",
+      request: {
+        name: "create_task",
+        args: { title: required(arg, "/new <title>") },
+      },
+      message: (task) => `Created ${task.id}.`,
+    }),
+  },
+  {
+    name: "move",
+    usage: "/move <status>",
+    summary: "Change the status of the selected task",
+    plan: (arg, task) => {
+      const status = findStatus(required(arg, "/move <status>"));
+      const t = selected(task);
+      return update(t, { status }, `${t.id} moved to ${statusTitle(status)}.`);
+    },
+  },
+  {
+    name: "done",
+    usage: "/done",
+    summary: "Mark the reviewed task Done",
+    plan: (_, task) => {
+      const t = selected(task);
+      return update(t, { status: "done" }, `${t.id} is Done.`);
+    },
+  },
+  {
+    name: "assign",
+    usage: "/assign [name]",
+    summary: "Assign the selected task, or clear the assignee",
+    plan: (arg, task) => {
+      const t = selected(task);
+      return update(
+        t,
+        { assignee: arg },
+        arg ? `${t.id} assigned to ${arg}.` : `${t.id} is unassigned.`,
+      );
+    },
+  },
+  {
+    name: "priority",
+    usage: "/priority <low|medium|high>",
+    summary: "Set the priority of the selected task",
+    plan: (arg, task) => {
+      const key = required(arg, "/priority <low|medium|high>").toLowerCase();
+      const match = priorities.find((p) => p.id.startsWith(key));
+      if (!match) throw new UsageError("Choose a priority: low, medium, high.");
+      const t = selected(task);
+      return update(
+        t,
+        { priority: match.id },
+        `${t.id} priority is ${match.title}.`,
+      );
+    },
+  },
+  {
+    name: "comment",
+    usage: "/comment <text>",
+    summary: "Add a comment to the selected task",
+    plan: (arg, task) => {
+      const body = required(arg, "/comment <text>");
+      const t = selected(task);
+      return versioned("add_comment", t, { body }, `Comment added to ${t.id}.`);
+    },
+  },
+  {
+    name: "claim",
+    usage: "/claim",
+    summary: "Claim the selected task for 15 minutes",
+    plan: (_, task) => {
+      const t = selected(task);
+      return versioned("claim_task", t, {}, `You claimed ${t.id}.`);
+    },
+  },
+  {
+    name: "release",
+    usage: "/release",
+    summary: "Release your claim on the selected task",
+    plan: (_, task) => {
+      const t = selected(task);
+      return versioned("release_task", t, {}, `You released ${t.id}.`);
+    },
+  },
+  {
+    name: "review",
+    usage: "/review <summary> [artifact URL]",
+    summary: "Submit the selected task for human review",
+    plan: (arg, task) => {
+      const text = required(arg, "/review <summary> [artifact URL]");
+      const last = text.split(/\s+/).at(-1) ?? "";
+      const artifactUrl = /^https?:\/\/\S+$/.test(last) ? last : "";
+      const summary = artifactUrl ? text.slice(0, -last.length).trim() : text;
+      const t = selected(task);
+      return versioned(
+        "submit_review",
+        t,
+        {
+          summary: required(summary, "/review <summary> [artifact URL]"),
+          artifactUrl,
+        },
+        `${t.id} submitted for review.`,
+      );
+    },
+  },
+  {
+    name: "archive",
+    usage: "/archive <task id>",
+    summary: "Archive the selected task (type its id to confirm)",
+    plan: (arg, task) => {
+      const t = selected(task);
+      if (arg.toUpperCase() !== t.id)
+        throw new UsageError(`Type /archive ${t.id} to confirm.`);
+      return versioned("archive_task", t, {}, `${t.id} archived.`);
+    },
+  },
+  {
+    name: "mine",
+    usage: "/mine",
+    summary: "Show only your tasks, or show all again",
+    plan: () => ({ kind: "mine" }),
+  },
+  {
+    name: "refresh",
+    usage: "/refresh",
+    summary: "Reload tasks now",
+    plan: () => ({ kind: "refresh" }),
+  },
+  {
+    name: "help",
+    usage: "/help",
+    summary: "Show commands and keys",
+    plan: () => ({ kind: "help" }),
+  },
+  {
+    name: "quit",
+    usage: "/quit",
+    summary: "Exit TasknBoard",
+    plan: () => ({ kind: "quit" }),
+  },
+];
+
+/** Commands for the menu while the user types a command name. */
+export function matchCommands(input: string): Command[] {
+  if (!input.startsWith("/") || /\s/.test(input)) return [];
+  const typed = input.slice(1).toLowerCase();
+  return commands.filter((c) => c.name.startsWith(typed));
+}
+
+/** Turns one line of input into an action. Throws UsageError on mistakes. */
+export function planInput(input: string, task: Task | undefined): Action {
+  const [, name = "", arg = ""] =
+    /^\/(\S*)\s*([\s\S]*)$/.exec(input.trim()) ?? [];
+  const command =
+    commands.find((c) => c.name === name.toLowerCase()) ??
+    (name.toLowerCase() === "exit"
+      ? commands.find((c) => c.name === "quit")
+      : undefined);
+  if (!command) throw new UsageError(`Unknown command /${name}. Type /help.`);
+  return command.plan(arg.trim(), task);
+}

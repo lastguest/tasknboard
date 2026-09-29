@@ -107,6 +107,45 @@ The workflow fails at its first step until all three secrets exist.
 Tauri generates the Xcode project in CI, so `src-tauri/gen/` is not committed.
 To build on a Mac, run `npm run tauri -- ios init`, then `npm run tauri -- ios build`.
 
+## Command line
+
+`tasknboard` is a terminal client for the same workspace.
+Without arguments, it opens an interactive board in the terminal.
+With a command name, it runs one workspace command and prints JSON.
+
+```bash
+npm ci
+npm run build:cli
+npm run cli                                    # interactive board
+npm run cli -- list_tasks '{"status":"in_review"}'
+npm run cli -- help
+```
+
+After the build, `npm link` installs the `tasknboard` command on your PATH.
+Local mode opens `TASKNBOARD_DB` (default `data/tasknboard.sqlite`) as the human `you`.
+To use a shared server, set `TASKNBOARD_SERVER_URL` and a human or agent `TASKNBOARD_TOKEN`.
+The rules are the same as for MCP: HTTPS is required, except on loopback.
+
+In the board, type text to filter tasks and press Enter to open the selected task.
+Type `/` to open the command menu. Tab completes a command, and Enter runs it.
+
+| Command | Result |
+| --- | --- |
+| `/new <title>` | Create a backlog task |
+| `/move <status>`, `/done` | Change the status (`backlog`, `progress`, `review`, `done`) |
+| `/assign [name]`, `/priority <level>` | Change the assignee or priority |
+| `/comment <text>` | Add a comment |
+| `/claim`, `/release` | Claim or release the task for 15 minutes |
+| `/review <summary> [URL]` | Submit the task for review with an optional artifact link |
+| `/archive <task id>` | Archive the task; type its id to confirm |
+| `/mine`, `/refresh`, `/help`, `/quit` | Filter to your tasks, reload, show help, exit |
+
+Every write uses the task version that the board last read.
+If the task changed elsewhere, the server rejects the write and the command stays in the prompt.
+The board reloads the task, so you can check the change and press Enter again.
+The board refreshes every five seconds and shows **offline** when the workspace is unreachable.
+Ctrl+C clears the prompt, or exits when the prompt is empty.
+
 ## Stand-up mode
 
 Use **Stand-up** in the sidebar before sharing the browser tab in Google Meet.
@@ -265,7 +304,8 @@ No direct remote Streamable HTTP MCP endpoint is included yet. The bridge requir
 
 `src/` interface and API adapter; `server/domain.mjs` shared schemas;
 `server/store.mjs` transactional commands; `server/http.mjs` HTTP/auth/static files;
-`server/mcp.mjs` MCP adapter; `tests/` integration and domain coverage;
+`server/mcp.mjs` MCP adapter; `server/client.mjs` local or remote connection for MCP and the CLI;
+`cli/` terminal client; `tests/` integration and domain coverage;
 `src-tauri/` desktop and iOS host and packaging; `mobile/` iOS server setup page; `docs/ARCHITECTURE.md` decisions and follow-up scope.
 
 ## Why Vite instead of Next.js?
