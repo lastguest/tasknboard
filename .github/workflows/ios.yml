@@ -1,15 +1,8 @@
 name: iOS
 
 # The iOS app bundles only the Tauri shell and its server setup page.
-# The remote server serves the web interface, so web changes do not trigger this build.
+# Builds are manual-only until automatic iOS builds are enabled again.
 on:
-  push:
-    paths:
-      - ".github/workflows/ios.yml"
-      - "mobile/**"
-      - "src-tauri/**"
-      - "package.json"
-      - "package-lock.json"
   workflow_dispatch:
 
 concurrency:
