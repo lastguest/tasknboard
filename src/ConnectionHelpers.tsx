@@ -20,7 +20,7 @@ export function ConnectionHelpers({ runtime }: { runtime: LocalConnection }) {
     resetFeedback();
     try {
       await navigator.clipboard.writeText(helper.text);
-      setCopied("Copied. Complete the setup in your coding agent.");
+      setCopied("Copied.");
     } catch {
       setCopyError(
         "Could not copy. Select the text below and copy it manually.",
@@ -72,35 +72,40 @@ export function ConnectionHelpers({ runtime }: { runtime: LocalConnection }) {
             }}
           />
         </div>
+        <div className="connection-helper-actions">
+          <button
+            type="button"
+            className="secondary"
+            disabled={!valid}
+            onClick={() => void copy()}
+          >
+            {helper.label}
+          </button>
+          {client === "pi" && (
+            <button
+              type="button"
+              className="secondary"
+              disabled={!valid}
+              onClick={download}
+            >
+              Download skill
+            </button>
+          )}
+        </div>
       </div>
       <p id="agent-identity-help" className="small">
         {valid
           ? "Use a unique identity for each concurrent agent."
           : "Enter 1–80 letters, numbers, dots, underscores, or hyphens. Start with a letter or number."}
       </p>
-      <p>{helper.instruction}</p>
-      <div className="connection-helper-actions">
-        <button
-          type="button"
-          className="secondary small-button"
-          disabled={!valid}
-          onClick={() => void copy()}
-        >
-          {helper.label}
-        </button>
-        {client === "pi" && (
-          <button
-            type="button"
-            className="secondary small-button"
-            disabled={!valid}
-            onClick={download}
-          >
-            Download skill
-          </button>
-        )}
-      </div>
+      {valid && (
+        <pre tabIndex={0} aria-label={`${client} connection helper`}>
+          {helper.text}
+        </pre>
+      )}
+      <p className="small">{helper.instruction}</p>
       {copied && (
-        <p role="status" className="small">
+        <p role="status" className="small ok">
           {copied}
         </p>
       )}
@@ -109,12 +114,6 @@ export function ConnectionHelpers({ runtime }: { runtime: LocalConnection }) {
           {copyError}
         </p>
       )}
-      {valid && (
-        <pre tabIndex={0} aria-label={`${client} connection helper`}>
-          {helper.text}
-        </pre>
-      )}
-      <p className="small">{helper.verification}</p>
     </div>
   );
 }

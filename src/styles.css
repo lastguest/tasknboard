@@ -2067,7 +2067,10 @@ footer {
 .agents-page section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+}
+.agents-page .empty-state.compact {
+  margin: 0;
 }
 .section-title {
   font-size: 16px;
@@ -2099,6 +2102,9 @@ footer {
   color: var(--muted);
   max-width: 70ch;
 }
+.integration p.ok {
+  color: var(--accent);
+}
 .integration pre {
   background: #15171a;
   border: 1px solid var(--border);
@@ -2109,12 +2115,20 @@ footer {
   overflow-x: auto;
   color: #cfd6de;
 }
+.connection-helper {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 .connection-helper-controls,
 .connection-helper-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: end;
   gap: 12px;
+}
+.connection-helper #agent-identity-help {
+  margin-top: -6px;
 }
 .connection-helper-field {
   display: grid;
@@ -2127,6 +2141,7 @@ footer {
   max-width: 100%;
 }
 .connection-helper pre {
+  margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
