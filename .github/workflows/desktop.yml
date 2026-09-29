@@ -49,15 +49,18 @@ jobs:
           restore-keys: |
             windows-rust-${{ hashFiles('src-tauri/Cargo.lock') }}-
             windows-rust-
+      # PowerShell keeps the Windows tar.exe that desktop:prepare needs; Git Bash puts GNU tar first.
       - name: Build Windows installer
-        shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         run: |
-          echo "{\"version\":\"$TASKNBOARD_VERSION\",\"bundle\":{\"createUpdaterArtifacts\":true}}" > "$RUNNER_TEMP/release.conf.json"
+          $config = Join-Path $env:RUNNER_TEMP 'release.conf.json'
+          @{ version = $env:TASKNBOARD_VERSION; bundle = @{ createUpdaterArtifacts = $true } } |
+            ConvertTo-Json -Compress | Set-Content -Path $config -Encoding utf8NoBOM
           # A restored cache can hold installers from earlier versions.
-          rm -rf src-tauri/target/release/bundle
-          npm run desktop:build:windows -- --config "$RUNNER_TEMP/release.conf.json"
+          Remove-Item -Recurse -Force src-tauri/target/release/bundle -ErrorAction SilentlyContinue
+          # PowerShell removes a bare -- before it runs the npm.ps1 shim.
+          npm run desktop:build:windows '--' --config $config
       - name: Save Rust build cache
         if: steps.rust-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
