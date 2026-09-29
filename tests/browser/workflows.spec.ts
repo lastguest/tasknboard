@@ -118,7 +118,7 @@ test("Settings, task workflow, agent review, archive, and export", async ({ page
   await details.getByLabel("Title").fill(`Edited ${title}`);
   await details.getByRole("button", { name: "Save changes" }).click();
   // The task stays open in its tab; closing the tab shows the board again.
-  await expect(details.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  await expect(details.getByRole("button", { name: "Save changes" })).toBeHidden();
   await expect(page.getByRole("navigation", { name: "Open tasks" })).toContainText(`Edited ${title}`);
   await details.getByRole("button", { name: `Close ${taskId}` }).click();
   await expect(details).toBeHidden();

@@ -925,7 +925,7 @@ export function TaskEditor({
           type="button"
           className="secondary"
           onClick={current ? () => setDiscard("revert") : requestClose}
-          disabled={current ? !dirty || Boolean(pending) : pending === "save"}
+          disabled={current ? Boolean(pending) : pending === "save"}
         >
           Cancel
         </button>
@@ -933,7 +933,7 @@ export function TaskEditor({
           type="submit"
           form={`${listId}-form`}
           className="primary"
-          disabled={Boolean(pending) || Boolean(current && !dirty)}
+          disabled={Boolean(pending)}
         >
           {pending === "save"
             ? "Saving…"
@@ -1411,12 +1411,16 @@ export function TaskEditor({
     <>
     {current ? (
       <section className="task-panel" aria-labelledby={`${listId}-title`}>
-        {/* Actions sit in the header, clear of the toasts in the bottom corner. */}
+        {/* Actions sit in the sticky header, clear of the toasts in the bottom corner. */}
+        <div className="task-panel-top">
         <div className="dialog-head">
           <h2 id={`${listId}-title`} ref={headingRef} tabIndex={-1}>
             <span className="task-id">{current.id}</span> Task details
           </h2>
-          {discard ? discardBar : actions}
+          {/* Save and Cancel show only while there is a draft to act on. */}
+          {discard
+            ? discardBar
+            : (dirty || pending === "save") && actions}
           <button
             type="button"
             className="icon-button"
@@ -1427,6 +1431,7 @@ export function TaskEditor({
           </button>
         </div>
         {errorNote && <div className="task-panel-error">{errorNote}</div>}
+        </div>
         <div className="dialog-body">{layout}</div>
       </section>
     ) : (

@@ -476,18 +476,29 @@ main {
 .task-tab-panel {
   flex: 1;
   min-height: 0;
-  display: flex;
-  padding: 16px 28px 24px;
+  /* No top padding: content would show above the stuck header. */
+  padding: 0 28px 24px;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
+/* The tab panel scrolls the whole task; clip keeps the header sticky. */
 .task-panel {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
+  margin-top: 16px;
   background: #191b1f;
   border: 1px solid var(--border);
   border-radius: 12px;
-  overflow: hidden;
+  overflow: clip;
+}
+.task-panel-top {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.task-panel .dialog-body {
+  overflow: visible;
+}
+.task-panel .dialog-head {
+  min-height: 57px;
 }
 .task-panel h2:focus {
   outline: none;
@@ -3139,9 +3150,10 @@ footer {
     max-width: 180px;
   }
   .task-tab-panel {
-    padding: 10px 0 0;
+    padding: 0;
   }
   .task-panel {
+    margin-top: 10px;
     border-radius: 0;
     border-width: 1px 0 0;
   }
