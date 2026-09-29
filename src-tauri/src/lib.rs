@@ -2,6 +2,8 @@
 mod desktop;
 #[cfg(mobile)]
 mod mobile;
+#[cfg(desktop)]
+mod update;
 
 use tauri::{AppHandle, Url};
 use tauri_plugin_opener::OpenerExt;

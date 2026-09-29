@@ -19,5 +19,11 @@
     "icon": ["icons/icon.png", "icons/icon.icns"],
     "resources": { "resources/": "resources/" },
     "macOS": { "minimumSystemVersion": "13.5", "signingIdentity": "-" }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhENUJDMTU2RUFBOTg3MTAKUldRUWg2bnFWc0ZialdsWmk3RWJLMkhaRjc1VHZwanJuU0tIVU96M1YxRzkzZTY1eEhLRGF3bUcK",
+      "endpoints": ["https://github.com/lastguest/tasknboard/releases/download/latest/latest.json"]
+    }
   }
 }
