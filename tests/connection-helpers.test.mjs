@@ -25,6 +25,7 @@ test("client commands preserve literal paths and separate agent identities", () 
       { encoding: "utf8" },
     );
     const args = output.split("\0").slice(0, -1);
+    assert.deepEqual(args.slice(0, 3), ["mcp", "add", "tasknboard"]);
     assert.deepEqual(args.slice(-3), ["--", entry.command, ...entry.args]);
     assert.ok(args.includes(`TASKNBOARD_DB=${entry.env.TASKNBOARD_DB}`));
     assert.ok(args.includes(`TASKNBOARD_AGENT_ID=${client}`));

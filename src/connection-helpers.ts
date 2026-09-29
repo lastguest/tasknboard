@@ -58,13 +58,13 @@ export function connectionHelper(
   };
   const shell = windows ? "PowerShell" : "a POSIX shell (zsh or bash)";
   if (client === "codex" || client === "claude") {
-    const parts =
-      client === "codex"
-        ? ["codex", "mcp", "add", "tasknboard"]
-        : ["claude", "mcp", "add", "--transport", "stdio", "--scope", "user"];
+    // The name comes before --env: Claude Code parses --env as variadic
+    // and takes any later positional argument as one more variable.
+    const parts = [client, "mcp", "add", "tasknboard"];
+    if (client === "claude")
+      parts.push("--transport", "stdio", "--scope", "user");
     for (const [key, value] of Object.entries(env))
       parts.push("--env", quote(`${key}=${value}`));
-    if (client === "claude") parts.push("tasknboard");
     parts.push("--", quote(source.command), ...source.args.map(quote));
     return {
       text: parts.join(" "),

@@ -60,7 +60,7 @@ test("client helpers switch formats, copy current identity, and report clipboard
   await expect(section.getByRole("status")).toHaveCount(0);
   await expect(section.getByLabel("Agent identity")).toHaveValue("claude");
   await expect(section.getByLabel("claude connection helper")).toContainText(
-    "claude mcp add --transport stdio --scope user",
+    "claude mcp add tasknboard --transport stdio --scope user",
   );
   await section.getByLabel("Client", { exact: true }).selectOption("opencode");
   await section.getByRole("button", { name: "Copy configuration" }).click();
