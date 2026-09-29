@@ -107,6 +107,11 @@ export function createStore(path, { clock = Date.now } = {}) {
       );
       db.prepare("INSERT INTO migrations VALUES(7)").run();
     }
+    if (!db.prepare("SELECT version FROM migrations WHERE version=8").get()) {
+      // A renamed board's old ID keeps resolving until a board takes it again.
+      db.exec(`CREATE TABLE board_redirects(from_id TEXT PRIMARY KEY, to_id TEXT NOT NULL);
+ INSERT INTO migrations VALUES(8);`);
+    }
   });
   const readTransaction = (fn) => {
     db.exec("BEGIN");
@@ -124,8 +129,17 @@ export function createStore(path, { clock = Date.now } = {}) {
       .prepare("SELECT data FROM tasks ORDER BY number DESC")
       .all()
       .map((r) => JSON.parse(r.data));
+  /** The current ID of a board, following a redirect from a former ID. */
+  const boardOf = (id) =>
+    db.prepare("SELECT to_id FROM board_redirects WHERE from_id=?").get(id)
+      ?.to_id ?? id;
+  /** Task IDs under a former board ID resolve to the renamed task. */
+  const taskOf = (id) => {
+    const split = id.lastIndexOf("-");
+    return `${boardOf(id.slice(0, split))}${id.slice(split)}`;
+  };
   const get = (id) => {
-    const row = db.prepare("SELECT data FROM tasks WHERE id=?").get(id);
+    const row = db.prepare("SELECT data FROM tasks WHERE id=?").get(taskOf(id));
     if (!row) fail("NOT_FOUND", "Task not found", 404);
     return JSON.parse(row.data);
   };
@@ -138,8 +152,18 @@ export function createStore(path, { clock = Date.now } = {}) {
       .prepare("SELECT data FROM boards ORDER BY number")
       .all()
       .map((r) => JSON.parse(r.data));
+  /** Adds `formerIds`: the old IDs that still redirect to each board. */
+  const withFormerIds = (boards) => {
+    const rows = db
+      .prepare("SELECT from_id, to_id FROM board_redirects ORDER BY from_id")
+      .all();
+    return boards.map((b) => ({
+      ...b,
+      formerIds: rows.filter((r) => r.to_id === b.id).map((r) => r.from_id),
+    }));
+  };
   const getBoard = (id) => {
-    const row = db.prepare("SELECT data FROM boards WHERE id=?").get(id);
+    const row = db.prepare("SELECT data FROM boards WHERE id=?").get(boardOf(id));
     if (!row) fail("NOT_FOUND", `Board ${id} not found`, 404);
     return JSON.parse(row.data);
   };
@@ -292,7 +316,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         actor: identity,
         actors: actorRoster(),
         leaseSeconds: 900,
-        schemaVersion: 7,
+        schemaVersion: 8,
       };
     if (command === "update_profile")
       return transaction(() => {
@@ -336,7 +360,7 @@ export function createStore(path, { clock = Date.now } = {}) {
                 .includes(q)) &&
             (!p.status || t.status === p.status) &&
             (!p.assignee || t.assignee === p.assignee) &&
-            (!p.board || t.board === p.board) &&
+            (!p.board || t.board === boardOf(p.board)) &&
             (!p.epic || (t.epic || "none") === p.epic),
         );
         const page = rows.slice(p.offset, p.offset + p.limit);
@@ -351,7 +375,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       return readTransaction(() => detail(get(p.id)));
     if (command === "list_boards")
       return readTransaction(() => ({
-        boards: withCounts(allBoards(), "board"),
+        boards: withFormerIds(withCounts(allBoards(), "board")),
       }));
     if (command === "create_board")
       return transaction(() => {
@@ -367,12 +391,14 @@ export function createStore(path, { clock = Date.now } = {}) {
           createdAt: now,
           updatedAt: now,
         };
+        // Registering a former ID again ends its redirect.
+        db.prepare("DELETE FROM board_redirects WHERE from_id=?").run(p.id);
         db.prepare("INSERT INTO boards(id, next_task, data) VALUES(?, 0, ?)").run(
           board.id,
           JSON.stringify(board),
         );
         event(board.id, identity, "create_board");
-        return withCounts([board], "board")[0];
+        return withFormerIds(withCounts([board], "board"))[0];
       });
     if (command === "update_board")
       return transaction(() => {
@@ -388,7 +414,71 @@ export function createStore(path, { clock = Date.now } = {}) {
         board.updatedAt = new Date(clock()).toISOString();
         saveBoard(board);
         event(board.id, identity, "update_board", JSON.stringify(p.patch));
-        return withCounts([board], "board")[0];
+        return withFormerIds(withCounts([board], "board"))[0];
+      });
+    if (command === "rename_board")
+      return transaction(() => {
+        humanOnly(identity, "rename", "boards");
+        const board = getBoard(p.id);
+        if (board.version !== p.expectedVersion)
+          fail(
+            "VERSION_CONFLICT",
+            `Board changed. Read it again. Current version: ${board.version}`,
+          );
+        if (db.prepare("SELECT 1 FROM boards WHERE id=?").get(p.newId))
+          fail("BOARD_EXISTS", `Board ${p.newId} already exists`);
+        const tasks = all().filter((t) => t.board === board.id);
+        // A claim names the old ID, so claimed work must be released first.
+        const claimed = tasks.filter((t) => active(t)).map((t) => t.id);
+        if (claimed.length)
+          fail(
+            "LEASE_CONFLICT",
+            `Release the claims on ${claimed.join(", ")} before changing the board ID`,
+          );
+        const now = new Date(clock()).toISOString();
+        const moveTask = db.prepare("UPDATE tasks SET id=?, data=? WHERE id=?");
+        const moveEvents = db.prepare("UPDATE events SET task_id=? WHERE task_id=?");
+        for (const t of tasks) {
+          const from = t.id;
+          t.id = `${p.newId}${from.slice(board.id.length)}`;
+          t.board = p.newId;
+          t.version++;
+          t.updatedAt = now;
+          moveTask.run(t.id, JSON.stringify(t), from);
+          moveEvents.run(t.id, from);
+          event(t.id, identity, "rename_board", JSON.stringify({ from, to: t.id }));
+        }
+        for (const e of allEpics().filter((e) => e.board === board.id)) {
+          e.board = p.newId;
+          saveEpic(e);
+        }
+        moveEvents.run(p.newId, board.id);
+        db.prepare("UPDATE boards SET id=? WHERE id=?").run(p.newId, board.id);
+        // The old ID redirects to the new one. A redirect to the old ID
+        // follows it, and one from the new ID ends because a board holds it.
+        db.prepare("DELETE FROM board_redirects WHERE from_id=?").run(p.newId);
+        db.prepare("UPDATE board_redirects SET to_id=? WHERE to_id=?").run(
+          p.newId,
+          board.id,
+        );
+        db.prepare("INSERT INTO board_redirects(from_id, to_id) VALUES(?, ?)").run(
+          board.id,
+          p.newId,
+        );
+        const from = board.id;
+        Object.assign(board, {
+          id: p.newId,
+          version: board.version + 1,
+          updatedAt: now,
+        });
+        saveBoard(board);
+        event(
+          board.id,
+          identity,
+          "rename_board",
+          JSON.stringify({ from, to: p.newId }),
+        );
+        return withFormerIds(withCounts([board], "board"))[0];
       });
     if (command === "list_epics")
       return readTransaction(() => ({
@@ -396,7 +486,7 @@ export function createStore(path, { clock = Date.now } = {}) {
           allEpics().filter(
             (e) =>
               (p.includeArchived || !e.archived) &&
-              (!p.board || e.board === p.board),
+              (!p.board || e.board === boardOf(p.board)),
           ),
           "epic",
         ),
@@ -404,14 +494,14 @@ export function createStore(path, { clock = Date.now } = {}) {
     if (command === "create_epic")
       return transaction(() => {
         humanOnly(identity, "create", "epics");
-        getBoard(p.board);
+        const { id: board } = getBoard(p.board);
         if (p.id && db.prepare("SELECT 1 FROM epics WHERE id=?").get(p.id))
           fail("EPIC_EXISTS", `Epic ${p.id} already exists`);
         const result = db.prepare("INSERT INTO epics(data) VALUES('{}')").run();
         const now = new Date(clock()).toISOString();
         const epic = {
           id: p.id ?? `EPIC-${result.lastInsertRowid}`,
-          board: p.board,
+          board,
           title: p.title,
           description: p.description,
           // Unless chosen, rotate through the palette in creation order.
@@ -472,10 +562,13 @@ export function createStore(path, { clock = Date.now } = {}) {
       if (identity.kind !== "human")
         fail("FORBIDDEN", "Human access required", 403);
       return transaction(() => ({
-        schemaVersion: 7,
+        schemaVersion: 8,
         exportedAt: new Date(clock()).toISOString(),
         actors: actorRoster(),
         boards: allBoards(),
+        boardRedirects: db
+          .prepare("SELECT from_id AS fromId, to_id AS toId FROM board_redirects ORDER BY from_id")
+          .all(),
         epics: allEpics(),
         tasks: all(),
         events: db.prepare("SELECT * FROM events ORDER BY sequence").all(),
@@ -492,18 +585,19 @@ export function createStore(path, { clock = Date.now } = {}) {
     }
     return transaction(() => {
       if (command === "create_task") {
-        getBoard(p.board);
-        assignableEpic(p.epic, p.board);
+        const { id: board } = getBoard(p.board);
+        assignableEpic(p.epic, board);
         // Numbers are allocated per board and never reused.
         const { next_task: number } = db
           .prepare(
             "UPDATE boards SET next_task=next_task+1 WHERE id=? RETURNING next_task",
           )
-          .get(p.board);
+          .get(board);
         const now = new Date(clock()).toISOString();
         const t = {
           ...p,
-          id: `${p.board}-${String(number).padStart(3, "0")}`,
+          board,
+          id: `${board}-${String(number).padStart(3, "0")}`,
           status: "backlog",
           version: 1,
           createdAt: now,

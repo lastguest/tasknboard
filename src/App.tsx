@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Assignee, Board } from "./Board";
 import {
   Settings,
@@ -235,8 +242,16 @@ export default function App() {
     settings ||
     help ||
     Boolean(opening);
+  // One listener calls the handler from the latest commit. A passive effect
+  // would leave the previous render's handler (and its board) in place.
+  const shortcuts = useRef<(e: KeyboardEvent) => void>(() => {});
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
+    const handler = (e: KeyboardEvent) => shortcuts.current(e);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+  useLayoutEffect(() => {
+    shortcuts.current = (e: KeyboardEvent) => {
       if (standup || dialogOpen || e.defaultPrevented) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -267,8 +282,6 @@ export default function App() {
         setCollapsed((c) => !c);
       }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
   });
 
   const wasPresenting = useRef(false);
@@ -497,6 +510,18 @@ export default function App() {
       actions: isNew
         ? [{ label: "Open", run: () => openBoard(board) }]
         : undefined,
+    });
+  }
+
+  function boardRenamed(from: string, board: BoardRecord) {
+    setBoardDialog(null);
+    setBoards((list) => list.map((b) => (b.id === from ? board : b)));
+    setBoardId((current) => (current === from ? board.id : current));
+    void refresh();
+    notify({
+      tone: "ok",
+      title: `Changed board ${from} to ${board.id}`,
+      body: `Its tasks are now ${board.id}-001, ${board.id}-002, and so on.`,
     });
   }
 
@@ -1177,6 +1202,7 @@ export default function App() {
           board={boardDialog.board}
           onClose={() => setBoardDialog(null)}
           onSaved={boardSaved}
+          onRenamed={boardRenamed}
         />
       )}
       {help && <ShortcutHelp onClose={() => setHelp(false)} />}

@@ -57,6 +57,8 @@ export function BoardsPage({
               <p className="epic-card-summary">
                 {board.showInSidebar ? "Shown in the sidebar" : "Hidden from the sidebar"}
                 {` · ${done} done`}
+                {board.formerIds.length > 0 &&
+                  ` · Formerly ${board.formerIds.join(", ")}`}
               </p>
               {canManage && (
                 <div className="board-card-actions">
@@ -83,15 +85,22 @@ const boardErrors: Record<string, string> = {
     "This board changed after you opened it, so nothing was saved. Load the latest version, check your draft, and save again.",
 };
 
+/** A board ID field: capital letters and digits only. */
+const boardIdInput = (value: string) =>
+  value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
 /** Create or edit a board. Only people manage boards; the server enforces it. */
 export function BoardEditor({
   board,
   onClose,
   onSaved,
+  onRenamed,
 }: {
   board: Board | null;
   onClose: () => void;
   onSaved: (board: Board, created: boolean) => void;
+  /** The board's ID and all its task IDs changed from `from`. */
+  onRenamed: (from: string, board: Board) => void;
 }) {
   const [base, setBase] = useState(board);
   const [id, setId] = useState("");
@@ -99,6 +108,8 @@ export function BoardEditor({
   const [showInSidebar, setShowInSidebar] = useState(
     board?.showInSidebar ?? true,
   );
+  const [newId, setNewId] = useState("");
+  const [renameStep, setRenameStep] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const patch = {
@@ -144,6 +155,25 @@ export function BoardEditor({
           })
         : await command<Board>("create_board", { id, title, showInSidebar });
       onSaved(saved, !base);
+    } catch (e) {
+      setError(errorOf(e));
+      setPending(false);
+    }
+  }
+
+  async function rename() {
+    if (!base || pending) return;
+    setPending(true);
+    setError(null);
+    try {
+      onRenamed(
+        base.id,
+        await command<Board>("rename_board", {
+          id: base.id,
+          expectedVersion: base.version,
+          newId,
+        }),
+      );
     } catch (e) {
       setError(errorOf(e));
       setPending(false);
@@ -226,9 +256,7 @@ export function BoardEditor({
               autoCapitalize="characters"
               spellCheck={false}
               value={id}
-              onChange={(e) =>
-                setId(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))
-              }
+              onChange={(e) => setId(boardIdInput(e.target.value))}
             />
           </label>
         )}
@@ -257,6 +285,68 @@ export function BoardEditor({
           to everyone in the workspace.
         </p>
       </form>
+      {base && (
+        <section className="side-block epic-archive" aria-label="Change ID">
+          {!renameStep ? (
+            <button
+              type="button"
+              className="quiet"
+              onClick={() => setRenameStep(true)}
+              disabled={pending}
+            >
+              Change ID…
+            </button>
+          ) : (
+            <div
+              className="confirm-archive"
+              role="group"
+              aria-label="Confirm ID change"
+            >
+              <label className="field">
+                <span className="field-label">New ID</span>
+                <input
+                  autoFocus
+                  maxLength={10}
+                  placeholder={base.id}
+                  autoCapitalize="characters"
+                  spellCheck={false}
+                  value={newId}
+                  onChange={(e) => setNewId(boardIdInput(e.target.value))}
+                />
+              </label>
+              <p>
+                Every task on this board moves to the new prefix, for example{" "}
+                {base.id}-001 becomes {newId || "NEW"}-001. Its history moves
+                with it. {base.id} keeps redirecting to the new ID until a new
+                board takes {base.id}. Claimed tasks must be released first.
+              </p>
+              {dirty && (
+                <p className="small">
+                  Save or undo your other changes before you change the ID.
+                </p>
+              )}
+              <div className="review-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={pending}
+                  onClick={() => setRenameStep(false)}
+                >
+                  Keep {base.id}
+                </button>
+                <button
+                  type="button"
+                  className="danger-button"
+                  disabled={pending || dirty || !newId || newId === base.id}
+                  onClick={rename}
+                >
+                  {pending ? "Changing…" : `Change ID to ${newId || "…"}`}
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
     </Dialog>
   );
 }

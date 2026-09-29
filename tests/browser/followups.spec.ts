@@ -702,4 +702,15 @@ test("Boards number their own tasks and can hide from the sidebar", async ({ pag
   await expect(listed).toContainText("Hidden from the sidebar");
   await listed.getByRole("button", { name: title }).click();
   await expect(card(page, `${id}-001`)).toBeVisible();
+
+  // Changing the ID moves every task to the new prefix.
+  const renamed = `R${key().toUpperCase()}`;
+  await page.getByRole("button", { name: "Edit board" }).click();
+  await edit.getByRole("button", { name: "Change ID…" }).click();
+  await edit.getByRole("textbox", { name: "New ID" }).fill(renamed);
+  await edit.getByRole("button", { name: `Change ID to ${renamed}` }).click();
+  await expect(edit).toBeHidden();
+  await expect(card(page, `${renamed}-001`)).toBeVisible();
+  await expect(page.locator(".page-title p")).toContainText(renamed);
+  expect((await command("get_task", { id: `${renamed}-001` })).board).toBe(renamed);
 });

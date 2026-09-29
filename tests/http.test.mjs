@@ -65,7 +65,7 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   const infoResponse = await post("workspace_info");
   assert.equal(infoResponse.status, 200);
   const info = await infoResponse.json();
-  assert.equal(info.schemaVersion, 7);
+  assert.equal(info.schemaVersion, 8);
   assert.deepEqual(info.actors, [
     { id: "remote-agent", kind: "agent", name: "", avatar: "" },
     { id: "reviewer", kind: "human", name: "", avatar: "" },
@@ -192,7 +192,7 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
     413,
   );
   const backup = await (await post("export_workspace")).json();
-  assert.equal(backup.schemaVersion, 7);
+  assert.equal(backup.schemaVersion, 8);
   assert.deepEqual(backup.boards.map((b) => b.id), ["TNB", "WEB"]);
   assert.ok(backup.actors.some((actor) => actor.id === "remote-agent"));
   const databaseBytes = Buffer.concat([

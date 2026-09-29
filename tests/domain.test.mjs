@@ -188,7 +188,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
     { id: "TasknBoard Agent", kind: "human", token: "must-not-be-kept" },
   ]);
   const info = s.execute("workspace_info", {}, human);
-  assert.equal(info.schemaVersion, 7);
+  assert.equal(info.schemaVersion, 8);
   assert.deepEqual(info.actor, human);
   assert.deepEqual(info.actors, [
     { id: "Morgan", kind: "agent", name: "", avatar: "" },
@@ -210,7 +210,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
   );
   assert.equal(s.execute("list_tasks", {}, human).total, 0);
   const backup = s.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 7);
+  assert.equal(backup.schemaVersion, 8);
   assert.deepEqual(backup.actors, info.actors);
 });
 test("actors edit only their own display name and picture", (t) => {
@@ -912,6 +912,7 @@ test("migration 7 moves a schema-6 workspace onto board TNB", (t) => {
       id: "TNB",
       title: "Studio",
       showInSidebar: true,
+      formerIds: [],
       version: 1,
       createdAt: stamp,
       updatedAt: stamp,
@@ -928,7 +929,7 @@ test("migration 7 moves a schema-6 workspace onto board TNB", (t) => {
     "EPIC-2",
   );
   const backup = store.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 7);
+  assert.equal(backup.schemaVersion, 8);
   assert.deepEqual(backup.boards.map((b) => b.id), ["TNB"]);
   assert.ok(backup.epics.every((e) => e.board === "TNB"));
   store.close();
@@ -1185,4 +1186,93 @@ test("epics take custom codenames and stay on their board", (t) => {
       .tasks.map((task) => task.id),
     [webTask.id],
   );
+});
+
+test("rename_board moves every task, its history and epics to the new prefix", (t) => {
+  const s = fixture(t);
+  s.execute("create_board", { id: "WEB", title: "Website" }, human);
+  s.execute("create_epic", { board: "WEB", id: "HOME", title: "Home" }, human);
+  const first = s.execute("create_task", { board: "WEB", title: "One", epic: "HOME" }, human);
+  s.execute("add_comment", { id: first.id, expectedVersion: 1, body: "Note" }, human);
+  let second = s.execute("create_task", { board: "WEB", title: "Two" }, human);
+  second = s.execute("archive_task", { id: second.id, expectedVersion: 1 }, human);
+  const other = s.execute("create_task", { board: "TNB", title: "Stays" }, human);
+
+  assert.throws(
+    () => s.execute("rename_board", { id: "WEB", expectedVersion: 1, newId: "SITE" }, a),
+    { code: "FORBIDDEN" },
+  );
+  assert.throws(
+    () => s.execute("rename_board", { id: "WEB", expectedVersion: 1, newId: "TNB" }, human),
+    { code: "BOARD_EXISTS" },
+  );
+  assert.throws(
+    () => s.execute("rename_board", { id: "WEB", expectedVersion: 1, newId: "WEB" }, human),
+    { code: "VALIDATION" },
+  );
+  // A claim names the old ID, so the rename waits for it.
+  const claimed = s.execute("claim_task", { id: first.id, expectedVersion: 2 }, a);
+  assert.throws(
+    () => s.execute("rename_board", { id: "WEB", expectedVersion: 1, newId: "SITE" }, human),
+    { code: "LEASE_CONFLICT" },
+  );
+  s.execute("release_task", { id: first.id, expectedVersion: claimed.version }, a);
+
+  const board = s.execute("rename_board", { id: "WEB", expectedVersion: 1, newId: "SITE" }, human);
+  assert.equal(board.id, "SITE");
+  assert.equal(board.version, 2);
+  const moved = s.execute("get_task", { id: "SITE-001" }, human);
+  assert.equal(moved.board, "SITE");
+  assert.equal(moved.epic, "HOME");
+  assert.equal(moved.commentCount, 1);
+  const renamedEvent = moved.events.at(-1);
+  assert.equal(renamedEvent.kind, "rename_board");
+  assert.equal(renamedEvent.body, JSON.stringify({ from: "WEB-001", to: "SITE-001" }));
+  assert.equal(s.execute("get_task", { id: "SITE-002" }, human).title, "Two");
+  assert.equal(s.execute("get_task", { id: other.id }, human).board, "TNB");
+  assert.deepEqual(
+    s.execute("list_epics", { board: "SITE" }, human).epics.map((e) => e.id),
+    ["HOME"],
+  );
+  assert.deepEqual(s.execute("list_boards", {}, human).boards.map((b) => b.id), ["TNB", "SITE"]);
+  // Numbering continues.
+  assert.equal(s.execute("create_task", { board: "SITE", title: "Three" }, human).id, "SITE-003");
+
+  // The old prefix redirects: reads, writes, board filters and new tasks.
+  assert.equal(s.execute("get_task", { id: "WEB-001" }, human).id, "SITE-001");
+  const edited = s.execute(
+    "update_task",
+    { id: "WEB-001", expectedVersion: moved.version, patch: { title: "One!" } },
+    human,
+  );
+  assert.equal(edited.id, "SITE-001");
+  assert.equal(s.execute("list_tasks", { board: "WEB" }, human).total, 2);
+  assert.equal(s.execute("create_task", { board: "WEB", title: "Four" }, human).id, "SITE-004");
+  assert.deepEqual(s.execute("list_boards", {}, human).boards[1].formerIds, ["WEB"]);
+
+  // A second rename keeps the chain one hop: WEB and SITE both reach HOME1.
+  s.execute("rename_board", { id: "WEB", expectedVersion: 2, newId: "HOME1" }, human);
+  assert.equal(s.execute("get_task", { id: "WEB-002" }, human).id, "HOME1-002");
+  assert.equal(s.execute("get_task", { id: "SITE-002" }, human).id, "HOME1-002");
+  assert.deepEqual(s.execute("list_boards", {}, human).boards[1].formerIds, ["SITE", "WEB"]);
+
+  // Registering an old prefix again drops its redirect only.
+  assert.equal(s.execute("create_board", { id: "WEB", title: "New web" }, human).id, "WEB");
+  assert.equal(s.execute("create_task", { board: "WEB", title: "Fresh" }, human).id, "WEB-001");
+  assert.equal(s.execute("get_task", { id: "WEB-001" }, human).title, "Fresh");
+  assert.equal(s.execute("get_task", { id: "SITE-001" }, human).id, "HOME1-001");
+  assert.deepEqual(s.execute("list_boards", {}, human).boards[1].formerIds, ["SITE"]);
+
+  // Renaming back onto a former ID takes it over as well.
+  s.execute("rename_board", { id: "HOME1", expectedVersion: 3, newId: "SITE" }, human);
+  assert.equal(s.execute("get_task", { id: "HOME1-001" }, human).id, "SITE-001");
+  assert.deepEqual(s.execute("list_boards", {}, human).boards[1].formerIds, ["HOME1"]);
+  const backup = s.execute("export_workspace", {}, human);
+  assert.deepEqual(
+    backup.boardRedirects.map((r) => [r.fromId, r.toId]),
+    [["HOME1", "SITE"]],
+  );
+  const events = backup.events;
+  assert.ok(events.some((e) => e.task_id === "SITE" && e.kind === "create_board"));
+  assert.throws(() => s.execute("get_task", { id: "HOME1-099" }, human), { code: "NOT_FOUND" });
 });

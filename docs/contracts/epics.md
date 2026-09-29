@@ -55,7 +55,7 @@ changing their versions or activity. Epic writes append events (`created`,
 `update_epic`, `archive_epic`) whose subject ID is the epic ID. Task activity
 never includes them. Migration 7 adds boards; see the [boards contract](boards.md).
 `workspace_info` and `export_workspace` report
-`schemaVersion: 7`, and the export includes every epic, including archived ones.
+`schemaVersion: 8`, and the export includes every epic, including archived ones.
 
 MCP exposes `list_epics` to agents. WebMCP exposes `list_epics` and
 `create_epic` to the signed-in browser user.

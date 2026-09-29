@@ -399,6 +399,7 @@ const kindText: Record<string, string> = {
   submit_review: "submitted for review",
   archive_task: "archived the task",
   set_standup_notes: "updated stand-up notes",
+  rename_board: "changed the task ID",
 };
 const fieldLabels: Record<string, string> = {
   title: "title",
@@ -437,6 +438,7 @@ function eventDetail(e: TaskEvent, epicTitle: (id: string) => string) {
           .join("\n") || "Notes cleared."
       );
     if (e.kind === "submit_review") return body.summary;
+    if (e.kind === "rename_board") return `${body.from} → ${body.to}`;
   } catch {
     // Older or free-text bodies are shown as plain text below.
   }

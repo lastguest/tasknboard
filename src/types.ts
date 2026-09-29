@@ -33,6 +33,8 @@ export type Board = {
   id: string;
   title: string;
   showInSidebar: boolean;
+  /** Former IDs that still redirect here, until a board takes them again. */
+  formerIds: string[];
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -67,7 +69,7 @@ export type WorkspaceInfo = {
   name: string;
   actor: Actor;
   actors: Actor[];
-  schemaVersion: 7;
+  schemaVersion: 8;
 };
 export const columns: { id: Status; title: string; color: string }[] = [
   { id: "backlog", title: "Backlog", color: "#88909e" },

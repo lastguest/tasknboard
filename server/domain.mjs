@@ -183,6 +183,10 @@ export const schemas = {
         .refine((v) => Object.keys(v).length > 0, "Empty patch"),
     })
     .strict(),
+  rename_board: z
+    .object({ id: boardId, expectedVersion: version, newId: boardId })
+    .strict()
+    .refine((v) => v.id !== v.newId, "newId: Choose a different ID"),
   list_epics: z
     .object({
       board: boardId.optional(),
