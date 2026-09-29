@@ -27,8 +27,10 @@ test("desktop service uses its assigned port, persists tasks, and exits with its
     await rm(directory, { recursive: true, force: true });
   });
 
+  // The bundled runtime when testing a packaged app; the service reports it as the MCP command.
+  const node = resolve(process.env.TASKNBOARD_TEST_NODE || process.execPath);
   async function start() {
-    const child = spawn(process.env.TASKNBOARD_TEST_NODE || process.execPath, [
+    const child = spawn(node, [
       resolve(process.env.TASKNBOARD_TEST_SERVICE || "server/http.mjs"),
     ], {
       cwd: directory,
@@ -85,7 +87,7 @@ test("desktop service uses its assigned port, persists tasks, and exits with its
   const mcpStatus = await mcpResponse.json();
   assert.equal(mcpStatus.mode, "local");
   assert.deepEqual(mcpStatus.config.mcpServers.tasknboard, {
-    command: process.execPath,
+    command: node,
     args: [join(assets, "mcp.mjs")],
     env: {
       TASKNBOARD_DB: database,

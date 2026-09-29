@@ -88,6 +88,15 @@ The macOS app is written to `src-tauri/target/release/bundle/macos/TasknBoard.ap
 The Windows NSIS installer is written to `src-tauri/target/release/bundle/nsis/` and installs for the current user.
 Local macOS builds use ad-hoc signing and are not notarized. Local Windows installers are unsigned.
 
+Every push to `main` runs the **Desktop apps** workflow. It builds and tests both apps.
+If both pass, it updates the `latest` GitHub release to that commit with these files:
+
+- [TasknBoard-windows-x64-setup.exe](https://github.com/lastguest/tasknboard/releases/download/latest/TasknBoard-windows-x64-setup.exe)
+- [TasknBoard-macos-arm64.zip](https://github.com/lastguest/tasknboard/releases/download/latest/TasknBoard-macos-arm64.zip)
+
+These builds are signed the same way as local builds. Windows SmartScreen can ask before the installer runs.
+On macOS, unzip the app, then run `xattr -dr com.apple.quarantine TasknBoard.app` before the first launch.
+
 `desktop:dev` rebuilds the interface before launch. Restart it after frontend changes.
 Use `npm run dev` for the ordinary web interface with hot reload.
 

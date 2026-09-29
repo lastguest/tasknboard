@@ -1,0 +1,156 @@
+name: Desktop apps
+
+# Builds the Windows installer and the macOS app. A push to main also
+# publishes both to the `latest` release.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'codex/windows-build']
+    paths-ignore: ['**/*.md']
+
+# A newer push replaces an older run, so `latest` never goes back in time.
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Restore Rust build cache
+        id: rust-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: src-tauri/target
+          key: windows-rust-${{ hashFiles('src-tauri/Cargo.lock') }}-${{ hashFiles('src-tauri/src/**', 'src-tauri/tauri*.json') }}
+          restore-keys: |
+            windows-rust-${{ hashFiles('src-tauri/Cargo.lock') }}-
+            windows-rust-
+      - name: Build Windows installer
+        run: npm run desktop:build:windows
+      - name: Save Rust build cache
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: src-tauri/target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+      - name: Test bundled service
+        shell: pwsh
+        run: |
+          $env:TASKNBOARD_TEST_NODE = Join-Path $PWD 'src-tauri/resources/node.exe'
+          $env:TASKNBOARD_TEST_SERVICE = Join-Path $PWD 'src-tauri/resources/server.mjs'
+          node --test tests/desktop.test.mjs
+      - name: Test browser workflows
+        run: |
+          npx playwright install chromium
+          npm run test:ui
+      - name: Install and launch the app
+        shell: pwsh
+        run: ./tests/windows-smoke.ps1
+      - name: Upload installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: TasknBoard-windows-x64
+          path: src-tauri/target/**/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  macos:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Restore Rust build cache
+        id: rust-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: src-tauri/target
+          key: macos-rust-${{ hashFiles('src-tauri/Cargo.lock') }}-${{ hashFiles('src-tauri/src/**', 'src-tauri/tauri*.json') }}
+          restore-keys: |
+            macos-rust-${{ hashFiles('src-tauri/Cargo.lock') }}-
+            macos-rust-
+      - name: Build macOS app
+        run: npm run desktop:build
+      - name: Save Rust build cache
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: src-tauri/target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+      - name: Test bundled service
+        run: |
+          TASKNBOARD_TEST_NODE="$PWD/src-tauri/resources/node" \
+          TASKNBOARD_TEST_SERVICE="$PWD/src-tauri/resources/server.mjs" \
+          node --test tests/desktop.test.mjs
+      # ditto keeps the bundle's symlinks and ad-hoc signature intact.
+      - name: Zip the app
+        run: |
+          app=src-tauri/target/release/bundle/macos/TasknBoard.app
+          codesign --verify --deep --strict "$app"
+          ditto -c -k --sequesterRsrc --keepParent "$app" TasknBoard-macos-arm64.zip
+      - name: Upload app
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: TasknBoard-macos-arm64
+          path: TasknBoard-macos-arm64.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Download builds
+        run: gh run download "$GITHUB_RUN_ID" --dir builds
+      # Fixed names keep the releases/latest/download/<name> links stable.
+      - name: Name release files
+        run: |
+          mkdir release
+          installers=$(find builds/TasknBoard-windows-x64 -name '*-setup.exe')
+          [ "$(echo "$installers" | wc -l)" -eq 1 ] || { echo "::error::Expected one installer: $installers"; exit 1; }
+          cp "$installers" release/TasknBoard-windows-x64-setup.exe
+          cp builds/TasknBoard-macos-arm64/TasknBoard-macos-arm64.zip release/
+          ls -l release
+      - name: Publish the latest release
+        run: |
+          sha="$GITHUB_SHA"
+          notes="Built from $sha on main by run $GITHUB_RUN_NUMBER.
+
+          - **Windows x64:** \`TasknBoard-windows-x64-setup.exe\`. The installer is unsigned, so Windows SmartScreen may ask before it runs.
+          - **macOS (Apple Silicon, 13.5 or later):** \`TasknBoard-macos-arm64.zip\`. The app has an ad-hoc signature and is not notarized. After you unzip it, run \`xattr -dr com.apple.quarantine TasknBoard.app\` before the first launch."
+          if gh api "repos/$GH_REPO/git/ref/tags/latest" --silent 2>/dev/null; then
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/latest" -f sha="$sha" -F force=true --silent
+          else
+            gh api "repos/$GH_REPO/git/refs" -f ref=refs/tags/latest -f sha="$sha" --silent
+          fi
+          if gh release view latest >/dev/null 2>&1; then
+            gh release upload latest release/* --clobber
+            gh release edit latest --title "Latest build" --notes "$notes" --latest
+          else
+            gh release create latest release/* --verify-tag --title "Latest build" --notes "$notes" --latest
+          fi
