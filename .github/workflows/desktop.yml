@@ -1,7 +1,7 @@
 name: Desktop apps
 
 # Builds the Windows installer and the macOS app. A push to main also
-# publishes both to the `latest` release.
+# publishes both, and the signed update feed, to the `latest` release.
 on:
   workflow_dispatch:
   push:
@@ -16,11 +16,23 @@ concurrency:
 permissions:
   contents: read
 
+# The run number makes each build newer than the last, so the updater can compare them.
+env:
+  TASKNBOARD_VERSION: 0.1.${{ github.run_number }}
+
 jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     steps:
+      - name: Check the updater signing key
+        if: env.TAURI_SIGNING_PRIVATE_KEY == ''
+        shell: bash
+        run: |
+          echo "::error::Missing repository secret TAURI_SIGNING_PRIVATE_KEY. See the Automatic updates section in README.md."
+          exit 1
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -38,7 +50,14 @@ jobs:
             windows-rust-${{ hashFiles('src-tauri/Cargo.lock') }}-
             windows-rust-
       - name: Build Windows installer
-        run: npm run desktop:build:windows
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        run: |
+          echo "{\"version\":\"$TASKNBOARD_VERSION\",\"bundle\":{\"createUpdaterArtifacts\":true}}" > "$RUNNER_TEMP/release.conf.json"
+          # A restored cache can hold installers from earlier versions.
+          rm -rf src-tauri/target/release/bundle
+          npm run desktop:build:windows -- --config "$RUNNER_TEMP/release.conf.json"
       - name: Save Rust build cache
         if: steps.rust-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -62,14 +81,24 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: TasknBoard-windows-x64
-          path: src-tauri/target/**/bundle/nsis/*-setup.exe
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
           if-no-files-found: error
           retention-days: 30
 
   macos:
     runs-on: macos-26
     timeout-minutes: 30
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     steps:
+      - name: Check the updater signing key
+        if: env.TAURI_SIGNING_PRIVATE_KEY == ''
+        shell: bash
+        run: |
+          echo "::error::Missing repository secret TAURI_SIGNING_PRIVATE_KEY. See the Automatic updates section in README.md."
+          exit 1
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -87,7 +116,13 @@ jobs:
             macos-rust-${{ hashFiles('src-tauri/Cargo.lock') }}-
             macos-rust-
       - name: Build macOS app
-        run: npm run desktop:build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        run: |
+          echo "{\"version\":\"$TASKNBOARD_VERSION\",\"bundle\":{\"createUpdaterArtifacts\":true}}" > "$RUNNER_TEMP/release.conf.json"
+          # A restored cache can hold bundles from earlier versions.
+          rm -rf src-tauri/target/release/bundle
+          npm run desktop:build -- --config "$RUNNER_TEMP/release.conf.json"
       - name: Save Rust build cache
         if: steps.rust-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -100,16 +135,20 @@ jobs:
           TASKNBOARD_TEST_SERVICE="$PWD/src-tauri/resources/server.mjs" \
           node --test tests/desktop.test.mjs
       # ditto keeps the bundle's symlinks and ad-hoc signature intact.
+      # The updater installs the signed .app.tar.gz archive.
       - name: Zip the app
         run: |
-          app=src-tauri/target/release/bundle/macos/TasknBoard.app
-          codesign --verify --deep --strict "$app"
-          ditto -c -k --sequesterRsrc --keepParent "$app" TasknBoard-macos-arm64.zip
+          bundle=src-tauri/target/release/bundle/macos
+          codesign --verify --deep --strict "$bundle/TasknBoard.app"
+          mkdir macos-release
+          ditto -c -k --sequesterRsrc --keepParent "$bundle/TasknBoard.app" macos-release/TasknBoard-macos-arm64.zip
+          cp "$bundle/TasknBoard.app.tar.gz" macos-release/TasknBoard-macos-arm64.app.tar.gz
+          cp "$bundle/TasknBoard.app.tar.gz.sig" macos-release/TasknBoard-macos-arm64.app.tar.gz.sig
       - name: Upload app
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: TasknBoard-macos-arm64
-          path: TasknBoard-macos-arm64.zip
+          path: macos-release/
           if-no-files-found: error
           retention-days: 30
 
@@ -135,14 +174,29 @@ jobs:
           [ "$(echo "$installers" | wc -l)" -eq 1 ] || { echo "::error::Expected one installer: $installers"; exit 1; }
           cp "$installers" release/TasknBoard-windows-x64-setup.exe
           cp builds/TasknBoard-macos-arm64/TasknBoard-macos-arm64.zip release/
+          cp builds/TasknBoard-macos-arm64/TasknBoard-macos-arm64.app.tar.gz release/
           ls -l release
+          base="https://github.com/$GH_REPO/releases/download/latest"
+          jq -n --arg version "$TASKNBOARD_VERSION" \
+            --arg notes "Built from $GITHUB_SHA on main." \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg mac_signature "$(cat builds/TasknBoard-macos-arm64/TasknBoard-macos-arm64.app.tar.gz.sig)" \
+            --arg windows_signature "$(cat "$installers.sig")" \
+            --arg base "$base" \
+            '{version: $version, notes: $notes, pub_date: $date, platforms: {
+              "darwin-aarch64": {signature: $mac_signature, url: "\($base)/TasknBoard-macos-arm64.app.tar.gz"},
+              "windows-x86_64": {signature: $windows_signature, url: "\($base)/TasknBoard-windows-x64-setup.exe"}
+            }}' > latest.json
+          cat latest.json
       - name: Publish the latest release
         run: |
           sha="$GITHUB_SHA"
           notes="Built from $sha on main by run $GITHUB_RUN_NUMBER.
 
           - **Windows x64:** \`TasknBoard-windows-x64-setup.exe\`. The installer is unsigned, so Windows SmartScreen may ask before it runs.
-          - **macOS (Apple Silicon, 13.5 or later):** \`TasknBoard-macos-arm64.zip\`. The app has an ad-hoc signature and is not notarized. After you unzip it, run \`xattr -dr com.apple.quarantine TasknBoard.app\` before the first launch."
+          - **macOS (Apple Silicon, 13.5 or later):** \`TasknBoard-macos-arm64.zip\`. The app has an ad-hoc signature and is not notarized. After you unzip it, run \`xattr -dr com.apple.quarantine TasknBoard.app\` before the first launch.
+
+          Installed apps check this release at launch and once a day, and offer to install a newer build."
           if gh api "repos/$GH_REPO/git/ref/tags/latest" --silent 2>/dev/null; then
             gh api -X PATCH "repos/$GH_REPO/git/refs/tags/latest" -f sha="$sha" -F force=true --silent
           else
@@ -154,3 +208,5 @@ jobs:
           else
             gh release create latest release/* --verify-tag --title "Latest build" --notes "$notes" --latest
           fi
+          # The feed goes last, so it never points at files that are not uploaded yet.
+          gh release upload latest latest.json --clobber

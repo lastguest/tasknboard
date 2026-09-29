@@ -97,6 +97,35 @@ If both pass, it updates the `latest` GitHub release to that commit with these f
 These builds are signed the same way as local builds. Windows SmartScreen can ask before the installer runs.
 On macOS, unzip the app, then run `xattr -dr com.apple.quarantine TasknBoard.app` before the first launch.
 
+### Automatic updates
+
+The desktop app checks for a newer build at launch and once a day.
+It uses the [Tauri updater](https://v2.tauri.app/plugin/updater/) on macOS and Windows.
+The app reads `latest.json` from the `latest` release.
+If a newer build is available, the app asks before it installs it.
+**Install and Restart** downloads the update, verifies its signature, installs it, and restarts the app.
+The app does not install an update without a valid signature.
+A failed check is written to the log only, so offline use does not show errors.
+Development builds from `desktop:dev` do not check for updates.
+
+Each CI build gets the version `0.1.<run number>`, so a newer run always has a higher version.
+Local builds keep the version `0.1.0`, so they offer the latest published build.
+
+The update feed is signed with an Ed25519 (minisign) key pair.
+The public key is `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`.
+The **Desktop apps** workflow requires the private key in the repository secret `TAURI_SIGNING_PRIVATE_KEY`.
+The key has no password.
+Without the secret, the workflow stops at its first step.
+To replace the key pair:
+
+1. Run `npx tauri signer generate -w ~/.tauri/tasknboard.key`.
+2. Put the content of `~/.tauri/tasknboard.key.pub` in `plugins.updater.pubkey`.
+3. Put the content of `~/.tauri/tasknboard.key` in the `TAURI_SIGNING_PRIVATE_KEY` secret.
+4. Set the `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` value in `.github/workflows/desktop.yml` if the key has a password.
+
+Warning: installed apps accept only updates signed with the key they were built with.
+After you replace the key, users must install the next build manually once.
+
 `desktop:dev` rebuilds the interface before launch. Restart it after frontend changes.
 Use `npm run dev` for the ordinary web interface with hot reload.
 

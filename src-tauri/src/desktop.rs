@@ -137,13 +137,19 @@ fn start_service(app: &tauri::App) -> Result<(Service, tauri::Url), Box<dyn std:
     Ok((service, url))
 }
 
-fn show_error(message: &str) {
+pub(crate) fn show_error(message: &str) {
     eprintln!("TasknBoard: {message}");
     rfd::MessageDialog::new()
         .set_title("TasknBoard")
         .set_description(message)
         .set_level(rfd::MessageLevel::Error)
         .show();
+}
+
+pub(crate) fn stop_service(app: &AppHandle) {
+    if let Some(service) = app.try_state::<Service>() {
+        service.stop();
+    }
 }
 
 fn open_artifact(app: &AppHandle, url: &tauri::Url) {
@@ -155,6 +161,7 @@ fn open_artifact(app: &AppHandle, url: &tauri::Url) {
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let (service, url) = start_service(app)?;
             let origin = url.origin();
@@ -198,6 +205,7 @@ pub fn run() {
                 .build()?;
             let child = Arc::clone(&service.0);
             app.manage(service);
+            crate::update::watch(app.handle().clone());
             let handle = app.handle().clone();
             thread::spawn(move || loop {
                 thread::sleep(Duration::from_millis(500));
@@ -222,9 +230,7 @@ pub fn run() {
     match app {
         Ok(app) => app.run(|handle, event| {
             if matches!(event, tauri::RunEvent::Exit) {
-                if let Some(service) = handle.try_state::<Service>() {
-                    service.stop();
-                }
+                stop_service(handle);
             }
         }),
         Err(error) => {
