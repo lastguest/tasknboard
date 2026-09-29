@@ -61,7 +61,7 @@ test("Board, List and My tasks combine filters and agree on counts", async ({ pa
   await expect(page.getByRole("heading", { name: "No tasks match these filters." })).toBeVisible();
   await page.getByRole("button", { name: "Clear filters", exact: true }).first().click();
   await expect(card(page, mine.id)).toBeVisible();
-  await expect(page.locator("tbody")).not.toContainText(`${prefix} other`);
+  await expect(page.locator("table")).not.toContainText(`${prefix} other`);
 });
 
 test("Status menu saves and the server rejects an invalid drag", async ({ page }) => {

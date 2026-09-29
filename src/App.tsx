@@ -1,7 +1,8 @@
 import { ConnectionHelpers } from "./ConnectionHelpers";
 import { isMcpStatus, type McpStatus } from "./connection-helpers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Assignee, Board } from "./Board";
+import { Assignee, Board, StatusIcon } from "./Board";
+import { ContextMenu, menuAt, type MenuState } from "./ContextMenu";
 import {
   Settings,
   ShortcutHelp,
@@ -45,9 +46,12 @@ import { formatUtcTimestamp } from "./formatting";
 import { Avatar, displayName, PeopleContext, usePeople } from "./People";
 import {
   activeLease,
+  columns,
+  doneLocked,
   epicProgress,
   epicPalette,
   epicStyle,
+  priorities,
   statusTitle,
   type Actor,
   type BoardRecord,
@@ -147,6 +151,7 @@ export default function App() {
   /** Bumped when Settings closes, so the section sees a new GitHub connection. */
   const [settingsClosed, setSettingsClosed] = useState(0);
   const [help, setHelp] = useState(false);
+  const [menu, setMenu] = useState<MenuState | null>(null);
   const [standup, setStandup] = useState(false);
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -510,7 +515,8 @@ export default function App() {
       : view === "saved"
         ? (currentSaved?.name ?? viewBase?.name ?? "View")
         : viewTitles[view];
-  const canManageEpics = workspaceInfoLoaded && actor.kind === "human";
+  /** People manage epics and archive tasks; the server enforces both. */
+  const isHuman = workspaceInfoLoaded && actor.kind === "human";
   const openEpic = (epic: Epic) => {
     setEpicId(epic.id);
     setView("epic");
@@ -615,7 +621,7 @@ export default function App() {
       seedView(currentSaved);
   }, [currentSaved?.version]);
   const canSaveView =
-    canManageEpics && !overviews.includes(view) && sync.connected;
+    isHuman && !overviews.includes(view) && sync.connected;
   saveAsRef.current = () => {
     if (canSaveView) setViewDialog({ view: null, ...working() });
   };
@@ -884,6 +890,315 @@ export default function App() {
     });
   }
 
+  async function quickEdit(
+    task: Task,
+    patch: Partial<Pick<Task, "priority" | "assignee">>,
+    body: string,
+  ) {
+    try {
+      const saved = await command<Task>("update_task", {
+        id: task.id,
+        expectedVersion: task.version,
+        patch,
+      });
+      setTasks((ts) => ts.map((t) => (t.id === saved.id ? saved : t)));
+      notify({ tone: "ok", title: `Saved ${task.id}`, body });
+    } catch (e) {
+      notify({
+        tone: "error",
+        title: `${task.id} was not changed`,
+        body: describeError(errorOf(e)),
+      });
+    } finally {
+      void refresh();
+    }
+  }
+
+  async function archiveTask(task: Task) {
+    try {
+      await command("archive_task", {
+        id: task.id,
+        expectedVersion: task.version,
+      });
+      archived(task);
+    } catch (e) {
+      notify({
+        tone: "error",
+        title: `${task.id} was not archived`,
+        body: describeError(errorOf(e)),
+      });
+      void refresh();
+    }
+  }
+
+  function copyId(id: string) {
+    Promise.resolve()
+      .then(() => navigator.clipboard.writeText(id))
+      .then(
+        () => notify({ tone: "ok", title: `Copied ${id}` }),
+        () =>
+          notify({
+            tone: "error",
+            title: `Couldn't copy ${id}`,
+            body: "The browser blocked clipboard access.",
+          }),
+      );
+  }
+
+  function filterBy(name: string) {
+    setAssignee(name);
+    if (view === "agents" || view === "epics") setView("board");
+  }
+
+  function taskMenu(e: React.MouseEvent<HTMLElement>, task: Task) {
+    const epic = epicsById.get(task.epic);
+    const moving = pending.has(task.id);
+    setMenu(
+      menuAt(e, `Actions for ${task.id}`, [
+        {
+          items: [
+            {
+              label: "Open details",
+              icon: <Icon name="external" size={14} />,
+              disabled: Boolean(opening),
+              onSelect: () => void openTask(task),
+            },
+          ],
+        },
+        {
+          label: "Status",
+          items: columns.map((c) => {
+            const locked = c.id === "done" && doneLocked(task.status);
+            return {
+              label: locked ? "Done (after review)" : c.title,
+              icon: <StatusIcon status={c.id} />,
+              checked: task.status === c.id,
+              disabled: moving || locked,
+              onSelect: () => void move(task, c.id),
+            };
+          }),
+        },
+        {
+          label: "Priority",
+          items: priorities.map((p) => ({
+            label: p.title,
+            checked: task.priority === p.id,
+            onSelect: () => {
+              if (task.priority !== p.id)
+                void quickEdit(task, { priority: p.id }, `Priority is now ${p.title}.`);
+            },
+          })),
+        },
+        {
+          label: "Assignee",
+          items: [
+            ...(workspaceInfoLoaded && task.assignee !== actor.id
+              ? [
+                  {
+                    label: "Assign to me",
+                    icon: <Icon name="user" size={14} />,
+                    onSelect: () =>
+                      void quickEdit(
+                        task,
+                        { assignee: actor.id },
+                        `Assigned to ${displayName(people, actor.id)}.`,
+                      ),
+                  },
+                ]
+              : []),
+            ...(task.assignee
+              ? [
+                  {
+                    label: "Unassign",
+                    icon: <Icon name="close" size={14} />,
+                    onSelect: () =>
+                      void quickEdit(task, { assignee: "" }, "Now unassigned."),
+                  },
+                  {
+                    label: `Show only ${displayName(people, task.assignee)}`,
+                    icon: <Icon name="users" size={14} />,
+                    checked: assignee === task.assignee,
+                    onSelect: () =>
+                      filterBy(assignee === task.assignee ? "" : task.assignee),
+                  },
+                ]
+              : []),
+          ],
+        },
+        {
+          items: [
+            ...(epic && !(view === "epic" && epicId === epic.id)
+              ? [
+                  {
+                    label: `Open epic “${epic.title}”`,
+                    icon: <Icon name="folder" size={14} />,
+                    onSelect: () => openEpic(epic),
+                  },
+                ]
+              : []),
+            {
+              label: "Copy ID",
+              icon: <Icon name="list" size={14} />,
+              onSelect: () => copyId(task.id),
+            },
+            ...(isHuman
+              ? [
+                  {
+                    label: "Archive",
+                    icon: <Icon name="archive" size={14} />,
+                    confirm: `Confirm archive of ${task.id}`,
+                    disabled: moving,
+                    onSelect: () => void archiveTask(task),
+                  },
+                ]
+              : []),
+          ],
+        },
+      ]),
+    );
+  }
+
+  function epicMenu(e: React.MouseEvent<HTMLElement>, epic: Epic) {
+    setMenu(
+      menuAt(e, `Actions for ${epic.id}`, [
+        {
+          items: [
+            {
+              label: "Open epic",
+              icon: <Icon name="folder" size={14} />,
+              onSelect: () => openEpic(epic),
+            },
+            ...(epic.archived || !currentBoard
+              ? []
+              : [
+                  {
+                    label: "New task in this epic",
+                    icon: <Icon name="plus" size={14} />,
+                    onSelect: () =>
+                      setEditor({ mode: "create", boardId: currentBoard.id, epic: epic.id }),
+                  },
+                ]),
+            ...(isHuman && !epic.archived
+              ? [
+                  {
+                    label: "Edit epic",
+                    icon: <Icon name="mdWrite" size={14} />,
+                    onSelect: () => setEpicDialog({ epic }),
+                  },
+                ]
+              : []),
+            {
+              label: "Copy ID",
+              icon: <Icon name="list" size={14} />,
+              onSelect: () => copyId(epic.id),
+            },
+          ],
+        },
+      ]),
+    );
+  }
+
+  function agentMenu(e: React.MouseEvent<HTMLElement>, name: string) {
+    setMenu(
+      menuAt(e, `Actions for ${displayName(people, name)}`, [
+        {
+          items: [
+            {
+              label: "View assigned tasks",
+              icon: <Icon name="arrow" size={14} />,
+              onSelect: () => {
+                setQuery("");
+                filterBy(name);
+              },
+            },
+            {
+              label: "Copy ID",
+              icon: <Icon name="list" size={14} />,
+              onSelect: () => copyId(name),
+            },
+          ],
+        },
+      ]),
+    );
+  }
+
+  /** The menu for empty space in the current view. */
+  function pageMenu(e: React.MouseEvent<HTMLElement>) {
+    const taskView = view !== "agents" && view !== "epics";
+    setMenu(
+      menuAt(e, `${title} actions`, [
+        {
+          items: [
+            ...(taskView && !currentEpic?.archived
+              ? [
+                  {
+                    label: "New task",
+                    icon: <Icon name="plus" size={14} />,
+                    onSelect: newTask,
+                  },
+                ]
+              : []),
+            ...(view === "epics" && isHuman
+              ? [
+                  {
+                    label: "New epic",
+                    icon: <Icon name="plus" size={14} />,
+                    onSelect: () => setEpicDialog({ epic: null }),
+                  },
+                ]
+              : []),
+            ...(currentEpic && isHuman && !currentEpic.archived
+              ? [
+                  {
+                    label: "Edit epic",
+                    icon: <Icon name="mdWrite" size={14} />,
+                    onSelect: () => setEpicDialog({ epic: currentEpic }),
+                  },
+                ]
+              : []),
+          ],
+        },
+        {
+          label: "Layout",
+          items: taskView
+            ? [
+                {
+                  label: "Board",
+                  icon: <Icon name="board" size={14} />,
+                  checked: !list,
+                  onSelect: () => setList(false),
+                },
+                {
+                  label: "List",
+                  icon: <Icon name="list" size={14} />,
+                  checked: list,
+                  onSelect: () => setList(true),
+                },
+              ]
+            : [],
+        },
+        {
+          items: [
+            ...(taskView && filtersActive
+              ? [
+                  {
+                    label: "Clear filters",
+                    icon: <Icon name="close" size={14} />,
+                    onSelect: clearFilters,
+                  },
+                ]
+              : []),
+            {
+              label: "Refresh",
+              icon: <Icon name="refresh" size={14} />,
+              onSelect: () => void refresh(),
+            },
+          ],
+        },
+      ]),
+    );
+  }
+
   const openStandup = () => {
     setEditor(null);
     setStandup(true);
@@ -1028,7 +1343,7 @@ export default function App() {
               <span className="nav-label" id="epics-label">
                 Epics
               </span>
-              {canManageEpics && (
+              {isHuman && (
                 <button
                   type="button"
                   className="icon-button nav-add"
@@ -1051,6 +1366,7 @@ export default function App() {
                   aria-current={selected ? "page" : undefined}
                   title={collapsed ? epic.title : undefined}
                   onClick={() => openEpic(epic)}
+                  onContextMenu={(e) => epicMenu(e, epic)}
                 >
                   <span
                     className="epic-glyph"
@@ -1184,7 +1500,7 @@ export default function App() {
               <Icon name="help" />
             </button>
           </div>
-          <div className="main-content">
+          <div className="main-content" onContextMenu={pageMenu}>
             <header className="page-title">
               <h1 tabIndex={-1} data-focus-fallback="">
                 {currentEpic && (
@@ -1250,7 +1566,7 @@ export default function App() {
             {currentEpic && (
               <EpicSummary
                 epic={currentEpic}
-                canManage={canManageEpics}
+                canManage={isHuman}
                 onEdit={() => setEpicDialog({ epic: currentEpic })}
               />
             )}
@@ -1258,7 +1574,7 @@ export default function App() {
               <ViewSummary
                 view={currentSaved}
                 dirty={viewDirty}
-                canManage={canManageEpics}
+                canManage={isHuman}
                 saving={viewSaving}
                 error={viewError}
                 onSave={() => void saveViewChanges()}
@@ -1274,7 +1590,7 @@ export default function App() {
                 me={actor.id}
                 count={viewCount}
                 describe={describe}
-                canManage={canManageEpics}
+                canManage={isHuman}
                 onOpen={openSavedView}
                 onNew={() =>
                   setViewDialog({
@@ -1298,9 +1614,10 @@ export default function App() {
               <EpicsPage
                 epics={activeEpics}
                 unfiled={tasks.filter((t) => !t.epic).length}
-                canManage={canManageEpics}
+                canManage={isHuman}
                 onOpen={openEpic}
                 onNew={() => setEpicDialog({ epic: null })}
+                onMenu={epicMenu}
               />
             ) : view === "agents" ? (
               <AgentsPage
@@ -1311,6 +1628,7 @@ export default function App() {
                   setAssignee(name);
                   setView("board");
                 }}
+                onMenu={agentMenu}
               />
             ) : (
               <>
@@ -1318,7 +1636,7 @@ export default function App() {
                   <BoardControls
                     boards={boards}
                     selectedBoardId={selectedBoardId}
-                    canManage={canManageEpics}
+                    canManage={isHuman}
                     onSelect={selectBoard}
                     onCreate={() => setBoardDialog({ board: null })}
                     onEdit={() =>
@@ -1542,6 +1860,7 @@ export default function App() {
                     onOpen={openTask}
                     onMove={move}
                     onNew={newTask}
+                    onMenu={taskMenu}
                     pending={pending}
                     list={list}
                     groups={groups}
@@ -1663,6 +1982,7 @@ export default function App() {
         />
       )}
       {help && <ShortcutHelp onClose={() => setHelp(false)} />}
+      {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
       {!standup && <Toasts toasts={toasts} onDismiss={dismissToast} />}
     </PeopleContext.Provider>
   );
@@ -1672,10 +1992,12 @@ function AgentsPage({
   tasks,
   agents,
   onView,
+  onMenu,
 }: {
   tasks: Task[];
   agents: Set<string>;
   onView: (name: string) => void;
+  onMenu: (e: React.MouseEvent<HTMLElement>, name: string) => void;
 }) {
   const people = usePeople();
   const roster = [...agents].sort((a, b) =>
@@ -1753,7 +2075,11 @@ function AgentsPage({
                 (t) => activeLease(t)?.actor === name,
               );
               return (
-                <li className="agent-row" key={name}>
+                <li
+                  className="agent-row"
+                  key={name}
+                  onContextMenu={(e) => onMenu(e, name)}
+                >
                   <Assignee name={name} agent />
                   <span>{assigned.length} assigned</span>
                   <span>
