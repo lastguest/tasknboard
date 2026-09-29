@@ -6,14 +6,20 @@ $install = Start-Process $installer.FullName -ArgumentList @('/S', "/D=$destinat
 if ($install.ExitCode -ne 0) { throw "Installer failed: $($install.ExitCode)" }
 $executable = Join-Path $destination 'tasknboard.exe'
 if (-not (Test-Path $executable)) { throw "Installed executable is missing: $executable" }
-$app = Start-Process $executable -PassThru
+$env:RUST_BACKTRACE = '1'
+$errorLog = Join-Path $env:RUNNER_TEMP 'tasknboard-stderr.log'
+$outputLog = Join-Path $env:RUNNER_TEMP 'tasknboard-stdout.log'
+$app = Start-Process $executable -PassThru -RedirectStandardError $errorLog -RedirectStandardOutput $outputLog
 $serviceProcessId = $null
 try {
   $deadline = (Get-Date).AddSeconds(30)
   do {
     Start-Sleep -Seconds 1
     $app.Refresh()
-    if ($app.HasExited) { throw "Installed app exited: $($app.ExitCode)" }
+    if ($app.HasExited) {
+      Get-Content $errorLog, $outputLog -ErrorAction SilentlyContinue | Write-Output
+      throw "Installed app exited: $($app.ExitCode)"
+    }
     if ($app.MainWindowHandle -ne 0 -and $app.MainWindowTitle -eq 'TasknBoard') {
       $service = Get-CimInstance Win32_Process -Filter "ParentProcessId = $($app.Id) AND Name = 'node.exe'"
       if (-not $service) { throw 'Installed app has no Node service.' }
