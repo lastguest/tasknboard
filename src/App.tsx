@@ -8,32 +8,42 @@ import {
   type RefreshResult,
 } from "./Dialogs";
 import { Icon } from "./Icons";
+import { AssigneeFilter, UNASSIGNED } from "./AssigneeFilter";
 import { ApiError, command, errorOf, loadTasks } from "./api";
 import { Standup } from "./Standup";
+import {
+  EpicEditor,
+  EpicsPage,
+  EpicSummary,
+} from "./Epics";
+import { type Toast, Toasts } from "./Toasts";
 import type { ModelContext } from "./webmcp";
 import { formatUtcTimestamp } from "./formatting";
+import { Avatar, displayName, PeopleContext, usePeople } from "./People";
 import {
   activeLease,
+  epicProgress,
+  epicPalette,
+  epicStyle,
   statusTitle,
   type Actor,
+  type Epic,
   type Status,
   type Task,
   type WorkspaceInfo,
 } from "./types";
 
-type View = "board" | "mine" | "agents";
-type Editor = null | { mode: "create" } | { mode: "edit"; task: Task };
-type Toast = {
-  id: number;
-  text: string;
-  tone: "ok" | "error";
-  actions?: { label: string; run: () => void }[];
-};
-const UNASSIGNED = "__unassigned__";
-const viewTitles: Record<View, string> = {
+type View = "board" | "mine" | "agents" | "epics" | "epic";
+type Editor =
+  | null
+  | { mode: "create"; epic?: string }
+  | { mode: "edit"; task: Task };
+type EpicDialog = null | { epic: Epic | null };
+const viewTitles: Record<Exclude<View, "epic">, string> = {
   board: "Board",
   mine: "My tasks",
   agents: "Agents",
+  epics: "Epics",
 };
 
 export default function App() {
@@ -43,6 +53,9 @@ export default function App() {
   const [workspaceInfoLoaded, setWorkspaceInfoLoaded] = useState(false);
   const [workspace, setWorkspace] = useState("Workspace");
   const [view, setView] = useState<View>("board");
+  const [epics, setEpics] = useState<Epic[]>([]);
+  const [epicId, setEpicId] = useState("");
+  const [epicDialog, setEpicDialog] = useState<EpicDialog>(null);
   const [list, setList] = useState(false);
   const [query, setQuery] = useState("");
   const [assignee, setAssignee] = useState("");
@@ -51,6 +64,20 @@ export default function App() {
   const [settings, setSettings] = useState(false);
   const [help, setHelp] = useState(false);
   const [standup, setStandup] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("tasknboard.sidebarCollapsed") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("tasknboard.sidebarCollapsed", collapsed ? "1" : "0");
+    } catch {
+      // Storage unavailable; the preference just won't persist.
+    }
+  }, [collapsed]);
   const [sync, setSync] = useState<{
     loaded: boolean;
     connected: boolean;
@@ -59,20 +86,23 @@ export default function App() {
   }>({ loaded: false, connected: false, error: null, lastSync: "" });
   const [pending, setPending] = useState(new Map<string, Status>());
   const [moveError, setMoveError] = useState("");
-  const [toast, setToast] = useState<Toast | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const search = useRef<HTMLInputElement>(null);
-  const filter = useRef<HTMLSelectElement>(null);
+  const filter = useRef<HTMLButtonElement>(null);
   const standupButton = useRef<HTMLButtonElement>(null);
   const running = useRef<Promise<RefreshResult> | null>(null);
   const queued = useRef<Promise<RefreshResult> | null>(null);
 
   const load = useCallback(async (): Promise<RefreshResult> => {
     try {
-      const [next, info] = await Promise.all([
+      const [next, info, epicList] = await Promise.all([
         loadTasks(),
         command<WorkspaceInfo>("workspace_info"),
+        // Archived epics still name the finished tasks that keep them.
+        command<{ epics: Epic[] }>("list_epics", { includeArchived: true }),
       ]);
       setTasks(next);
+      setEpics(epicList.epics);
       setActor(info.actor);
       setActors(info.actors);
       setWorkspace(info.name);
@@ -164,16 +194,22 @@ export default function App() {
     };
   }, [refresh]);
 
+  const toastSeq = useRef(0);
   const notify = useCallback((next: Omit<Toast, "id">) => {
-    setToast({ ...next, id: Date.now() });
+    const id = ++toastSeq.current;
+    // Newest last (closest to the corner); keep the stack short.
+    setToasts((ts) => [...ts, { ...next, id }].slice(-3));
   }, []);
-  useEffect(() => {
-    if (!toast || toast.actions?.length) return;
-    const timer = setTimeout(() => setToast(null), 6000);
-    return () => clearTimeout(timer);
-  }, [toast]);
+  const dismissToast = useCallback((id: number) => {
+    setToasts((ts) => ts.filter((t) => t.id !== id));
+  }, []);
 
-  const dialogOpen = editor !== null || settings || help || Boolean(opening);
+  const dialogOpen =
+    editor !== null ||
+    epicDialog !== null ||
+    settings ||
+    help ||
+    Boolean(opening);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (standup || dialogOpen || e.defaultPrevented) return;
@@ -193,19 +229,22 @@ export default function App() {
         return;
       if (e.key === "n" || e.key === "N") {
         e.preventDefault();
-        setEditor({ mode: "create" });
+        setEditor({ mode: "create", epic: view === "epic" ? epicId : undefined });
       } else if (e.key === "f" || e.key === "F") {
         e.preventDefault();
-        if (view === "agents") setView("board");
+        if (view === "agents" || view === "epics") setView("board");
         requestAnimationFrame(() => filter.current?.focus());
       } else if (e.key === "?") {
         e.preventDefault();
         setHelp(true);
+      } else if (e.key === "[") {
+        e.preventDefault();
+        setCollapsed((c) => !c);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [standup, dialogOpen, view]);
+  }, [standup, dialogOpen, view, epicId]);
 
   const wasPresenting = useRef(false);
   useEffect(() => {
@@ -213,6 +252,10 @@ export default function App() {
     wasPresenting.current = standup;
   }, [standup]);
 
+  const people = useMemo(
+    () => new Map(actors.map((a) => [a.id, a])),
+    [actors],
+  );
   const agents = useMemo(
     () => new Set(actors.filter((a) => a.kind === "agent").map((a) => a.id)),
     [actors],
@@ -228,19 +271,33 @@ export default function App() {
     () => [...new Set(tasks.flatMap((t) => t.labels))].sort(),
     [tasks],
   );
+  const epicsById = useMemo(
+    () => new Map(epics.map((epic) => [epic.id, epic])),
+    [epics],
+  );
+  const activeEpics = epics.filter((epic) => !epic.archived);
+  const currentEpic = view === "epic" ? epicsById.get(epicId) : undefined;
+  const title =
+    view === "epic" ? (currentEpic?.title ?? "Epic") : viewTitles[view];
+  const canManageEpics = workspaceInfoLoaded && actor.kind === "human";
+  const openEpic = (epic: Epic) => {
+    setEpicId(epic.id);
+    setView("epic");
+  };
+  const newTask = () =>
+    setEditor({ mode: "create", epic: view === "epic" ? epicId : undefined });
   const q = query.trim().toLowerCase();
   const filtersActive = Boolean(q || assignee);
+  const inScope = (t: Task, scope: View = view) =>
+    scope === "mine"
+      ? workspaceInfoLoaded && t.assignee === actor.id
+      : scope !== "epic" || t.epic === epicId;
   const matches = (t: Task, scope: View = view) =>
-    (scope !== "mine" ||
-      (workspaceInfoLoaded && t.assignee === actor.id)) &&
+    inScope(t, scope) &&
     (!assignee ||
       (assignee === UNASSIGNED ? !t.assignee : t.assignee === assignee)) &&
     (!q || `${t.id} ${t.title} ${t.description}`.toLowerCase().includes(q));
-  const scoped = tasks.filter(
-    (t) =>
-      view !== "mine" ||
-      (workspaceInfoLoaded && t.assignee === actor.id),
-  );
+  const scoped = tasks.filter((t) => inScope(t));
   const visible = tasks.filter((t) => matches(t));
 
   function clearFilters() {
@@ -259,7 +316,8 @@ export default function App() {
     } catch (e) {
       notify({
         tone: "error",
-        text: `Couldn't open ${task.id}: ${errorOf(e).message}`,
+        title: `Couldn't open ${task.id}`,
+        body: errorOf(e).message,
         actions: [{ label: "Retry", run: () => void openTask(task) }],
       });
     } finally {
@@ -280,7 +338,8 @@ export default function App() {
       setTasks((ts) => ts.map((t) => (t.id === saved.id ? saved : t)));
       notify({
         tone: "ok",
-        text: `Moved ${task.id} to ${statusTitle(status)}.`,
+        title: `Moved ${task.id}`,
+        body: `Now in ${statusTitle(status)}.`,
       });
     } catch (e) {
       const error = errorOf(e);
@@ -302,14 +361,14 @@ export default function App() {
   async function created(task: Task) {
     setEditor(null);
     await refresh();
-    const shown = view !== "agents" && matches(task);
+    const shown = !["agents", "epics"].includes(view) && matches(task);
     notify({
       tone: "ok",
-      text: shown
-        ? `Created ${task.id} in Backlog.`
-        : view === "agents"
-          ? `Created ${task.id} in Backlog.`
-          : `Created ${task.id} in Backlog. Your current filters hide it.`,
+      title: `Created ${task.id}`,
+      body:
+        shown || view === "agents" || view === "epics"
+          ? "Added to Backlog."
+          : "Added to Backlog. Your current filters hide it.",
       actions: [
         ...(shown
           ? []
@@ -333,9 +392,8 @@ export default function App() {
     void refresh();
     notify({
       tone: "ok",
-      text: matches(task)
-        ? `Saved ${task.id}.`
-        : `Saved ${task.id}. Your current filters now hide it.`,
+      title: `Saved ${task.id}`,
+      body: matches(task) ? undefined : "Your current filters now hide it.",
     });
   }
 
@@ -345,7 +403,36 @@ export default function App() {
     void refresh();
     notify({
       tone: "ok",
-      text: `Archived ${task.id}. Its history is kept and included in exports.`,
+      title: `Archived ${task.id}`,
+      body: "Its history is kept and included in exports.",
+    });
+  }
+
+  async function epicSaved(epic: Epic, isNew: boolean) {
+    setEpicDialog(null);
+    setEpics((list) =>
+      isNew ? [...list, epic] : list.map((e) => (e.id === epic.id ? epic : e)),
+    );
+    void refresh();
+    notify({
+      tone: "ok",
+      title: isNew ? `Created ${epic.id}` : `Saved ${epic.id}`,
+      body: isNew ? `“${epic.title}” is ready for tasks.` : undefined,
+      actions: isNew
+        ? [{ label: "Open", run: () => openEpic(epic) }]
+        : undefined,
+    });
+  }
+
+  function epicArchived(epic: Epic) {
+    setEpicDialog(null);
+    setEpics((list) => list.map((e) => (e.id === epic.id ? epic : e)));
+    setView("epics");
+    void refresh();
+    notify({
+      tone: "ok",
+      title: `Archived ${epic.id}`,
+      body: "Done tasks keep the epic, and it stays in exports.",
     });
   }
 
@@ -361,9 +448,10 @@ export default function App() {
   const hasData = sync.lastSync !== "";
 
   return (
-    <>
+    <PeopleContext.Provider value={people}>
       <div className="app-shell" hidden={standup} inert={standup}>
-        <aside className="sidebar">
+        <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
+          <div className="brand-row">
           <a
             className="brand"
             href="#board"
@@ -397,6 +485,17 @@ export default function App() {
             </svg>
             <span>TasknBoard</span>
           </a>
+          <button
+            type="button"
+            className="icon-button sidebar-toggle"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!collapsed}
+            title={collapsed ? "Expand sidebar ([)" : "Collapse sidebar ([)"}
+            onClick={() => setCollapsed((c) => !c)}
+          >
+            <Icon name={collapsed ? "sidebarExpand" : "sidebarCollapse"} />
+          </button>
+          </div>
           <span className="nav-label" id="nav-label">
             {workspace}
           </span>
@@ -406,6 +505,7 @@ export default function App() {
                 ["board", "board"],
                 ["mine", "user"],
                 ["agents", "bot"],
+                ["epics", "folder"],
               ] as const
             ).map(([id, icon]) => (
               <button
@@ -413,6 +513,7 @@ export default function App() {
                 type="button"
                 className={`nav-item ${view === id ? "selected" : ""}`}
                 aria-current={view === id ? "page" : undefined}
+                title={collapsed ? viewTitles[id] : undefined}
                 onClick={() => setView(id)}
               >
                 <Icon name={icon} />
@@ -442,10 +543,56 @@ export default function App() {
               <span>Stand-up</span>
             </button>
           </nav>
+          <nav className="nav-epics" aria-labelledby="epics-label">
+            <div className="nav-section-head">
+              <span className="nav-label" id="epics-label">
+                Epics
+              </span>
+              {canManageEpics && (
+                <button
+                  type="button"
+                  className="icon-button nav-add"
+                  aria-label="New epic"
+                  title="New epic"
+                  onClick={() => setEpicDialog({ epic: null })}
+                >
+                  <Icon name="plus" size={14} />
+                </button>
+              )}
+            </div>
+            {activeEpics.map((epic) => {
+              const { open } = epicProgress(epic);
+              const selected = view === "epic" && epicId === epic.id;
+              return (
+                <button
+                  key={epic.id}
+                  type="button"
+                  className={`nav-item nav-epic ${selected ? "selected" : ""}`}
+                  aria-current={selected ? "page" : undefined}
+                  title={collapsed ? epic.title : undefined}
+                  onClick={() => openEpic(epic)}
+                >
+                  <span
+                    className="epic-glyph"
+                    style={epicStyle(epic)}
+                    aria-hidden="true"
+                  />
+                  <span className="nav-epic-title">{epic.title}</span>
+                  <small aria-label={`${open} open tasks`}>{open}</small>
+                </button>
+              );
+            })}
+            {sync.loaded && !activeEpics.length && (
+              <p className="nav-empty">
+                Group related tasks into a project.
+              </p>
+            )}
+          </nav>
           <div className="sidebar-bottom">
             <button
               type="button"
               className="nav-item"
+              title={collapsed ? "Settings" : undefined}
               onClick={() => setSettings(true)}
             >
               <Icon name="settings" />
@@ -454,6 +601,7 @@ export default function App() {
             <button
               type="button"
               className="nav-item"
+              title={collapsed ? "Shortcuts" : undefined}
               onClick={() => setHelp(true)}
             >
               <Icon name="help" />
@@ -463,16 +611,43 @@ export default function App() {
               <span
                 className={`connection-dot ${sync.connected ? "online" : ""}`}
               />
-              <span>
-                {workspaceInfoLoaded ? `${actor.id} · ${actor.kind}` : ""}
-              </span>
+              {workspaceInfoLoaded && (
+                <button
+                  type="button"
+                  className="identity"
+                  title={
+                    collapsed
+                      ? `${displayName(people, actor.id)} · ${actor.kind} — edit your profile`
+                      : "Edit your profile"
+                  }
+                  onClick={() => setSettings(true)}
+                >
+                  <Avatar name={actor.id} agent={actor.kind === "agent"} />
+                  <span>
+                    {displayName(people, actor.id)} · {actor.kind}
+                  </span>
+                </button>
+              )}
             </div>
           </div>
         </aside>
         <main>
           <div className="topbar">
             <span className="breadcrumb">
-              {workspace} <span className="slash">/</span> {viewTitles[view]}
+              {workspace} <span className="slash">/</span>{" "}
+              {view === "epic" && (
+                <>
+                  <button
+                    type="button"
+                    className="breadcrumb-link"
+                    onClick={() => setView("epics")}
+                  >
+                    Epics
+                  </button>{" "}
+                  <span className="slash">/</span>{" "}
+                </>
+              )}
+              {title}
             </span>
             <div className="search">
               <Icon name="search" size={16} />
@@ -484,7 +659,7 @@ export default function App() {
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
-                  if (view === "agents") setView("board");
+                  if (view === "agents" || view === "epics") setView("board");
                 }}
               />
               <kbd aria-hidden="true">⌘K</kbd>
@@ -501,14 +676,27 @@ export default function App() {
           <div className="main-content">
             <header className="page-title">
               <h1 tabIndex={-1} data-focus-fallback="">
-                {viewTitles[view]}
+                {currentEpic && (
+                  <span
+                    className="epic-glyph large"
+                    style={epicStyle(currentEpic)}
+                    aria-hidden="true"
+                  />
+                )}
+                {title}
               </h1>
               <p>
-                {view === "agents"
+                {view === "epic"
+                  ? currentEpic
+                    ? `${currentEpic.id} · ${currentEpic.archived ? "Archived epic" : "Epic"}`
+                    : "This epic isn't in the workspace."
+                  : view === "epics"
+                  ? "Projects that group related tasks. Open one to see its board."
+                  : view === "agents"
                   ? "Known agents from the workspace roster. A listed agent is not necessarily connected or running."
                   : view === "mine"
                     ? workspaceInfoLoaded
-                      ? `Tasks assigned to ${actor.id}.`
+                      ? `Tasks assigned to ${displayName(people, actor.id)}.`
                       : ""
                     : `All active tasks in ${workspace}.`}
               </p>
@@ -539,7 +727,22 @@ export default function App() {
                 </button>
               </div>
             )}
-            {view === "agents" ? (
+            {currentEpic && (
+              <EpicSummary
+                epic={currentEpic}
+                canManage={canManageEpics}
+                onEdit={() => setEpicDialog({ epic: currentEpic })}
+              />
+            )}
+            {view === "epics" ? (
+              <EpicsPage
+                epics={activeEpics}
+                unfiled={tasks.filter((t) => !t.epic).length}
+                canManage={canManageEpics}
+                onOpen={openEpic}
+                onNew={() => setEpicDialog({ epic: null })}
+              />
+            ) : view === "agents" ? (
               <AgentsPage
                 tasks={tasks}
                 agents={agents}
@@ -580,36 +783,18 @@ export default function App() {
                         <Icon name="close" size={14} /> Clear filters
                       </button>
                     )}
-                    <label className="assignee-filter">
-                      <Icon name="users" size={16} />
-                      <span className="sr-only">Filter by assignee</span>
-                      <select
-                        ref={filter}
-                        aria-label="Filter by assignee"
-                        value={assignee}
-                        onChange={(e) => setAssignee(e.target.value)}
-                      >
-                        <option value="">All assignees</option>
-                        {[
-                          ...assignees,
-                          ...(assignee &&
-                          assignee !== UNASSIGNED &&
-                          !assignees.includes(assignee)
-                            ? [assignee]
-                            : []),
-                        ].map((a) => (
-                          <option key={a} value={a}>
-                            {a}
-                            {agents.has(a) ? " (agent)" : ""}
-                          </option>
-                        ))}
-                        <option value={UNASSIGNED}>Unassigned</option>
-                      </select>
-                    </label>
+                    <AssigneeFilter
+                      ref={filter}
+                      assignees={assignees}
+                      agents={agents}
+                      me={actor.id}
+                      value={assignee}
+                      onChange={setAssignee}
+                    />
                     <button
                       type="button"
                       className="primary"
-                      onClick={() => setEditor({ mode: "create" })}
+                      onClick={newTask}
                     >
                       <Icon name="plus" size={16} />
                       New task
@@ -676,7 +861,7 @@ export default function App() {
                     <button
                       type="button"
                       className="primary"
-                      onClick={() => setEditor({ mode: "create" })}
+                      onClick={newTask}
                     >
                       <Icon name="plus" size={16} /> Create the first task
                     </button>
@@ -690,7 +875,7 @@ export default function App() {
                           {[
                             q && `Search “${query.trim()}”`,
                             assignee &&
-                              `Assignee: ${assignee === UNASSIGNED ? "Unassigned" : assignee}`,
+                              `Assignee: ${assignee === UNASSIGNED ? "Unassigned" : displayName(people, assignee)}`,
                           ]
                             .filter(Boolean)
                             .join(" · ")}
@@ -704,9 +889,26 @@ export default function App() {
                           Clear filters
                         </button>
                       </>
+                    ) : view === "epic" ? (
+                      <>
+                        <h2>No tasks in this epic yet.</h2>
+                        <p>
+                          Create a task here, or move an existing task into
+                          this epic from its details.
+                        </p>
+                        {!currentEpic?.archived && (
+                          <button
+                            type="button"
+                            className="primary"
+                            onClick={newTask}
+                          >
+                            <Icon name="plus" size={16} /> New task in this epic
+                          </button>
+                        )}
+                      </>
                     ) : (
                       <>
-                        <h2>Nothing is assigned to {actor.id}.</h2>
+                        <h2>Nothing is assigned to {displayName(people, actor.id)}.</h2>
                         <p>
                           Pick up a task from the board by setting yourself as
                           its assignee.
@@ -725,9 +927,10 @@ export default function App() {
                   <Board
                     tasks={visible}
                     agents={agents}
+                    epics={view === "epic" ? undefined : epicsById}
                     onOpen={openTask}
                     onMove={move}
-                    onNew={() => setEditor({ mode: "create" })}
+                    onNew={newTask}
                     pending={pending}
                     list={list}
                   />
@@ -776,6 +979,8 @@ export default function App() {
           actors={actors}
           assignees={assignees}
           labels={labels}
+          epics={epics}
+          initialEpic={editor.mode === "create" ? editor.epic : undefined}
           latestVersion={
             editor.mode === "edit"
               ? tasks.find((t) => t.id === editor.task.id)?.version
@@ -796,41 +1001,19 @@ export default function App() {
           onReconnect={refresh}
         />
       )}
+      {epicDialog && (
+        <EpicEditor
+          key={epicDialog.epic?.id ?? "create"}
+          epic={epicDialog.epic}
+          suggestedColor={epicPalette[epics.length % epicPalette.length].id}
+          onClose={() => setEpicDialog(null)}
+          onSaved={epicSaved}
+          onArchived={epicArchived}
+        />
+      )}
       {help && <ShortcutHelp onClose={() => setHelp(false)} />}
-      <div className="toasts" aria-live="polite">
-        {toast && !standup && (
-          <div
-            className={`toast ${toast.tone}`}
-            role={toast.tone === "error" ? "alert" : "status"}
-            key={toast.id}
-          >
-            <Icon name={toast.tone === "error" ? "alert" : "check"} size={16} />
-            <span>{toast.text}</span>
-            {toast.actions?.map((a) => (
-              <button
-                key={a.label}
-                type="button"
-                className="quiet"
-                onClick={() => {
-                  setToast(null);
-                  a.run();
-                }}
-              >
-                {a.label}
-              </button>
-            ))}
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="Dismiss notification"
-              onClick={() => setToast(null)}
-            >
-              <Icon name="close" size={14} />
-            </button>
-          </div>
-        )}
-      </div>
-    </>
+      {!standup && <Toasts toasts={toasts} onDismiss={dismissToast} />}
+    </PeopleContext.Provider>
   );
 }
 
@@ -843,7 +1026,10 @@ function AgentsPage({
   agents: Set<string>;
   onView: (name: string) => void;
 }) {
-  const roster = [...agents].sort((a, b) => a.localeCompare(b));
+  const people = usePeople();
+  const roster = [...agents].sort((a, b) =>
+    displayName(people, a).localeCompare(displayName(people, b)),
+  );
   return (
     <div className="agents-page">
       <section aria-labelledby="roster-title">
@@ -874,7 +1060,7 @@ function AgentsPage({
                     type="button"
                     className="secondary small-button"
                     onClick={() => onView(name)}
-                    aria-label={`View tasks assigned to ${name}`}
+                    aria-label={`View tasks assigned to ${displayName(people, name)}`}
                   >
                     View tasks <Icon name="arrow" size={13} />
                   </button>

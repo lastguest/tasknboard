@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { createStore } from "./store.mjs";
+import { imageDataUrlLimit } from "./domain.mjs";
 import { dbPath, localActor, tokensFromEnvironment } from "./config.mjs";
 const host = process.env.HOST || "127.0.0.1",
   port = Number(process.env.PORT || 4310);
@@ -79,10 +80,13 @@ const server = createServer(async (req, res) => {
         json(res, 415, { message: "JSON required" });
         return;
       }
+      // Image uploads carry a base64 data URL; every other command stays small.
+      const limit =
+        url.pathname === "/api/upload_image" ? imageDataUrlLimit + 1024 : 65536;
       let body = "";
       for await (const chunk of req) {
         body += chunk;
-        if (Buffer.byteLength(body) > 65536) {
+        if (Buffer.byteLength(body) > limit) {
           json(res, 413, { message: "Request too large" });
           return;
         }
@@ -99,6 +103,25 @@ const server = createServer(async (req, res) => {
     }
     if (!["GET", "HEAD"].includes(req.method)) {
       json(res, 405, { message: "Method not allowed" });
+      return;
+    }
+    // Uploaded images are capability URLs: 128-bit random IDs, served as inert files
+    // so <img> tags work without a bearer header.
+    const upload = url.pathname.match(/^\/files\/([0-9a-f]{32})$/);
+    if (upload) {
+      const image = store.image(upload[1]);
+      if (!image) {
+        json(res, 404, { message: "Not found" });
+        return;
+      }
+      res.writeHead(200, {
+        "Content-Type": image.mime,
+        "Content-Length": image.data.length,
+        "Cache-Control": "private, max-age=31536000, immutable",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+        "Content-Disposition": "inline",
+      });
+      res.end(req.method === "HEAD" ? undefined : image.data);
       return;
     }
     const file = resolve(

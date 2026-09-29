@@ -134,6 +134,7 @@ test("Settings, task workflow, agent review, archive, and export", async ({ page
 
   await page.locator(".sidebar").getByRole("button", { name: "Settings" }).click();
   const exportDialog = page.getByRole("dialog", { name: "Settings" });
+  await exportDialog.getByRole("button", { name: "Data" }).click();
   const downloadEvent = page.waitForEvent("download");
   await exportDialog.getByRole("button", { name: "Export workspace" }).click();
   const download = await downloadEvent;

@@ -9,6 +9,68 @@
         "dev"
       ],
       "port": 5173
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "start"
+      ],
+      "port": 4310,
+      "autoPort": false
+    },
+    {
+      "name": "review-api",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "server/http.mjs"
+      ],
+      "port": 4311,
+      "autoPort": false,
+      "env": {
+        "PORT": "4311",
+        "TASKNBOARD_DB": "/private/tmp/claude-501/-Users-lastguest-Projects-tasknboard/4134d1cd-97d5-42d3-a0dc-30c9575bf08d/scratchpad/review.sqlite",
+        "TASKNBOARD_ALLOWED_HOSTS": "127.0.0.1:4311,localhost:4311,localhost:5174,127.0.0.1:5174"
+      }
+    },
+    {
+      "name": "review-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--config",
+        "/private/tmp/claude-501/-Users-lastguest-Projects-tasknboard/4134d1cd-97d5-42d3-a0dc-30c9575bf08d/scratchpad/vite.review.mjs"
+      ],
+      "port": 5174,
+      "autoPort": false
+    },
+    {
+      "name": "markdown-api",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "server/http.mjs"
+      ],
+      "port": 4312,
+      "autoPort": false,
+      "env": {
+        "PORT": "4312",
+        "TASKNBOARD_DB": "/private/tmp/claude-501/-Users-lastguest-Projects-tasknboard/5cbe5d45-2d28-4785-a366-1110188a96eb/scratchpad/md.sqlite"
+      }
+    },
+    {
+      "name": "epics-api",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "server/http.mjs"
+      ],
+      "port": 4313,
+      "autoPort": false,
+      "env": {
+        "PORT": "4313",
+        "TASKNBOARD_DB": "/private/tmp/claude-501/-Users-lastguest-Projects-tasknboard/a9bab6cd-3523-472a-a61f-f3cf9842976e/scratchpad/epics.sqlite"
+      }
     }
   ]
 }

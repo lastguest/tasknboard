@@ -1,0 +1,11 @@
+version = 1
+name = "TasknBoard"
+
+[setup]
+script = "npm ci"
+
+[[actions]]
+name = "Build"
+icon = "tool"
+command = "npm run desktop:build && open src-tauri/target/release/bundle/macos/TasknBoard.app"
+platform = "darwin"

@@ -7,6 +7,8 @@ import {
   safeUrl,
   statusTitle,
   type Actor,
+  type Epic,
+  epicStyle,
   type Priority,
   type Status,
   type Task,
@@ -14,8 +16,18 @@ import {
 } from "./types";
 import { ApiError, command, errorOf, token } from "./api";
 import { formatUtcTimestamp } from "./formatting";
-import { Assignee, Label } from "./Board";
+import { Assignee, Label, StatusIcon } from "./Board";
 import { Icon } from "./Icons";
+import { MarkdownEditor } from "./Markdown";
+import { EpicTag } from "./Epics";
+import {
+  Avatar,
+  displayName,
+  PeopleContext,
+  Person,
+  PersonName,
+  usePeople,
+} from "./People";
 
 export type RefreshResult = { ok: true } | { ok: false; error: ApiError };
 
@@ -123,14 +135,70 @@ export function Dialog({
   );
 }
 
-type ChoiceOption = {
+export type ChoiceOption = {
   value: string;
   label: string;
   detail?: string;
   disabled?: boolean;
+  icon?: React.ReactNode;
 };
 
-function SearchableChoiceDialog({
+/** Status choices shared by the task sidebar and the list view. */
+export function statusChoices(current?: Status): ChoiceOption[] {
+  const locked = current !== undefined && doneLocked(current);
+  return columns.map((column) => ({
+    value: column.id,
+    label: column.id === "done" && locked ? "Done (after review)" : column.title,
+    disabled: column.id === "done" && locked,
+    icon: <StatusIcon status={column.id} />,
+  }));
+}
+
+/** The list view's status cell: the sidebar trigger and picker, per row. */
+export function StatusPicker({
+  task,
+  pending,
+  onMove,
+}: {
+  task: Task;
+  pending?: Status;
+  onMove: (t: Task, s: Status) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const status = pending ?? task.status;
+  return (
+    <>
+      <button
+        type="button"
+        className="sidebar-picker-trigger status-picker-trigger"
+        aria-label={`Status of ${task.id}: ${statusTitle(status)}. Choose status`}
+        aria-haspopup="dialog"
+        disabled={Boolean(pending)}
+        onClick={() => setOpen(true)}
+      >
+        <StatusIcon status={status} />
+        <span>{statusTitle(status)}</span>
+        {pending && <span className="moving">Moving…</span>}
+      </button>
+      {open && (
+        <SearchableChoiceDialog
+          title={`Status of ${task.id}`}
+          searchLabel="Search status"
+          options={statusChoices(task.status)}
+          selected={[status]}
+          onSelect={(value) => {
+            setOpen(false);
+            if (value !== task.status) onMove(task, value as Status);
+          }}
+          onToggle={() => {}}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+export function SearchableChoiceDialog({
   title,
   searchLabel,
   options,
@@ -222,6 +290,7 @@ function SearchableChoiceDialog({
                         : onSelect(option.value)
                     }
                   />
+                  {option.icon}
                   <span className="picker-option-copy">
                     <span>{option.label}</span>
                     {option.detail && (
@@ -339,9 +408,10 @@ const fieldLabels: Record<string, string> = {
   priority: "priority",
   assignee: "assignee",
   labels: "labels",
+  epic: "epic",
 };
 
-function eventDetail(e: TaskEvent) {
+function eventDetail(e: TaskEvent, epicTitle: (id: string) => string) {
   if (!e.body) return "";
   try {
     const body = JSON.parse(e.body);
@@ -352,7 +422,9 @@ function eventDetail(e: TaskEvent) {
             ? `Status → ${statusTitle(v as Status)}`
             : ["description", "acceptance"].includes(k)
               ? `Edited ${fieldLabels[k]}`
-              : `${fieldLabels[k] ?? k} → ${String(v) || "none"}`,
+              : k === "epic"
+                ? `Epic → ${v ? epicTitle(String(v)) : "none"}`
+                : `${fieldLabels[k] ?? k} → ${String(v) || "none"}`,
         )
         .join(" · ");
     if (e.kind === "set_standup_notes")
@@ -371,16 +443,22 @@ function eventDetail(e: TaskEvent) {
   return e.body;
 }
 
-function Activity({ events }: { events: TaskEvent[] }) {
+function Activity({
+  events,
+  epicTitle,
+}: {
+  events: TaskEvent[];
+  epicTitle: (id: string) => string;
+}) {
   if (!events.length) return <p className="small">No activity yet.</p>;
   return (
     <ol className="activity-list">
       {events.map((e) => {
-        const detail = eventDetail(e);
+        const detail = eventDetail(e, epicTitle);
         return (
           <li key={e.sequence} className={`event kind-${e.kind}`}>
             <div className="event-head">
-              <strong>{e.actor}</strong>
+              <Person id={e.actor} />
               <span>{kindText[e.kind] ?? e.kind.replaceAll("_", " ")}</span>
               <time dateTime={e.createdAt}>
                 {formatUtcTimestamp(e.createdAt)}
@@ -402,6 +480,7 @@ type Draft = {
   priority: Priority;
   assignee: string;
   labels: string[];
+  epic: string;
 };
 const draftKeys = [
   "title",
@@ -411,8 +490,9 @@ const draftKeys = [
   "priority",
   "assignee",
   "labels",
+  "epic",
 ] as const;
-const draftOf = (t: Task | null): Draft =>
+const draftOf = (t: Task | null, epic = ""): Draft =>
   t
     ? {
         title: t.title,
@@ -422,6 +502,7 @@ const draftOf = (t: Task | null): Draft =>
         priority: t.priority,
         assignee: t.assignee,
         labels: [...t.labels],
+        epic: t.epic ?? "",
       }
     : {
         title: "",
@@ -431,6 +512,7 @@ const draftOf = (t: Task | null): Draft =>
         priority: "medium",
         assignee: "",
         labels: ["Product"],
+        epic,
       };
 
 function sameValue(left: unknown, right: unknown) {
@@ -451,6 +533,8 @@ export function TaskEditor({
   actors,
   assignees,
   labels,
+  epics,
+  initialEpic = "",
   latestVersion,
   onClose,
   onCreated,
@@ -464,6 +548,8 @@ export function TaskEditor({
   actors: Actor[];
   assignees: string[];
   labels: string[];
+  epics: Epic[];
+  initialEpic?: string;
   latestVersion?: number;
   onClose: () => void;
   onCreated: (t: Task) => void;
@@ -472,7 +558,7 @@ export function TaskEditor({
   onArchived: (t: Task) => void;
 }) {
   const [current, setCurrent] = useState(task);
-  const [draft, setDraft] = useState(() => draftOf(task));
+  const [draft, setDraft] = useState(() => draftOf(task, initialEpic));
   const [pending, setPending] = useState<Pending>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [merge, setMerge] = useState<null | {
@@ -488,11 +574,22 @@ export function TaskEditor({
   const [discard, setDiscard] = useState(false);
   const [notice, setNotice] = useState("");
   const [picker, setPicker] = useState<
-    "status" | "priority" | "assignee" | "labels" | null
+    "status" | "priority" | "assignee" | "labels" | "epic" | null
   >(null);
   const listId = useId();
 
+  const people = usePeople();
   const actorKinds = new Map(actors.map((candidate) => [candidate.id, candidate.kind]));
+  const personOption = (id: string, detail: string[]): ChoiceOption => {
+    const name = displayName(people, id);
+    return {
+      value: id,
+      label: name,
+      // The ID stays searchable and visible when a profile name replaces it.
+      detail: [...(name !== id ? [id] : []), ...detail].join(" · ") || undefined,
+      icon: <Avatar name={id} agent={actorKinds.get(id) === "agent"} />,
+    };
+  };
   const otherAssignees = [
     ...new Set([
       ...actors.map((candidate) => candidate.id),
@@ -502,38 +599,54 @@ export function TaskEditor({
     ]),
   ]
     .filter((name) => name && name !== actor.id)
-    .sort((left, right) => left.localeCompare(right));
+    .sort((left, right) =>
+      displayName(people, left).localeCompare(displayName(people, right)),
+    );
   const assigneeOptions: ChoiceOption[] = [
-    {
-      value: actor.id,
-      label: actor.id,
-      detail: `You · ${actor.kind === "agent" ? "Agent" : "Human"}`,
-    },
-    { value: "", label: "Unassigned" },
+    personOption(actor.id, [
+      "You",
+      actor.kind === "agent" ? "Agent" : "Human",
+    ]),
+    { value: "", label: "Unassigned", icon: <Avatar name="" agent={false} /> },
     ...otherAssignees.map((name) => {
       const kind = actorKinds.get(name);
-      return {
-        value: name,
-        label: name,
-        ...(kind ? { detail: kind === "agent" ? "Agent" : "Human" } : {}),
-      };
+      return personOption(
+        name,
+        kind ? [kind === "agent" ? "Agent" : "Human"] : [],
+      );
     }),
   ];
-  const statusOptions: ChoiceOption[] = columns.map((column) => ({
-    value: column.id,
-    label:
-      column.id === "done" && current && doneLocked(current.status)
-        ? "Done (after review)"
-        : column.title,
-    disabled:
-      column.id === "done" && current
-        ? doneLocked(current.status)
-        : false,
-  }));
+  const statusOptions = statusChoices(current?.status);
   const priorityOptions: ChoiceOption[] = priorities.map((priority) => ({
     value: priority.id,
     label: priority.title,
   }));
+  const epicsById = new Map(epics.map((epic) => [epic.id, epic]));
+  const epicTitle = (id: string) => epicsById.get(id)?.title ?? id;
+  // Archived epics cannot take new tasks; the current one stays listed.
+  const epicOptions: ChoiceOption[] = [
+    { value: "", label: "No epic" },
+    ...epics
+      .filter(
+        (epic) =>
+          !epic.archived ||
+          epic.id === draft.epic ||
+          epic.id === current?.epic,
+      )
+      .map((epic) => ({
+        value: epic.id,
+        label: epic.title,
+        detail: epic.archived ? `${epic.id} · Archived` : epic.id,
+        disabled: epic.archived && epic.id !== current?.epic,
+        icon: (
+          <span
+            className="epic-glyph"
+                    style={epicStyle(epic)}
+            aria-hidden="true"
+          />
+        ),
+      })),
+  ];
   const labelOptions: ChoiceOption[] = [
     ...new Set([...labels, ...draft.labels]),
   ]
@@ -644,6 +757,7 @@ export function TaskEditor({
           "description",
           "acceptance",
           "assignee",
+          "epic",
         ] as const)
           if (draft[k].trim()) args[k] = draft[k];
         onCreated(await command<Task>("create_task", args));
@@ -874,11 +988,13 @@ export function TaskEditor({
             }
             onUseLatest={() => set("description")(current!.description)}
           >
-            <textarea
-              rows={5}
+            <MarkdownEditor
+              rows={7}
               maxLength={20000}
+              placeholder="Describe the work. Markdown, tables, and pasted images are supported."
+              startInPreview={Boolean(current)}
               value={draft.description}
-              onChange={(e) => set("description")(e.target.value)}
+              onChange={set("description")}
             />
           </Field>
           <Field
@@ -917,7 +1033,8 @@ export function TaskEditor({
                     disabled={Boolean(pending)}
                     onClick={() => setPicker("status")}
                   >
-                    {statusTitle(draft.status)}
+                    <StatusIcon status={draft.status} />
+                    <span>{statusTitle(draft.status)}</span>
                   </button>
                   {conflicted("status") && (
                     <ConflictValue
@@ -960,7 +1077,7 @@ export function TaskEditor({
                 <button
                   type="button"
                   className="sidebar-picker-trigger assignee-picker-trigger"
-                  aria-label={"Assignee: " + (draft.assignee || "Unassigned") + ". Choose assignee"}
+                  aria-label={"Assignee: " + (displayName(people, draft.assignee) || "Unassigned") + ". Choose assignee"}
                   aria-haspopup="dialog"
                   disabled={Boolean(pending)}
                   onClick={() => setPicker("assignee")}
@@ -974,6 +1091,35 @@ export function TaskEditor({
                   <ConflictValue
                     value={current.assignee || "Unassigned"}
                     onUseLatest={() => set("assignee")(current.assignee)}
+                  />
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Epic</dt>
+              <dd>
+                <button
+                  type="button"
+                  className="sidebar-picker-trigger epic-picker-trigger"
+                  aria-label={
+                    "Epic: " +
+                    (draft.epic ? epicTitle(draft.epic) : "None") +
+                    ". Choose epic"
+                  }
+                  aria-haspopup="dialog"
+                  disabled={Boolean(pending)}
+                  onClick={() => setPicker("epic")}
+                >
+                  {draft.epic ? (
+                    <EpicTag epic={epicsById.get(draft.epic)} />
+                  ) : (
+                    <span className="small">None</span>
+                  )}
+                </button>
+                {conflicted("epic") && current && (
+                  <ConflictValue
+                    value={current.epic ? epicTitle(current.epic) : "None"}
+                    onUseLatest={() => set("epic")(current.epic)}
                   />
                 )}
               </dd>
@@ -1025,7 +1171,11 @@ export function TaskEditor({
               ) : lease ? (
                 <>
                   <p>
-                    Claimed by <strong>{lease.actor}</strong>, expires{" "}
+                    Claimed by{" "}
+                    <strong>
+                      <PersonName id={lease.actor} />
+                    </strong>
+                    , expires{" "}
                     {formatUtcTimestamp(lease.expiresAt)}.
                   </p>
                   {foreignLease && (
@@ -1038,7 +1188,7 @@ export function TaskEditor({
                 </>
               ) : (
                 <p className="small">
-                  Claim by {current.lease.actor} expired at{" "}
+                  Claim by <PersonName id={current.lease.actor} /> expired at{" "}
                   {formatUtcTimestamp(current.lease.expiresAt)}.
                 </p>
               )}
@@ -1055,7 +1205,9 @@ export function TaskEditor({
                       records the earlier submission for context.
                     </p>
                   )}
-                  <p className="small">Submitted by {current.review.actor}</p>
+                  <p className="small">
+                    Submitted by <PersonName id={current.review.actor} />
+                  </p>
                   <p className="review-summary">{current.review.summary}</p>
                   {artifact ? (
                     <a
@@ -1171,7 +1323,7 @@ export function TaskEditor({
         {current && (
           <section className="activity" aria-label="Comments and activity">
             <h3>Activity</h3>
-            <Activity events={current.events ?? []} />
+            <Activity events={current.events ?? []} epicTitle={epicTitle} />
             <form className="comment-form" onSubmit={postComment}>
               <label className="field">
                 <span className="field-label">Add a comment</span>
@@ -1224,7 +1376,9 @@ export function TaskEditor({
               ? "Choose status"
               : picker === "priority"
                 ? "Choose priority"
-                : "Choose labels"
+                : picker === "epic"
+                  ? "Choose epic"
+                  : "Choose labels"
         }
         searchLabel={
           picker === "assignee"
@@ -1233,7 +1387,9 @@ export function TaskEditor({
               ? "Search status"
               : picker === "priority"
                 ? "Search priority"
-                : "Search labels"
+                : picker === "epic"
+                  ? "Search epics"
+                  : "Search labels"
         }
         options={
           picker === "assignee"
@@ -1242,7 +1398,9 @@ export function TaskEditor({
               ? statusOptions
               : picker === "priority"
                 ? priorityOptions
-                : labelOptions
+                : picker === "epic"
+                  ? epicOptions
+                  : labelOptions
         }
         selected={
           picker === "status"
@@ -1251,7 +1409,9 @@ export function TaskEditor({
               ? [draft.priority]
               : picker === "assignee"
                 ? [draft.assignee]
-                : draft.labels
+                : picker === "epic"
+                  ? [draft.epic]
+                  : draft.labels
         }
         multiple={picker === "labels"}
         allowCreate={picker === "labels"}
@@ -1260,6 +1420,7 @@ export function TaskEditor({
           else if (picker === "priority")
             set("priority")(value as Priority);
           else if (picker === "assignee") set("assignee")(value);
+          else if (picker === "epic") set("epic")(value);
           setPicker(null);
         }}
         onToggle={(value) =>
@@ -1358,6 +1519,12 @@ export function Settings({
   onClose: () => void;
   onReconnect: () => Promise<RefreshResult>;
 }) {
+  const profileActor = usePeople().get(actor.id) ?? actor;
+  const [page, setPage] = useState<SettingsPage>(
+    connected ? "profile" : "connection",
+  );
+  const [search, setSearch] = useState("");
+  const tokenId = useId();
   const [value, setValue] = useState(token.get());
   const [stored, setStored] = useState(Boolean(token.get()));
   const [connection, setConnection] = useState<null | {
@@ -1419,104 +1586,459 @@ export function Settings({
     }
   }
 
+  const pages: {
+    id: SettingsPage;
+    label: string;
+    icon: string;
+    group: string;
+    keywords: string;
+  }[] = [
+    {
+      id: "profile",
+      label: "Profile",
+      icon: "user",
+      group: "Account",
+      keywords: "name display picture photo avatar image me",
+    },
+    {
+      id: "connection",
+      label: "Connection",
+      icon: "plug",
+      group: "Workspace",
+      keywords: "token access auth server sign in status",
+    },
+    {
+      id: "data",
+      label: "Data",
+      icon: "database",
+      group: "Workspace",
+      keywords: "export import download json backup archive activity",
+    },
+    {
+      id: "shortcuts",
+      label: "Keyboard shortcuts",
+      icon: "keyboard",
+      group: "App",
+      keywords: shortcuts.flat().join(" "),
+    },
+  ];
+  const q = search.trim().toLowerCase();
+  const visible = pages.filter(
+    (p) => !q || `${p.label} ${p.keywords}`.toLowerCase().includes(q),
+  );
+  const groups = [...new Set(visible.map((p) => p.group))];
+  const title = pages.find((p) => p.id === page)!.label;
+
   return (
-    <Dialog title="Settings" onClose={onClose} dismissOnBackdrop>
-      <div className="settings-body">
-        <section>
-          <h3>Connection</h3>
-          <p className="small">
-            {connected
-              ? `Connected as ${actor.id} (${actor.kind}).`
-              : "Not connected to the workspace service."}
-          </p>
-          {window.tasknboardShell && (
-            <>
-              <p className="small">Server: {location.origin}</p>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => window.tasknboardShell?.changeServer()}
-              >
-                Change server
-              </button>
-            </>
-          )}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void saveConnection(value);
-            }}
-          >
-            <label className="field">
-              <span className="field-label">Workspace access token</span>
-              <span className="field-hint">
-                Needed only for a shared server. Kept for this browser session
-                only and never shown again.
-              </span>
-              <input
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder={
-                  stored
-                    ? "A token is stored for this session"
-                    : "Not needed for local mode"
-                }
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
+    <Dialog
+      title="Settings"
+      onClose={onClose}
+      dismissOnBackdrop
+      className="settings-dialog"
+    >
+      <div className="settings-layout">
+        <aside className="settings-nav">
+          <label className="settings-search">
+            <Icon name="search" size={15} />
+            <span className="sr-only">Search settings</span>
+            <input
+              type="search"
+              placeholder="Search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </label>
+          <nav aria-label="Settings sections">
+            {groups.map((group) => (
+              <div key={group} className="settings-nav-group">
+                <span className="settings-nav-heading">{group}</span>
+                {visible
+                  .filter((p) => p.group === group)
+                  .map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="settings-nav-item"
+                      aria-current={p.id === page ? "page" : undefined}
+                      onClick={() => setPage(p.id)}
+                    >
+                      <Icon name={p.icon} size={16} />
+                      <span>{p.label}</span>
+                    </button>
+                  ))}
+              </div>
+            ))}
+            {!visible.length && (
+              <p className="small settings-nav-empty">No matching settings</p>
+            )}
+          </nav>
+        </aside>
+        <div className="settings-main">
+          <div className="settings-page">
+            <h3 className="settings-title">{title}</h3>
+            {page === "profile" && (
+              <ProfileSettings
+                actor={profileActor}
+                connected={connected}
+                onSaved={onReconnect}
               />
-            </label>
-            <div className="review-actions">
-              <button className="primary" disabled={saving}>
-                {saving ? "Connecting…" : "Save connection"}
-              </button>
-              {stored && (
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={saving}
-                  onClick={() => saveConnection("")}
+            )}
+            {page === "connection" && (
+              <>
+                <SettingsGroup title="Status">
+                  <SettingsRow
+                    title="Workspace"
+                    hint={
+                      connected
+                        ? `Signed in as ${actor.id} (${actor.kind}).`
+                        : "Not connected to the workspace service."
+                    }
+                  >
+                    <span
+                      className={`settings-pill ${connected ? "on" : "off"}`}
+                    >
+                      {connected ? "Connected" : "Offline"}
+                    </span>
+                  </SettingsRow>
+                  {window.tasknboardShell && (
+                    <SettingsRow
+                      title="Server"
+                      hint={`Server: ${location.origin}`}
+                    >
+                      <button
+                        type="button"
+                        className="secondary small-button"
+                        onClick={() => window.tasknboardShell?.changeServer()}
+                      >
+                        Change server
+                      </button>
+                    </SettingsRow>
+                  )}
+                </SettingsGroup>
+                <SettingsGroup title="Authentication">
+                  <form
+                    className="settings-row settings-row-stack"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void saveConnection(value);
+                    }}
+                  >
+                    <div className="settings-row-text">
+                      <label className="settings-row-title" htmlFor={tokenId}>
+                        Workspace access token
+                      </label>
+                      <span className="settings-row-hint">
+                        Needed only for a shared server. Kept for this browser
+                        session only and never shown again.
+                      </span>
+                    </div>
+                    <div className="settings-token">
+                      <input
+                        id={tokenId}
+                        type="password"
+                        autoComplete="off"
+                        spellCheck={false}
+                        placeholder={
+                          stored
+                            ? "A token is stored for this session"
+                            : "Not needed for local mode"
+                        }
+                        value={value}
+                        onChange={(e) => setValue(e.target.value)}
+                      />
+                      {stored && (
+                        <button
+                          type="button"
+                          className="secondary small-button"
+                          disabled={saving}
+                          onClick={() => saveConnection("")}
+                        >
+                          Remove token
+                        </button>
+                      )}
+                      <button
+                        className="primary small-button"
+                        disabled={saving}
+                      >
+                        {saving ? "Connecting…" : "Save connection"}
+                      </button>
+                    </div>
+                    {connection && (
+                      <p
+                        className={
+                          connection.ok ? "small ok" : "inline-error"
+                        }
+                        role={connection.ok ? "status" : "alert"}
+                      >
+                        {connection.text}
+                      </p>
+                    )}
+                  </form>
+                </SettingsGroup>
+              </>
+            )}
+            {page === "data" && (
+              <SettingsGroup title="Backup">
+                <SettingsRow
+                  title="Export workspace"
+                  hint="Download all tasks, archived work, and the full activity log as JSON."
                 >
-                  Remove token
-                </button>
-              )}
-            </div>
-          </form>
-          {connection && (
-            <p
-              className={connection.ok ? "small ok" : "inline-error"}
-              role={connection.ok ? "status" : "alert"}
-            >
-              {connection.text}
-            </p>
-          )}
-        </section>
-        <section>
-          <h3>Export</h3>
-          <p className="small">
-            Download all tasks, archived work, and the full activity log as
-            JSON. Import is not available.
-          </p>
-          <button
-            type="button"
-            className="secondary"
-            onClick={exportWorkspace}
-            disabled={exporting}
-          >
-            <Icon name="download" size={16} />
-            {exporting ? "Exporting…" : "Export workspace"}
-          </button>
-          {exported && (
-            <p
-              className={exported.ok ? "small ok" : "inline-error"}
-              role={exported.ok ? "status" : "alert"}
-            >
-              {exported.text}
-            </p>
-          )}
-        </section>
+                  <button
+                    type="button"
+                    className="secondary small-button"
+                    onClick={exportWorkspace}
+                    disabled={exporting}
+                  >
+                    <Icon name="download" size={14} />
+                    {exporting ? "Exporting…" : "Export workspace"}
+                  </button>
+                </SettingsRow>
+                <SettingsRow
+                  title="Import"
+                  hint="Restoring from an export file is not available."
+                >
+                  <span className="settings-pill off">Unavailable</span>
+                </SettingsRow>
+                {exported && (
+                  <p
+                    className={`settings-row-note ${exported.ok ? "small ok" : "inline-error"}`}
+                    role={exported.ok ? "status" : "alert"}
+                  >
+                    {exported.text}
+                  </p>
+                )}
+              </SettingsGroup>
+            )}
+            {page === "shortcuts" && (
+              <SettingsGroup
+                title="Shortcuts"
+                note="Shortcuts are ignored while you type in a field. Each card's Status menu moves it without dragging."
+              >
+                {shortcuts.map(([key, label]) => (
+                  <SettingsRow key={key} title={label}>
+                    <kbd>{key}</kbd>
+                  </SettingsRow>
+                ))}
+              </SettingsGroup>
+            )}
+          </div>
+        </div>
       </div>
     </Dialog>
+  );
+}
+
+type SettingsPage = "profile" | "connection" | "data" | "shortcuts";
+
+const AVATAR_PIXELS = 128;
+
+/** Crop to a centred square and re-encode small enough for one API request. */
+async function avatarFromFile(file: File) {
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type))
+    throw new Error("Choose a PNG, JPEG, WebP, or GIF image.");
+  if (file.size > 10 * 1024 * 1024)
+    throw new Error("Choose an image smaller than 10 MB.");
+  const bitmap = await createImageBitmap(file).catch(() => {
+    throw new Error("This image couldn't be read.");
+  });
+  const side = Math.min(bitmap.width, bitmap.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = AVATAR_PIXELS;
+  const context = canvas.getContext("2d")!;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(
+    bitmap,
+    (bitmap.width - side) / 2,
+    (bitmap.height - side) / 2,
+    side,
+    side,
+    0,
+    0,
+    AVATAR_PIXELS,
+    AVATAR_PIXELS,
+  );
+  bitmap.close();
+  for (const quality of [0.86, 0.7, 0.5]) {
+    const url = canvas.toDataURL("image/jpeg", quality);
+    if (url.length <= 48000) return url;
+  }
+  throw new Error("This image is too detailed to store. Try another one.");
+}
+
+function ProfileSettings({
+  actor,
+  connected,
+  onSaved,
+}: {
+  actor: Actor;
+  connected: boolean;
+  onSaved: () => Promise<RefreshResult>;
+}) {
+  const nameId = useId();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [name, setName] = useState(actor.name ?? "");
+  const [avatar, setAvatar] = useState(actor.avatar ?? "");
+  const [saving, setSaving] = useState(false);
+  const [note, setNote] = useState<null | { ok: boolean; text: string }>(null);
+  const dirty =
+    name.trim() !== (actor.name ?? "") || avatar !== (actor.avatar ?? "");
+  const preview = new Map([
+    [actor.id, { ...actor, name: name.trim(), avatar }],
+  ]);
+
+  async function choose(file: File | undefined) {
+    if (!file) return;
+    setNote(null);
+    try {
+      setAvatar(await avatarFromFile(file));
+    } catch (e) {
+      setNote({ ok: false, text: (e as Error).message });
+    } finally {
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  }
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setNote(null);
+    try {
+      await command("update_profile", { name: name.trim(), avatar });
+      await onSaved();
+      setNote({ ok: true, text: "Profile saved. Everyone sees it on their next refresh." });
+    } catch (err) {
+      setNote({ ok: false, text: describeError(errorOf(err)) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={save}>
+      <SettingsGroup
+        title="How others see you"
+        note={`Your workspace ID stays “${actor.id}”. Assignments, claims, and history keep using it.`}
+      >
+        <div className="settings-row profile-row">
+          <PeopleContext.Provider value={preview}>
+            <Avatar
+              name={actor.id}
+              agent={actor.kind === "agent"}
+              size="large"
+            />
+          </PeopleContext.Provider>
+          <div className="settings-row-text">
+            <span className="settings-row-title">Profile picture</span>
+            <span className="settings-row-hint">
+              Square crop, resized to {AVATAR_PIXELS}px. Without a picture,
+              your initials are shown.
+            </span>
+          </div>
+          <div className="settings-row-control profile-picture-actions">
+            <input
+              ref={fileInput}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="sr-only"
+              tabIndex={-1}
+              aria-label="Profile picture file"
+              onChange={(e) => void choose(e.target.files?.[0])}
+            />
+            <button
+              type="button"
+              className="secondary small-button"
+              onClick={() => fileInput.current?.click()}
+            >
+              {avatar ? "Change picture" : "Upload picture"}
+            </button>
+            {avatar && (
+              <button
+                type="button"
+                className="quiet small-button"
+                onClick={() => setAvatar("")}
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="settings-row settings-row-stack">
+          <div className="settings-row-text">
+            <label className="settings-row-title" htmlFor={nameId}>
+              Display name
+            </label>
+            <span className="settings-row-hint">
+              Shown on cards, in activity, and in the assignee picker. Leave
+              empty to show your ID.
+            </span>
+          </div>
+          <input
+            id={nameId}
+            type="text"
+            maxLength={80}
+            autoComplete="name"
+            placeholder={actor.id}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+      </SettingsGroup>
+      <div className="form-actions">
+        {note && (
+          <p
+            className={note.ok ? "small ok" : "inline-error"}
+            role={note.ok ? "status" : "alert"}
+          >
+            {note.text}
+          </p>
+        )}
+        <span className="spacer" />
+        <button
+          className="primary small-button"
+          disabled={!dirty || saving || !connected}
+        >
+          {saving ? "Saving…" : "Save profile"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function SettingsGroup({
+  title,
+  note,
+  children,
+}: {
+  title: string;
+  note?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="settings-group">
+      <h4>{title}</h4>
+      <div className="settings-card">{children}</div>
+      {note && <p className="small settings-group-note">{note}</p>}
+    </section>
+  );
+}
+
+function SettingsRow({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="settings-row">
+      <div className="settings-row-text">
+        <span className="settings-row-title">{title}</span>
+        {hint && <span className="settings-row-hint">{hint}</span>}
+      </div>
+      <div className="settings-row-control">{children}</div>
+    </div>
   );
 }
 
@@ -1525,6 +2047,7 @@ export const shortcuts: [string, string][] = [
   ["⌘/Ctrl K", "Focus search"],
   ["F", "Focus the assignee filter"],
   ["?", "Open keyboard help"],
+  ["[", "Collapse / expand the sidebar"],
   ["Esc", "Close a dialog, or exit stand-up"],
   ["← / →", "Stand-up: previous / next participant"],
   ["Home", "Stand-up: back to Team overview"],

@@ -18,7 +18,7 @@ assignee ID matches an agent in the roster. Unknown assignees remain neutral.
 Names and lease ownership must not determine actor kind.
 
 `export_workspace` includes the actor roster. `workspace_info` and exports use
-`schemaVersion: 3` for this contract. No import or restore command is added.
+`schemaVersion: 6` since [epics](epics.md) were added (5 added description images). No import or restore command is added.
 
 ## Comment counts
 
@@ -44,3 +44,33 @@ An empty array clears the labels. New tasks default to `["Product"]`.
 The old `label` command field is rejected. Stored single labels convert once to
 arrays when the database opens. Task versions and activity remain unchanged.
 Status remains a single workflow state.
+
+## Profiles
+
+Roster entries also carry `name` and `avatar`, both empty strings by default.
+`update_profile({ name?, avatar? })` edits only the calling actor's own entry and
+returns it; the actor ID never changes, so assignees, leases, and events keep
+using IDs. `name` is trimmed, up to 80 characters. `avatar` is empty or a PNG,
+JPEG, or WebP base64 data URL of at most 48,000 characters; the UI crops and
+re-encodes uploads to 128px JPEG before sending. Remote URLs and SVG are rejected.
+The UI shows the name in place of the ID wherever a known actor appears, and
+coloured initials when no picture is set. Migration 4 adds both columns.
+
+## Rich descriptions
+
+`description` stays a plain string, stored and returned as Markdown source.
+Agents read and write the same text. The UI renders headings, emphasis,
+strikethrough, links, inline and fenced code, quotes, nested and ordered lists,
+task lists, tables, dividers and images. Rendering builds React elements; raw
+HTML stays literal text. Links allow only `http`, `https`, and `mailto`. Images
+load only from `/files/<id>`; other image URLs become plain links. Ticking a
+task-list box in Preview edits the draft; it is saved with the normal version check.
+
+`upload_image({ data })` accepts a PNG, JPEG, WebP, or GIF data URL up to 5 MB of
+decoded bytes and returns `{ id, url, mime, bytes }`. The server checks the file
+signature against the declared type. SVG is rejected. Images are stored in the
+`images` table (migration 5) and are not tied to a task. `GET /files/<id>`
+serves them with `Content-Security-Policy: sandbox` and `nosniff`. The route
+needs no token, so `<img>` tags work: the 128-bit random ID is the capability.
+Anyone holding the URL can view the image. `export_workspace` includes every
+image as base64. Images are not deleted when a description stops using them.

@@ -2,20 +2,29 @@ import { useEffect, useRef, useState } from "react";
 import { Assignee, Board } from "./Board";
 import { Dialog, ErrorNote } from "./Dialogs";
 import { Icon } from "./Icons";
+import { Markdown } from "./Markdown";
 import { ApiError, command, errorOf } from "./api";
-import { statusTitle, type Task } from "./types";
+import { statusTitle, type Actor, type Task } from "./types";
+import { Avatar, displayName, usePeople } from "./People";
 
 type Stage = { key: string; name: string; assignee?: string };
 type Focus = "all" | "highlight" | "blocker";
 
-/** Speaking order: alphabetical assignees (agents included), Unassigned last. */
-export function stagesFor(tasks: Task[]): Stage[] {
-  const owners = [
-    ...new Set(tasks.map((t) => t.assignee).filter(Boolean)),
-  ].sort((a, b) => a.localeCompare(b));
+/** Speaking order: alphabetical display names (agents included), Unassigned last. */
+export function stagesFor(
+  tasks: Task[],
+  people: ReadonlyMap<string, Actor> = new Map(),
+): Stage[] {
+  const owners = [...new Set(tasks.map((t) => t.assignee).filter(Boolean))]
+    .map((id) => ({ id, name: displayName(people, id) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   return [
     { key: "team", name: "Team overview" },
-    ...owners.map((name) => ({ key: `owner:${name}`, name, assignee: name })),
+    ...owners.map(({ id, name }) => ({
+      key: `owner:${id}`,
+      name,
+      assignee: id,
+    })),
     ...(tasks.some((t) => !t.assignee)
       ? [{ key: "unassigned", name: "Unassigned", assignee: "" }]
       : []),
@@ -130,7 +139,7 @@ function StandupNotes({
           agent={agents.has(current.assignee)}
         />
         {current.description && (
-          <p className="standup-context">{current.description}</p>
+          <Markdown className="standup-context" source={current.description} />
         )}
         {reloaded && (
           <div className="inline-notice" role="status">
@@ -191,7 +200,8 @@ export function Standup({
   onSaved: (t: Task) => void;
 }) {
   // Keep the speaking order fixed while polling updates the tasks underneath it.
-  const [stages] = useState(() => stagesFor(tasks));
+  const people = usePeople();
+  const [stages] = useState(() => stagesFor(tasks, people));
   const [index, setIndex] = useState(0);
   const [focus, setFocus] = useState<Focus>("all");
   const [selected, setSelected] = useState<Task | null>(null);
@@ -317,6 +327,13 @@ export function Standup({
   return (
     <div className="standup-shell">
       <header className="standup-bar">
+        {stage.assignee && (
+          <Avatar
+            name={stage.assignee}
+            agent={agents.has(stage.assignee)}
+            size="large"
+          />
+        )}
         <div className="standup-identity">
           <span className="standup-eyebrow">Stand-up</span>
           <h1 aria-live="polite">{stage.name}</h1>

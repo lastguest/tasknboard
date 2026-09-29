@@ -54,7 +54,7 @@ keyboard shortcuts, persisted comments/events, MCP tools, lease coordination,
 version conflicts, minimal actor tokens, server polling, backup export.
 Not implemented: organization membership UI, OAuth/SSO, remote Streamable HTTP
 MCP endpoint, granular per-project roles, offline replica sync, notification
-service, attachments storage, dependencies, custom workflows.
+service, general attachments (only description images are stored), dependencies, custom workflows.
 Remote MCP currently means a local stdio bridge to the shared authenticated API.
 For public deployment, terminate HTTPS and configure tokens. Token rotation is
 by process configuration. Database must be on local disk, not NFS.
@@ -84,6 +84,12 @@ roster and derived comment counts. SQLite stores explicit actor kinds; assignee
 names remain free text. The UI never guesses kinds from names or claims.
 Comment counts come from persisted comment events. Existing version, lease,
 and authorization checks still apply.
+
+## Epics
+
+The [epics contract](contracts/epics.md) groups tasks into projects. A task has
+at most one epic. Epic counts are derived from tasks when read. Only humans
+manage epics, and an epic with open work cannot be archived.
 
 The UI loads WebMCP validation only when the browser exposes
 `document.modelContext`. Ordinary browsers do not download that chunk. Polling

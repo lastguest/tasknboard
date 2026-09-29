@@ -23,7 +23,11 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const version = "v24.14.0";
 const platform = process.platform;
 const arch = process.arch;
-const nativeTarget = "aarch64-apple-darwin";
+const isMacArm64 = platform === "darwin" && arch === "arm64";
+const isWindowsX64 = platform === "win32" && arch === "x64";
+const nativeTarget = isWindowsX64
+  ? "x86_64-pc-windows-msvc"
+  : "aarch64-apple-darwin";
 const requestedTargets = [
   process.env.TAURI_ENV_TARGET_TRIPLE,
   process.env.CARGO_BUILD_TARGET,
@@ -43,9 +47,9 @@ for (let i = 2; i < process.argv.length; i += 1) {
   }
 }
 
-if (platform !== "darwin" || arch !== "arm64") {
+if (!isMacArm64 && !isWindowsX64) {
   throw new Error(
-    `Desktop packaging supports native macOS arm64 only; found ${platform}-${arch}.`,
+    `Desktop packaging supports macOS arm64 and Windows x64; found ${platform}-${arch}.`,
   );
 }
 for (const target of requestedTargets) {
@@ -56,7 +60,9 @@ for (const target of requestedTargets) {
   }
 }
 
-const archiveName = `node-${version}-darwin-arm64.tar.gz`;
+const archiveName = isWindowsX64
+  ? `node-${version}-win-x64.zip`
+  : `node-${version}-darwin-arm64.tar.gz`;
 const archiveUrl = `https://nodejs.org/dist/${version}/${archiveName}`;
 const checksumsUrl = `https://nodejs.org/dist/${version}/SHASUMS256.txt`;
 const resourcesDir = join(root, "src-tauri", "resources");
@@ -113,20 +119,26 @@ try {
 
   const extractedDir = join(tempDir, "extracted");
   await mkdir(extractedDir);
-  const archiveRoot = `node-${version}-darwin-arm64`;
+  const archiveRoot = isWindowsX64
+    ? `node-${version}-win-x64`
+    : `node-${version}-darwin-arm64`;
+  const nodeExecutable = isWindowsX64 ? "node.exe" : "node";
   await execFileAsync("tar", [
-    "-xzf",
+    isWindowsX64 ? "-xf" : "-xzf",
     archivePath,
     "--strip-components=1",
     "-C",
     extractedDir,
-    `${archiveRoot}/bin/node`,
+    `${archiveRoot}/${isWindowsX64 ? "" : "bin/"}${nodeExecutable}`,
     `${archiveRoot}/LICENSE`,
   ]);
 
   await mkdir(resourcesDir, { recursive: true });
-  await copyFile(join(extractedDir, "bin", "node"), join(resourcesDir, "node"));
-  await chmod(join(resourcesDir, "node"), 0o755);
+  const extractedNode = isWindowsX64
+    ? join(extractedDir, nodeExecutable)
+    : join(extractedDir, "bin", nodeExecutable);
+  await copyFile(extractedNode, join(resourcesDir, nodeExecutable));
+  if (!isWindowsX64) await chmod(join(resourcesDir, nodeExecutable), 0o755);
   await copyFile(join(extractedDir, "LICENSE"), join(resourcesDir, "LICENSE"));
   const licensesDir = join(resourcesDir, "licenses");
   await mkdir(licensesDir, { recursive: true });

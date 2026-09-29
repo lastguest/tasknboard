@@ -52,11 +52,29 @@ const paths: Record<string, React.ReactNode> = {
   check: <path d="m5 12 4 4L19 6" />,
   arrow: <path d="m9 5 7 7-7 7" />,
   back: <path d="m15 5-7 7 7 7" />,
+  sidebarCollapse: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4v16M16 10l-2 2 2 2" />
+    </>
+  ),
+  sidebarExpand: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4v16M14 10l2 2-2 2" />
+    </>
+  ),
   download: <path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4" />,
   alert: (
     <>
       <path d="M12 3 2 20h20L12 3z" />
       <path d="M12 10v4M12 17h.01" />
+    </>
+  ),
+  info: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5M12 8h.01" />
     </>
   ),
   refresh: <path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5" />,
@@ -72,11 +90,64 @@ const paths: Record<string, React.ReactNode> = {
       <path d="M5 9v10h14V9M10 13h4" />
     </>
   ),
+  folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
+  plug: <path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v4" />,
+  database: (
+    <>
+      <ellipse cx="12" cy="5" rx="8" ry="3" />
+      <path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" />
+    </>
+  ),
+  keyboard: (
+    <>
+      <rect x="2" y="5" width="20" height="14" rx="2" />
+      <path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M9 13h6M8 16h8" />
+    </>
+  ),
+  comment: <path d="M20 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z" />,
   external: <path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6" />,
   lock: (
     <>
       <rect x="5" y="11" width="14" height="10" rx="2" />
       <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </>
+  ),
+  // Markdown formatting toolbar.
+  mdHeading: <path d="M6 5v14M18 5v14M6 12h12" />,
+  mdBold: <path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z" />,
+  mdItalic: <path d="M10 5h8M6 19h8M14 5l-4 14" />,
+  mdStrike: <path d="M4 12h16M16.5 7.5C16 5.9 14.3 5 12 5 9.2 5 7.5 6.3 7.5 8.2c0 1.2.7 2.1 2 2.8M8 16c.5 1.8 2.3 3 4.5 3 2.8 0 4.5-1.4 4.5-3.3 0-.6-.2-1.2-.5-1.7" />,
+  mdLink: <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />,
+  mdCode: <path d="m8 7-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14" />,
+  mdQuote: <path d="M5 6v12M9 8h10M9 12h10M9 16h6" />,
+  mdBullets: <path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01" />,
+  mdNumbers: <path d="M10 6h10M10 12h10M10 18h10M4 5l1.5-1v5M3.5 14.5a1.5 1.5 0 1 1 2.3 1.3L3.5 19H6" />,
+  mdTasks: (
+    <>
+      <rect x="3" y="4" width="6" height="6" rx="1.5" />
+      <path d="m4.5 7 1 1 2-2M13 7h8M13 17h8" />
+      <rect x="3" y="14" width="6" height="6" rx="1.5" />
+    </>
+  ),
+  mdTable: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 10h18M3 15h18M10 4v16" />
+    </>
+  ),
+  mdPreview: (
+    <>
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  mdWrite: <path d="M4 20h4L19 9l-4-4L4 16v4ZM13.5 6.5l4 4" />,
+  mdRule: <path d="M3 12h18M7 7h10M7 17h10" />,
+  mdImage: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="9" cy="10" r="1.8" />
+      <path d="m21 16-5-5-9 9" />
     </>
   ),
 };

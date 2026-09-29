@@ -22,6 +22,7 @@
     "desktop:prepare": "npm run build && node scripts/desktop-prepare.mjs",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build --bundles app",
+    "desktop:build:windows": "tauri build --bundles nsis",
     "tauri": "tauri"
   },
   "dependencies": {

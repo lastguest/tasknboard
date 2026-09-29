@@ -1,0 +1,60 @@
+name: Windows app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'codex/windows-build']
+    paths-ignore: ['**/*.md']
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Restore Rust build cache
+        id: rust-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: src-tauri/target
+          key: windows-rust-${{ hashFiles('src-tauri/Cargo.lock') }}-${{ hashFiles('src-tauri/src/**', 'src-tauri/tauri*.json') }}
+          restore-keys: |
+            windows-rust-${{ hashFiles('src-tauri/Cargo.lock') }}-
+            windows-rust-
+      - name: Build Windows installer
+        run: npm run desktop:build:windows
+      - name: Save Rust build cache
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: src-tauri/target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+      - name: Test bundled service
+        shell: pwsh
+        run: |
+          $env:TASKNBOARD_TEST_NODE = Join-Path $PWD 'src-tauri/resources/node.exe'
+          $env:TASKNBOARD_TEST_SERVICE = Join-Path $PWD 'src-tauri/resources/server.mjs'
+          node --test tests/desktop.test.mjs
+      - name: Test browser workflows
+        run: |
+          npx playwright install chromium
+          npm run test:ui
+      - name: Install and launch the app
+        shell: pwsh
+        run: ./tests/windows-smoke.ps1
+      - name: Upload installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: TasknBoard-windows-x64
+          path: src-tauri/target/**/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 30

@@ -24,17 +24,23 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
   });
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 11);
+  assert.equal(tools.tools.length, 14);
   const call = async (name, args) => {
     const r = await client.callTool({ name, arguments: args });
     assert.notEqual(r.isError, true, JSON.stringify(r));
     return JSON.parse(r.content[0].text);
   };
   const info = await call("workspace_info", {});
-  assert.equal(info.schemaVersion, 3);
+  assert.equal(info.schemaVersion, 6);
   assert.ok(
     info.actors.some((entry) => entry.id === "test-agent" && entry.kind === "agent"),
   );
+  assert.deepEqual(await call("list_epics", {}), { epics: [] });
+  const epicDenied = await client.callTool({
+    name: "create_epic",
+    arguments: { title: "Not an MCP tool" },
+  });
+  assert.equal(epicDenied.isError, true);
   let task = await call("create_task", { title: "Real protocol test" });
   assert.equal(task.commentCount, 0);
   task = await call("claim_task", {

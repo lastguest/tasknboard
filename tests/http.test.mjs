@@ -65,14 +65,19 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   const infoResponse = await post("workspace_info");
   assert.equal(infoResponse.status, 200);
   const info = await infoResponse.json();
-  assert.equal(info.schemaVersion, 3);
+  assert.equal(info.schemaVersion, 6);
   assert.deepEqual(info.actors, [
-    { id: "remote-agent", kind: "agent" },
-    { id: "reviewer", kind: "human" },
+    { id: "remote-agent", kind: "agent", name: "", avatar: "" },
+    { id: "reviewer", kind: "human", name: "", avatar: "" },
   ]);
   assert.ok(!JSON.stringify(info).includes(token));
   assert.ok(!JSON.stringify(info).includes(agentToken));
-  let task = await (await post("create_task", { title: "Shared task", labels: ["Product", "UX"] })).json();
+  let task = await (
+    await post("create_task", {
+      title: "Shared task",
+      labels: ["Product", "UX"],
+    })
+  ).json();
   const client = new Client({ name: "remote-test", version: "1" });
   t.after(() => client.close());
   await client.connect(
@@ -129,8 +134,37 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   });
   assert.equal(completed.status, 200);
   assert.equal((await completed.json()).status, "done");
+  // Images exceed the ordinary command size and are served as inert files.
+  const bigPng = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.alloc(200000),
+  ]);
+  const uploaded = await post("upload_image", {
+    data: `data:image/png;base64,${bigPng.toString("base64")}`,
+  });
+  assert.equal(uploaded.status, 200);
+  const { url: imageUrl } = await uploaded.json();
+  const file = await fetch(`http://127.0.0.1:14319${imageUrl}`);
+  assert.equal(file.status, 200);
+  assert.equal(file.headers.get("content-type"), "image/png");
+  assert.match(file.headers.get("content-security-policy"), /sandbox/);
+  assert.ok(Buffer.from(await file.arrayBuffer()).equals(bigPng));
+  assert.equal(
+    (await fetch(`http://127.0.0.1:14319/files/${"0".repeat(32)}`)).status,
+    404,
+  );
+  assert.equal(
+    (
+      await post("add_comment", {
+        id: task.id,
+        expectedVersion: task.version,
+        body: "x".repeat(70000),
+      })
+    ).status,
+    413,
+  );
   const backup = await (await post("export_workspace")).json();
-  assert.equal(backup.schemaVersion, 3);
+  assert.equal(backup.schemaVersion, 6);
   assert.ok(backup.actors.some((actor) => actor.id === "remote-agent"));
   const databaseBytes = Buffer.concat([
     readFileSync(dbPath),

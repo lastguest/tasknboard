@@ -40,8 +40,18 @@ const tools = [
     true,
   ],
   [
+    "list_epics",
+    "List epics (projects that group tasks) with per-status task counts.",
+    true,
+  ],
+  [
     "create_task",
-    "Create a backlog task in the active workspace for the user.",
+    "Create a backlog task in the active workspace for the user, optionally inside an epic.",
+    false,
+  ],
+  [
+    "create_epic",
+    "Create an epic: a project that groups related tasks. Give it a title and optional Markdown description.",
     false,
   ],
   [
