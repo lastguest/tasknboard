@@ -347,6 +347,7 @@ test("the board migration preserves legacy keys and epic references", (t) => {
     "createdAt",
     "formerPrefixes",
     "id",
+    "inSidebar",
     "name",
     "prefix",
     "updatedAt",
@@ -387,11 +388,11 @@ test("the board migration preserves legacy keys and epic references", (t) => {
     "APP-002",
   );
   const backup = store.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 11);
+  assert.equal(backup.schemaVersion, 12);
   assert.equal(Object.hasOwn(backup, "workspace"), false);
   assert.equal(backup.tasks[0].boardId, defaultBoard.id);
-  // Exports hold stored records; formerPrefixes is derived from the reservations.
-  const { formerPrefixes, ...storedBoard } = defaultBoard;
+  // Exports hold stored records; formerPrefixes and inSidebar are derived.
+  const { formerPrefixes, inSidebar, ...storedBoard } = defaultBoard;
   assert.deepEqual(backup.boards, [storedBoard]);
   assert.deepEqual(backup.boardPrefixReservations, [
     { prefix: "APP", boardId: defaultBoard.id },
@@ -399,4 +400,68 @@ test("the board migration preserves legacy keys and epic references", (t) => {
   ]);
   // Close before the directory is removed: Windows cannot delete an open file.
   store.close();
+});
+
+test("each person hides boards from their own sidebar without changing the board", (t) => {
+  const store = fixture(t);
+  const other = { id: "sam", kind: "human" };
+  const [defaultBoard] = store.execute("list_boards", {}, human).boards;
+  const operations = store.execute(
+    "create_board",
+    { name: "Operations", prefix: "OPS" },
+    human,
+  );
+  assert.equal(operations.inSidebar, true);
+
+  const hidden = store.execute(
+    "set_board_sidebar",
+    { id: operations.id, inSidebar: false },
+    human,
+  );
+  assert.equal(hidden.inSidebar, false);
+  assert.equal(hidden.version, operations.version);
+  const sidebar = (actor) =>
+    store
+      .execute("list_boards", {}, actor)
+      .boards.map((board) => [board.id, board.inSidebar]);
+  assert.deepEqual(sidebar(human), [
+    [defaultBoard.id, true],
+    [operations.id, false],
+  ]);
+  assert.deepEqual(sidebar(other), [
+    [defaultBoard.id, true],
+    [operations.id, true],
+  ]);
+  assert.equal(
+    store
+      .execute("workspace_info", {}, human)
+      .boards.find((board) => board.id === operations.id).inSidebar,
+    false,
+  );
+  // Hiding twice is a no-op, and a board edit keeps the preference.
+  store.execute("set_board_sidebar", { id: operations.id, inSidebar: false }, human);
+  const renamed = store.execute(
+    "update_board",
+    { id: operations.id, expectedVersion: operations.version, patch: { name: "Ops" } },
+    human,
+  );
+  assert.equal(renamed.inSidebar, false);
+  assert.deepEqual(store.execute("export_workspace", {}, human).boardSidebarHidden, [
+    { actor: "you", boardId: operations.id },
+  ]);
+
+  assert.equal(
+    store.execute("set_board_sidebar", { id: operations.id, inSidebar: true }, human)
+      .inSidebar,
+    true,
+  );
+  assert.deepEqual(store.execute("export_workspace", {}, human).boardSidebarHidden, []);
+  assert.throws(
+    () => store.execute("set_board_sidebar", { id: operations.id, inSidebar: false }, agent),
+    { code: "FORBIDDEN" },
+  );
+  assert.throws(
+    () => store.execute("set_board_sidebar", { id: "BOARD-99", inSidebar: false }, human),
+    { code: "NOT_FOUND" },
+  );
 });

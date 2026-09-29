@@ -290,6 +290,9 @@ export const schemas = {
         .refine((v) => Object.keys(v).length > 0, "Empty patch"),
     })
     .strict(),
+  set_board_sidebar: z
+    .object({ id: boardId, inSidebar: z.boolean() })
+    .strict(),
   workspace_info: z.object({}).strict(),
   export_workspace: z.object({}).strict(),
 };

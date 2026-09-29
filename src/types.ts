@@ -91,6 +91,8 @@ export type BoardRecord = {
   prefix: string;
   /** Retired prefixes whose task keys still resolve on this board. */
   formerPrefixes: string[];
+  /** Whether the caller lists this board in the sidebar. Each person sets it. */
+  inSidebar: boolean;
   version: number;
   createdAt: string;
   updatedAt: string;

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const baseURL = process.env.TASKNBOARD_BASE_URL!;
 const humanToken = process.env.TASKNBOARD_HUMAN_TOKEN!;
@@ -37,7 +37,10 @@ test("boards scope task keys, persist selection, and own task deep links", async
 
   const boardSelect = page.getByRole("combobox", { name: "Board" });
   await expect(boardSelect).toHaveValue("BOARD-1");
-  await page.getByRole("button", { name: "New board" }).click();
+  await page
+    .getByRole("group", { name: "Board selection and actions" })
+    .getByRole("button", { name: "New board" })
+    .click();
   const newBoard = page.getByRole("dialog", { name: "New board" });
   const boardName = `Operations ${suffix}`;
   const prefix = `OPS${suffix}`;
@@ -107,4 +110,57 @@ test("boards scope task keys, persist selection, and own task deep links", async
   await expect(page.getByRole("navigation", { name: "Open tasks" })).toContainText(task.id);
   await page.getByRole("navigation", { name: "Open tasks" }).getByRole("button", { name: "Board" }).click();
   await expect(boardSelect).toHaveValue("BOARD-1");
+});
+
+/** Menus close on scroll, so scroll a sidebar control into view before it opens one. */
+async function reveal(page: Page, target: Locator) {
+  await target.scrollIntoViewIfNeeded();
+  await page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+  );
+  return target;
+}
+
+test("the sidebar lists boards with their pages, and each person hides boards", async ({ page }) => {
+  const suffix = key();
+  const name = `Sidebar ${suffix}`;
+  const board = await command<any>("create_board", { name, prefix: `SB${suffix}` });
+  await command("create_task", { boardId: board.id, title: `Sidebar task ${suffix}` });
+  await connect(page);
+
+  const sidebar = page.getByRole("navigation", { name: "Boards" });
+  const row = sidebar.getByRole("button", { name, exact: true });
+  await expect(row).toHaveAttribute("aria-expanded", "false");
+  await row.click();
+  const pages = sidebar.getByRole("group", { name });
+  await pages.getByRole("button", { name: "Epics", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Epics");
+  await pages.getByRole("button", { name: "Board", exact: true }).click();
+  await expect(pages.getByRole("button", { name: "Board", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await expect(page.getByRole("combobox", { name: "Board" })).toHaveValue(board.id);
+  await expect(page.getByText(`Sidebar task ${suffix}`)).toBeVisible();
+
+  // Rows stay expanded after a reload; the section collapses as a whole.
+  await page.reload();
+  await expect(row).toHaveAttribute("aria-expanded", "true");
+  await sidebar.getByRole("button", { name: "Boards" }).click();
+  await expect(row).toBeHidden();
+  await sidebar.getByRole("button", { name: "Boards" }).click();
+
+  await (await reveal(page, row)).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Hide from sidebar" }).click();
+  await expect(row).toBeHidden();
+  expect(
+    (await command<{ boards: any[] }>("list_boards")).boards.find((b) => b.id === board.id)
+      .inSidebar,
+  ).toBe(false);
+  // The board stays available from the board selector.
+  await expect(page.getByRole("combobox", { name: "Board" }).locator(`option[value="${board.id}"]`)).toHaveCount(1);
+
+  await (await reveal(page, sidebar.getByRole("button", { name: /hidden board/ }))).click();
+  await page.getByRole("menuitem", { name }).click();
+  await expect(row).toBeVisible();
 });

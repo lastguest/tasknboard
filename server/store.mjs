@@ -143,6 +143,11 @@ export function createStore(path, { clock = Date.now } = {}) {
       db.exec("DROP TABLE IF EXISTS workspace");
       db.prepare("INSERT INTO migrations VALUES(11)").run();
     }
+    if (!db.prepare("SELECT version FROM migrations WHERE version=12").get()) {
+      // Each person's boards hidden from their sidebar. Boards show by default.
+      db.exec(`CREATE TABLE board_sidebar_hidden(actor TEXT NOT NULL, board_id TEXT NOT NULL, PRIMARY KEY(actor, board_id));
+ INSERT INTO migrations VALUES(12);`);
+    }
   });
   const readTransaction = (fn) => {
     db.exec("BEGIN");
@@ -184,16 +189,26 @@ export function createStore(path, { clock = Date.now } = {}) {
         boardId,
       );
   };
-  /** Adds `formerPrefixes`: the retired prefixes whose task keys still resolve on each board. */
-  const withFormerPrefixes = (boards) => {
+  /**
+   * Adds `formerPrefixes`, the retired prefixes whose task keys still resolve
+   * on each board, and `inSidebar`, the caller's own sidebar preference.
+   */
+  const boardsFor = (identity, boards) => {
     const reservations = db
       .prepare("SELECT prefix, board_id FROM board_prefixes ORDER BY prefix")
       .all();
+    const hidden = new Set(
+      db
+        .prepare("SELECT board_id FROM board_sidebar_hidden WHERE actor=?")
+        .all(identity.id)
+        .map((r) => r.board_id),
+    );
     return boards.map((board) => ({
       ...board,
       formerPrefixes: reservations
         .filter((r) => r.board_id === board.id && r.prefix !== board.prefix)
         .map((r) => r.prefix),
+      inSidebar: !hidden.has(board.id),
     }));
   };
   const taskKey = (board, n) => `${board.prefix}-${String(n).padStart(3, "0")}`;
@@ -471,7 +486,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       );
     const p = parsed.data;
     if (command === "list_boards")
-      return readTransaction(() => ({ boards: withFormerPrefixes(allBoards()) }));
+      return readTransaction(() => ({ boards: boardsFor(identity, allBoards()) }));
     if (command === "create_board")
       return transaction(() => {
         humanOnly(identity, "create", "boards");
@@ -489,7 +504,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         saveBoard(board);
         reserveBoardPrefix(board.prefix, board.id);
         event(board.id, identity, "created");
-        return withFormerPrefixes([board])[0];
+        return boardsFor(identity, [board])[0];
       });
     if (command === "update_board")
       return transaction(() => {
@@ -512,7 +527,22 @@ export function createStore(path, { clock = Date.now } = {}) {
         }
         saveBoard(board);
         event(board.id, identity, "update_board", JSON.stringify(p.patch));
-        return withFormerPrefixes([board])[0];
+        return boardsFor(identity, [board])[0];
+      });
+    if (command === "set_board_sidebar")
+      return transaction(() => {
+        humanOnly(identity, "arrange", "the sidebar");
+        const board = getBoard(p.id);
+        // A personal preference: it neither versions the board nor logs an event.
+        if (p.inSidebar)
+          db.prepare(
+            "DELETE FROM board_sidebar_hidden WHERE actor=? AND board_id=?",
+          ).run(identity.id, board.id);
+        else
+          db.prepare(
+            "INSERT OR IGNORE INTO board_sidebar_hidden(actor, board_id) VALUES(?,?)",
+          ).run(identity.id, board.id);
+        return boardsFor(identity, [board])[0];
       });
     if (command === "workspace_info")
       return {
@@ -520,8 +550,8 @@ export function createStore(path, { clock = Date.now } = {}) {
         actor: profileOf(identity.id),
         actors: actorRoster(),
         leaseSeconds: 900,
-        boards: withFormerPrefixes(allBoards()),
-        schemaVersion: 11,
+        boards: boardsFor(identity, allBoards()),
+        schemaVersion: 12,
       };
     if (command === "update_profile")
       return transaction(() => {
@@ -755,7 +785,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       if (identity.kind !== "human")
         fail("FORBIDDEN", "Human access required", 403);
       return transaction(() => ({
-        schemaVersion: 11,
+        schemaVersion: 12,
         exportedAt: new Date(clock()).toISOString(),
         boards: allBoards(),
         actors: actorRoster(),
@@ -765,6 +795,12 @@ export function createStore(path, { clock = Date.now } = {}) {
           .prepare("SELECT actor, view_id FROM view_favorites ORDER BY actor, view_id")
           .all()
           .map((row) => ({ actor: row.actor, viewId: row.view_id })),
+        boardSidebarHidden: db
+          .prepare(
+            "SELECT actor, board_id FROM board_sidebar_hidden ORDER BY actor, board_id",
+          )
+          .all()
+          .map((row) => ({ actor: row.actor, boardId: row.board_id })),
         boardPrefixReservations: db
           .prepare(
             "SELECT prefix, board_id AS boardId FROM board_prefixes ORDER BY prefix",

@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { ApiError, command, errorOf } from "./api";
 import { Dialog } from "./Dialogs";
 import { Icon } from "./Icons";
@@ -58,6 +58,172 @@ export function BoardControls({
         </div>
       )}
     </div>
+  );
+}
+
+/** The board pages that each sidebar board row expands to. */
+export type BoardPage = "board" | "epics" | "views";
+const boardPages: [BoardPage, string, string][] = [
+  ["board", "board", "Board"],
+  ["epics", "folder", "Epics"],
+  ["views", "layers", "Views"],
+];
+const SIDEBAR_BOARDS_KEY = "tasknboard.sidebarBoards";
+/** Expanded board rows and the section state are this browser's layout, not workspace data. */
+type SidebarLayout = { open: boolean; expanded: string[] };
+const readSidebarLayout = (): SidebarLayout | null => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SIDEBAR_BOARDS_KEY) ?? "null");
+    return typeof stored?.open === "boolean" && Array.isArray(stored.expanded)
+      ? stored
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The sidebar Boards section: one expandable row per board the person keeps
+ * in the sidebar, each with its Board, Epics, and Views pages.
+ */
+export function SidebarBoards({
+  boards,
+  selectedBoardId,
+  page,
+  collapsed,
+  canManage,
+  onOpen,
+  onCreate,
+  onMenu,
+  onHiddenMenu,
+}: {
+  boards: BoardRecord[];
+  selectedBoardId: string;
+  /** The open page; it marks a board page only on the selected board. */
+  page: string;
+  /** The icon-only sidebar shows every page of every listed board. */
+  collapsed: boolean;
+  canManage: boolean;
+  onOpen: (boardId: string, page: BoardPage) => void;
+  onCreate: () => void;
+  onMenu: (e: React.MouseEvent<HTMLElement>, board: BoardRecord) => void;
+  onHiddenMenu: (e: React.MouseEvent<HTMLElement>) => void;
+}) {
+  const [layout, setLayout] = useState<SidebarLayout>(
+    () => readSidebarLayout() ?? { open: true, expanded: [selectedBoardId] },
+  );
+  const update = (change: (current: SidebarLayout) => SidebarLayout) =>
+    setLayout((current) => {
+      const next = change(current);
+      try {
+        localStorage.setItem(SIDEBAR_BOARDS_KEY, JSON.stringify(next));
+      } catch {
+        // The layout still works for this page when storage is unavailable.
+      }
+      return next;
+    });
+  // The selected board opens, so its current page stays visible.
+  useEffect(() => {
+    if (selectedBoardId)
+      update((current) =>
+        current.expanded.includes(selectedBoardId)
+          ? current
+          : { ...current, expanded: [...current.expanded, selectedBoardId] },
+      );
+  }, [selectedBoardId]);
+  const listed = boards.filter((board) => board.inSidebar);
+  const hidden = boards.length - listed.length;
+  const open = layout.open || collapsed;
+  return (
+    <nav className="nav-epics nav-boards" aria-labelledby="boards-label">
+      <div className="nav-section-head">
+        <button
+          type="button"
+          className="nav-label nav-section-toggle"
+          id="boards-label"
+          aria-expanded={open}
+          onClick={() => update((current) => ({ ...current, open: !current.open }))}
+        >
+          Boards
+          <Icon name={open ? "chevronDown" : "chevronRight"} size={12} />
+        </button>
+        {canManage && (
+          <button
+            type="button"
+            className="icon-button nav-add"
+            aria-label="New board"
+            title="New board"
+            onClick={onCreate}
+          >
+            <Icon name="plus" size={14} />
+          </button>
+        )}
+      </div>
+      {open &&
+        listed.map((board) => {
+          const expanded = collapsed || layout.expanded.includes(board.id);
+          return (
+            <div
+              key={board.id}
+              className="nav-board"
+              role="group"
+              aria-label={board.name}
+            >
+              <button
+                type="button"
+                className="nav-item nav-epic nav-board-row"
+                aria-expanded={expanded}
+                title={collapsed ? board.name : undefined}
+                onClick={() =>
+                  update((current) => ({
+                    ...current,
+                    expanded: current.expanded.includes(board.id)
+                      ? current.expanded.filter((id) => id !== board.id)
+                      : [...current.expanded, board.id],
+                  }))
+                }
+                onContextMenu={(e) => onMenu(e, board)}
+              >
+                <span className="board-glyph" aria-hidden="true">
+                  {board.prefix.slice(0, 2)}
+                </span>
+                <span className="nav-epic-title">{board.name}</span>
+                <Icon name={expanded ? "chevronDown" : "chevronRight"} size={12} />
+              </button>
+              {expanded &&
+                boardPages.map(([id, icon, label]) => {
+                  const selected =
+                    board.id === selectedBoardId &&
+                    (page === id || (id === "epics" && page === "epic") ||
+                      (id === "views" && page === "saved"));
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className={`nav-item nav-epic nav-board-page ${selected ? "selected" : ""}`}
+                      aria-current={selected ? "page" : undefined}
+                      title={collapsed ? `${board.name} ${label}` : undefined}
+                      onClick={() => onOpen(board.id, id)}
+                    >
+                      <Icon name={icon} size={15} />
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
+            </div>
+          );
+        })}
+      {open && hidden > 0 && (
+        <button
+          type="button"
+          className="nav-hidden-boards"
+          aria-haspopup="menu"
+          onClick={onHiddenMenu}
+        >
+          {hidden === 1 ? "1 hidden board" : `${hidden} hidden boards`}
+        </button>
+      )}
+    </nav>
   );
 }
 

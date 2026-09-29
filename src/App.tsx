@@ -14,7 +14,7 @@ import { Icon } from "./Icons";
 import { AssigneeFilter, UNASSIGNED } from "./AssigneeFilter";
 import { ApiError, command, errorOf, loadTasks, taskNumber, token } from "./api";
 import { Standup } from "./Standup";
-import { BoardControls, BoardEditor } from "./Boards";
+import { BoardControls, BoardEditor, type BoardPage, SidebarBoards } from "./Boards";
 import {
   EpicEditor,
   EpicsPage,
@@ -655,6 +655,74 @@ export default function App() {
       setViewSaving(false);
       void refresh();
     }
+  }
+
+  function openBoardPage(boardId: string, page: BoardPage) {
+    selectBoard(boardId);
+    setView(page);
+  }
+
+  async function setBoardSidebar(board: BoardRecord, inSidebar: boolean) {
+    try {
+      const saved = await command<BoardRecord>("set_board_sidebar", {
+        id: board.id,
+        inSidebar,
+      });
+      setBoards((list) => list.map((b) => (b.id === saved.id ? saved : b)));
+    } catch (e) {
+      notify({
+        tone: "error",
+        title: `Couldn't update the sidebar`,
+        body: errorOf(e).message,
+      });
+    }
+  }
+
+  function boardMenu(e: React.MouseEvent<HTMLElement>, board: BoardRecord) {
+    setMenu(
+      menuAt(e, `Actions for ${board.name}`, [
+        {
+          items: [
+            {
+              label: "Open board",
+              icon: <Icon name="board" size={14} />,
+              onSelect: () => openBoardPage(board.id, "board"),
+            },
+            ...(isHuman
+              ? [
+                  {
+                    label: "Edit board",
+                    icon: <Icon name="mdWrite" size={14} />,
+                    onSelect: () => setBoardDialog({ board }),
+                  },
+                  {
+                    label: "Hide from sidebar",
+                    icon: <Icon name="eye" size={14} />,
+                    onSelect: () => void setBoardSidebar(board, false),
+                  },
+                ]
+              : []),
+          ],
+        },
+      ]),
+    );
+  }
+
+  function hiddenBoardsMenu(e: React.MouseEvent<HTMLElement>) {
+    setMenu(
+      menuAt(e, "Hidden boards", [
+        {
+          label: "Show in sidebar",
+          items: boards
+            .filter((board) => !board.inSidebar)
+            .map((board) => ({
+              label: board.name,
+              icon: <Icon name="eye" size={14} />,
+              onSelect: () => void setBoardSidebar(board, true),
+            })),
+        },
+      ]),
+    );
   }
 
   async function toggleFavorite(target: SavedView) {
@@ -1317,7 +1385,11 @@ export default function App() {
               <button
                 key={id}
                 type="button"
-                className={`nav-item ${view === id ? "selected" : ""}`}
+                className={`nav-item ${view === id ? "selected" : ""} ${
+                  id === "board" || id === "epics" || id === "views"
+                    ? "nav-board-scoped"
+                    : ""
+                }`}
                 aria-current={view === id ? "page" : undefined}
                 title={collapsed ? viewTitles[id] : undefined}
                 onClick={() => (id === "pulls" ? openPull(pullTarget) : setView(id))}
@@ -1349,82 +1421,95 @@ export default function App() {
               <span>Stand-up</span>
             </button>
           </nav>
-          {favorites.length > 0 && (
-            <nav
-              className="nav-epics nav-favorites"
-              aria-labelledby="favorites-label"
-            >
+          <div className="sidebar-scroll">
+            {favorites.length > 0 && (
+              <nav
+                className="nav-epics nav-favorites"
+                aria-labelledby="favorites-label"
+              >
+                <div className="nav-section-head">
+                  <span className="nav-label" id="favorites-label">
+                    Favorites
+                  </span>
+                </div>
+                {favorites.map((saved) => {
+                  const selected = view === "saved" && viewId === saved.id;
+                  const count = viewCount(saved);
+                  return (
+                    <button
+                      key={saved.id}
+                      type="button"
+                      className={`nav-item nav-epic ${selected ? "selected" : ""}`}
+                      aria-current={selected ? "page" : undefined}
+                      title={collapsed ? saved.name : undefined}
+                      onClick={() => openSavedView(saved)}
+                    >
+                      <ViewGlyph view={saved} size={14} />
+                      <span className="nav-epic-title">{saved.name}</span>
+                      <small aria-label={`${count} tasks`}>{count}</small>
+                    </button>
+                  );
+                })}
+              </nav>
+            )}
+            <SidebarBoards
+              boards={boards}
+              selectedBoardId={selectedBoardId}
+              page={view}
+              collapsed={collapsed}
+              canManage={isHuman}
+              onOpen={openBoardPage}
+              onCreate={() => setBoardDialog({ board: null })}
+              onMenu={boardMenu}
+              onHiddenMenu={hiddenBoardsMenu}
+            />
+            <nav className="nav-epics" aria-labelledby="epics-label">
               <div className="nav-section-head">
-                <span className="nav-label" id="favorites-label">
-                  Favorites
+                <span className="nav-label" id="epics-label">
+                  Epics
                 </span>
+                {isHuman && (
+                  <button
+                    type="button"
+                    className="icon-button nav-add"
+                    aria-label="New epic"
+                    title="New epic"
+                    onClick={() => setEpicDialog({ epic: null })}
+                  >
+                    <Icon name="plus" size={14} />
+                  </button>
+                )}
               </div>
-              {favorites.map((saved) => {
-                const selected = view === "saved" && viewId === saved.id;
-                const count = viewCount(saved);
+              {activeEpics.map((epic) => {
+                const { open } = epicProgress(epic);
+                const selected = view === "epic" && epicId === epic.id;
                 return (
                   <button
-                    key={saved.id}
+                    key={epic.id}
                     type="button"
                     className={`nav-item nav-epic ${selected ? "selected" : ""}`}
                     aria-current={selected ? "page" : undefined}
-                    title={collapsed ? saved.name : undefined}
-                    onClick={() => openSavedView(saved)}
+                    title={collapsed ? epic.title : undefined}
+                    onClick={() => openEpic(epic)}
+                    onContextMenu={(e) => epicMenu(e, epic)}
                   >
-                    <ViewGlyph view={saved} size={14} />
-                    <span className="nav-epic-title">{saved.name}</span>
-                    <small aria-label={`${count} tasks`}>{count}</small>
+                    <span
+                      className="epic-glyph"
+                      style={epicStyle(epic)}
+                      aria-hidden="true"
+                    />
+                    <span className="nav-epic-title">{epic.title}</span>
+                    <small aria-label={`${open} open tasks`}>{open}</small>
                   </button>
                 );
               })}
-            </nav>
-          )}
-          <nav className="nav-epics" aria-labelledby="epics-label">
-            <div className="nav-section-head">
-              <span className="nav-label" id="epics-label">
-                Epics
-              </span>
-              {isHuman && (
-                <button
-                  type="button"
-                  className="icon-button nav-add"
-                  aria-label="New epic"
-                  title="New epic"
-                  onClick={() => setEpicDialog({ epic: null })}
-                >
-                  <Icon name="plus" size={14} />
-                </button>
+              {sync.loaded && !activeEpics.length && (
+                <p className="nav-empty">
+                  Group related tasks into a project.
+                </p>
               )}
-            </div>
-            {activeEpics.map((epic) => {
-              const { open } = epicProgress(epic);
-              const selected = view === "epic" && epicId === epic.id;
-              return (
-                <button
-                  key={epic.id}
-                  type="button"
-                  className={`nav-item nav-epic ${selected ? "selected" : ""}`}
-                  aria-current={selected ? "page" : undefined}
-                  title={collapsed ? epic.title : undefined}
-                  onClick={() => openEpic(epic)}
-                  onContextMenu={(e) => epicMenu(e, epic)}
-                >
-                  <span
-                    className="epic-glyph"
-                    style={epicStyle(epic)}
-                    aria-hidden="true"
-                  />
-                  <span className="nav-epic-title">{epic.title}</span>
-                  <small aria-label={`${open} open tasks`}>{open}</small>
-                </button>
-              );
-            })}
-            {sync.loaded && !activeEpics.length && (
-              <p className="nav-empty">
-                Group related tasks into a project.
-              </p>
-            )}
-          </nav>
+            </nav>
+          </div>
           <div className="sidebar-bottom">
             <button
               type="button"

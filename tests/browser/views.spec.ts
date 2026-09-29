@@ -97,14 +97,14 @@ test("Views save filters and display, favourite into the sidebar, and delete", a
   await expect(favorites.getByRole("button", { name: new RegExp(`^${name}`) })).toBeVisible();
 
   // Leaving a view drops its filters.
-  await page.locator(".sidebar").getByRole("button", { name: /^Board/ }).click();
+  await page.getByRole("navigation", { name: "Boards" }).getByRole("group", { name: "Default" }).getByRole("button", { name: "Board", exact: true }).click();
   await expect(page.getByRole("group", { name: "Filters" }).locator(".filter-chip")).toHaveCount(0);
   await favorites.getByRole("button", { name: new RegExp(`^${name}`) }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(name);
   await expect(page.locator("tbody tr:not(.group-row)")).toHaveCount(1);
 
   // The Views page lists it; deleting it removes it for everyone.
-  await page.locator(".sidebar").getByRole("button", { name: /^Views/ }).click();
+  await page.getByRole("navigation", { name: "Boards" }).getByRole("group", { name: "Default" }).getByRole("button", { name: "Views", exact: true }).click();
   await expect(page.locator(".view-row").filter({ hasText: name })).toContainText("1 tasks");
   await page.getByRole("button", { name, exact: true }).click();
   await page.getByRole("button", { name: "Edit view" }).click();

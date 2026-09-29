@@ -2716,8 +2716,10 @@ footer {
 }
 .sidebar.collapsed .brand > span,
 .sidebar.collapsed .nav-label,
-.sidebar.collapsed .nav-item > span:not(.epic-glyph):not(.view-glyph),
+.sidebar.collapsed .nav-item > span:not(.epic-glyph):not(.view-glyph):not(.board-glyph),
 .sidebar.collapsed .nav-item small,
+.sidebar.collapsed .nav-board-row > svg,
+.sidebar.collapsed .nav-hidden-boards,
 .sidebar.collapsed .nav-add,
 .sidebar.collapsed .nav-empty,
 .sidebar.collapsed .identity > span:last-child {
@@ -2743,14 +2745,18 @@ footer {
 
 /* Responsive */
 /* Epics: projects that group tasks. */
+/* Favorites, boards, and epics scroll together, so no section hides another. */
+.sidebar-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
 .nav-epics {
   display: flex;
   flex-direction: column;
   gap: 1px;
   margin-top: 20px;
-  min-height: 0;
-  flex: 0 1 auto;
-  overflow-y: auto;
 }
 .nav-section-head {
   display: flex;
@@ -2779,6 +2785,68 @@ footer {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Boards: each row expands to its board pages, as teams do in Linear. */
+.nav-section-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.nav-section-toggle:hover {
+  color: var(--text-strong);
+}
+.nav-board {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.board-glyph {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: #2c3036;
+  color: var(--text-strong);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+.nav-board-row > svg {
+  margin-left: auto;
+  color: var(--subtle);
+}
+.nav-item.nav-board-page {
+  padding-left: 39px;
+}
+.sidebar.collapsed .nav-item.nav-board-page {
+  padding-left: 0;
+}
+.nav-hidden-boards {
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  margin: 2px 10px;
+  padding: 2px 0;
+  color: var(--subtle);
+  font-size: 12px;
+  cursor: pointer;
+}
+.nav-hidden-boards:hover {
+  color: var(--text-strong);
+}
+/* Wide screens reach the board pages from the Boards section. */
+@media (min-width: 801px) {
+  .nav-board-scoped {
+    display: none;
+  }
 }
 .nav-empty {
   margin: 2px 10px;
@@ -3100,7 +3168,7 @@ footer {
   }
   .brand,
   .nav-label,
-  .nav-epics,
+  .sidebar-scroll,
   .workspace-status,
   .sidebar-bottom .nav-item:last-of-type {
     display: none;
