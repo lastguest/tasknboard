@@ -65,7 +65,12 @@ export function connectionHelper(
       parts.push("--transport", "stdio", "--scope", "user");
     for (const [key, value] of Object.entries(env))
       parts.push("--env", quote(`${key}=${value}`));
-    parts.push("--", quote(source.command), ...source.args.map(quote));
+    // PowerShell drops a bare -- before it runs the npm .ps1 shims.
+    parts.push(
+      windows ? quote("--") : "--",
+      quote(source.command),
+      ...source.args.map(quote),
+    );
     return {
       text: parts.join(" "),
       label: "Copy command",

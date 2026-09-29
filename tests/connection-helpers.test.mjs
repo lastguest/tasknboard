@@ -59,6 +59,8 @@ test("OpenCode gets its native configuration and Pi gets an agent CLI skill", ()
 test("Windows commands use PowerShell literal strings and invocation", () => {
   const windows = { ...runtime, platform: "win32" };
   assert.match(connectionHelper("codex", windows, "codex").text, /Stefano''s/);
+  for (const client of ["codex", "claude"])
+    assert.match(connectionHelper(client, windows, client).text, / '--' '/);
   const pi = connectionHelper("pi", windows, "pi").text;
   assert.ok(pi.includes("$env:TASKNBOARD_AGENT_ID = 'pi';"));
   assert.ok(pi.includes("& '/Apps/Stefano''s $(false)/node'"));
