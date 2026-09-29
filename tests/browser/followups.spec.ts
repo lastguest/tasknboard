@@ -309,6 +309,28 @@ test("Initial My tasks hides placeholder identity and ordinary browsers skip Web
   expect(scripts.some((url) => /\/webmcp-/.test(url))).toBe(false);
 });
 
+test("Settings offers Change server only inside the iOS shell", async ({ page }) => {
+  await connect(page);
+  await nav(page, "Settings").click();
+  let settings = page.getByRole("dialog", { name: "Settings" });
+  await expect(settings.getByRole("heading", { name: "Connection" })).toBeVisible();
+  await expect(settings.getByRole("button", { name: "Change server" })).toHaveCount(0);
+
+  // The iOS shell injects this contract into every page it loads.
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "tasknboardShell", {
+      value: { changeServer: () => { (window as any).serverChangeRequested = true; } },
+    });
+  });
+  await page.reload();
+  await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
+  await nav(page, "Settings").click();
+  settings = page.getByRole("dialog", { name: "Settings" });
+  await expect(settings).toContainText(`Server: ${new URL(baseURL).origin}`);
+  await settings.getByRole("button", { name: "Change server" }).click();
+  expect(await page.evaluate(() => (window as any).serverChangeRequested)).toBe(true);
+});
+
 test("Phone navigation, fullscreen dialogs and keyboard focus remain usable", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await create(`Phone ${key()}`);

@@ -22,6 +22,11 @@ The webview loads the interface from that service, so assets and API calls share
 one origin. The service uses SQLite in the application data directory.
 The Rust host owns the service lifecycle. Domain rules stay in the existing Node core.
 The packaged runtime removes the need for a separate Node installation.
+iOS: the Tauri shell is a client for a centralized server. A bundled setup page
+saves one HTTPS server origin, checks that it responds, and loads it in the webview.
+The webview stays on that origin and opens other links in the system browser.
+The shell injects `window.tasknboardShell.changeServer()`. Settings uses it to
+return to the setup page. Remote pages have no Tauri IPC access.
 
 ## Agent lifecycle
 

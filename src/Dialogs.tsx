@@ -1429,6 +1429,18 @@ export function Settings({
               ? `Connected as ${actor.id} (${actor.kind}).`
               : "Not connected to the workspace service."}
           </p>
+          {window.tasknboardShell && (
+            <>
+              <p className="small">Server: {location.origin}</p>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => window.tasknboardShell?.changeServer()}
+              >
+                Change server
+              </button>
+            </>
+          )}
           <form
             onSubmit={(e) => {
               e.preventDefault();

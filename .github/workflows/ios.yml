@@ -1,0 +1,77 @@
+name: iOS
+
+# The iOS app bundles only the Tauri shell and its server setup page.
+# The remote server serves the web interface, so web changes do not trigger this build.
+on:
+  push:
+    paths:
+      - ".github/workflows/ios.yml"
+      - "mobile/**"
+      - "src-tauri/**"
+      - "package.json"
+      - "package-lock.json"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    name: Signed IPA
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+      IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+      IOS_MOBILE_PROVISION: ${{ secrets.IOS_MOBILE_PROVISION }}
+    steps:
+      - name: Check signing secrets
+        run: |
+          missing=""
+          for name in IOS_CERTIFICATE IOS_CERTIFICATE_PASSWORD IOS_MOBILE_PROVISION; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. See the iOS app section in README.md."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - run: npm ci
+
+      # src-tauri/gen is not committed. Tauri generates the Xcode project on each run.
+      - name: Generate Xcode project
+        run: npm run tauri -- ios init --ci
+
+      - name: Generate iOS icons
+        run: npm run tauri -- icon src-tauri/app-icon.svg --ios-color "#111214"
+
+      - name: Build signed IPA
+        run: >-
+          npm run tauri -- ios build --ci
+          --export-method app-store-connect
+          --config '{"bundle":{"iOS":{"bundleVersion":"${{ github.run_number }}"}}}'
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: TasknBoard-ios-${{ github.run_number }}
+          path: src-tauri/gen/apple/build/**/*.ipa
+          if-no-files-found: error

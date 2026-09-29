@@ -79,6 +79,34 @@ The desktop app uses the same command validation, SQLite store, and task interfa
 For local MCP access, set `TASKNBOARD_DB` to the desktop database's absolute path.
 WebMCP tools register only when the embedded webview supports the native browser API.
 
+## iOS app
+
+The iOS app is a client for a [centralized server](#centralized-server).
+It does not contain the service or a database.
+At first launch, the app asks for the server address and keeps it on the device.
+The server must use HTTPS and must allow its public host in `TASKNBOARD_ALLOWED_HOSTS`.
+Settings shows the current server and a **Change server** button.
+If the server is unreachable at launch, the app shows the setup screen with the error.
+The access token stays in sessionStorage, so enter it again after iOS ends the app.
+Links to other sites open in the system browser.
+The app requires iOS 17.4 or later.
+
+The **iOS** GitHub Actions workflow builds a signed IPA for App Store Connect and TestFlight.
+It runs on pushes that change `mobile/`, `src-tauri/`, the npm manifests, or the workflow.
+You can also start it by hand from the Actions tab.
+The IPA is attached to the workflow run as an artifact.
+
+Before the first run, register the bundle ID `app.tasknboard.mobile` in your Apple Developer account.
+Then add these repository secrets:
+
+- `IOS_CERTIFICATE`: your Apple Distribution certificate, exported as `.p12` and encoded with `base64 -i certificate.p12`.
+- `IOS_CERTIFICATE_PASSWORD`: the `.p12` export password.
+- `IOS_MOBILE_PROVISION`: an App Store distribution provisioning profile for `app.tasknboard.mobile`, encoded with `base64 -i profile.mobileprovision`.
+
+The workflow fails at its first step until all three secrets exist.
+Tauri generates the Xcode project in CI, so `src-tauri/gen/` is not committed.
+To build on a Mac, run `npm run tauri -- ios init`, then `npm run tauri -- ios build`.
+
 ## Stand-up mode
 
 Use **Stand-up** in the sidebar before sharing the browser tab in Google Meet.
@@ -230,14 +258,15 @@ No direct remote Streamable HTTP MCP endpoint is included yet. The bridge requir
 - Task assignees are free text. The server roster records explicit human and agent identities from trusted configuration and authenticated commands. Unknown assignees remain neutral. The roster is not live telemetry.
 - Cards and list rows show counts from persisted comment events. See the [task metadata contract](docs/contracts/task-metadata.md).
 - Shared timestamps use an explicit English format and UTC. Review evidence stays available when a task needs changes, with an explanation that it belongs to the earlier submission.
-- The Tauri shell packages a local workspace. It does not add cloud synchronization or a remote workspace selector.
+- The desktop app packages a local workspace. It does not add cloud synchronization or a remote workspace selector.
+- The iOS app connects to one centralized server. It stores no workspace data on the device.
 
 ## Repository
 
 `src/` interface and API adapter; `server/domain.mjs` shared schemas;
 `server/store.mjs` transactional commands; `server/http.mjs` HTTP/auth/static files;
 `server/mcp.mjs` MCP adapter; `tests/` integration and domain coverage;
-`src-tauri/` desktop host and packaging; `docs/ARCHITECTURE.md` decisions and follow-up scope.
+`src-tauri/` desktop and iOS host and packaging; `mobile/` iOS server setup page; `docs/ARCHITECTURE.md` decisions and follow-up scope.
 
 ## Why Vite instead of Next.js?
 
