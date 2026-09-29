@@ -871,7 +871,7 @@ export function TaskEditor({
   }
 
   const artifact = safeUrl(current?.review?.artifactUrl);
-  const footer = discard ? (
+  const discardBar = (
     <div
       className="discard-bar"
       role="alertdialog"
@@ -895,9 +895,8 @@ export function TaskEditor({
         Discard
       </button>
     </div>
-  ) : (
-    <>
-      {error && (
+  );
+  const errorNote = error && (
         <ErrorNote
           error={error}
           kept={
@@ -915,7 +914,8 @@ export function TaskEditor({
           }
           busy={Boolean(pending)}
         />
-      )}
+  );
+  const actions = (
       <div className="form-actions">
         {current && dirty && !pending && (
           <span className="small dirty-note">Unsaved changes</span>
@@ -942,7 +942,6 @@ export function TaskEditor({
               : "Create task"}
         </button>
       </div>
-    </>
   );
 
   const layout = (
@@ -1412,10 +1411,12 @@ export function TaskEditor({
     <>
     {current ? (
       <section className="task-panel" aria-labelledby={`${listId}-title`}>
+        {/* Actions sit in the header, clear of the toasts in the bottom corner. */}
         <div className="dialog-head">
           <h2 id={`${listId}-title`} ref={headingRef} tabIndex={-1}>
             <span className="task-id">{current.id}</span> Task details
           </h2>
+          {discard ? discardBar : actions}
           <button
             type="button"
             className="icon-button"
@@ -1425,12 +1426,25 @@ export function TaskEditor({
             <Icon name="close" />
           </button>
         </div>
-        {/* Actions sit at the top, clear of the toasts in the bottom corner. */}
-        <div className="dialog-foot task-panel-actions">{footer}</div>
+        {errorNote && <div className="task-panel-error">{errorNote}</div>}
         <div className="dialog-body">{layout}</div>
       </section>
     ) : (
-      <Dialog title="New task" onClose={requestClose} footer={footer} wide>
+      <Dialog
+        title="New task"
+        onClose={requestClose}
+        footer={
+          discard ? (
+            discardBar
+          ) : (
+            <>
+              {errorNote}
+              {actions}
+            </>
+          )
+        }
+        wide
+      >
         {layout}
       </Dialog>
     )}

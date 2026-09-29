@@ -492,9 +492,19 @@ main {
 .task-panel h2:focus {
   outline: none;
 }
-.task-panel-actions {
-  border-top: 0;
+.task-panel .dialog-head h2 {
+  flex-shrink: 0;
+}
+.task-panel .dialog-head .form-actions,
+.task-panel .dialog-head .discard-bar {
+  flex: 1;
+  justify-content: flex-end;
+}
+.task-panel-error {
+  flex-shrink: 0;
+  padding: 12px 20px;
   border-bottom: 1px solid var(--border);
+  background: #1b1d21;
 }
 .page-title {
   margin-bottom: 18px;
@@ -3310,8 +3320,13 @@ footer {
   .dialog-foot {
     padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px);
   }
-  .dialog-foot.task-panel-actions {
-    padding-bottom: 10px;
+  .task-panel .dialog-head {
+    flex-wrap: wrap;
+  }
+  .task-panel .dialog-head .form-actions,
+  .task-panel .dialog-head .discard-bar {
+    order: 3;
+    flex-basis: 100%;
   }
 }
 @media (prefers-reduced-motion: reduce) {
