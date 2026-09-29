@@ -184,6 +184,18 @@ export function createStore(path, { clock = Date.now } = {}) {
         boardId,
       );
   };
+  /** Adds `formerPrefixes`: the retired prefixes whose task keys still resolve on each board. */
+  const withFormerPrefixes = (boards) => {
+    const reservations = db
+      .prepare("SELECT prefix, board_id FROM board_prefixes ORDER BY prefix")
+      .all();
+    return boards.map((board) => ({
+      ...board,
+      formerPrefixes: reservations
+        .filter((r) => r.board_id === board.id && r.prefix !== board.prefix)
+        .map((r) => r.prefix),
+    }));
+  };
   const taskKey = (board, n) => `${board.prefix}-${String(n).padStart(3, "0")}`;
   const all = () =>
     db
@@ -195,13 +207,26 @@ export function createStore(path, { clock = Date.now } = {}) {
       if (task.boardId !== boardId) return max;
       return Math.max(max, Number(task.id.match(/-(\d+)$/)?.[1] ?? 0));
     }, 0) + 1;
-  const get = (id) => {
+  /** A key with a board's former prefix names that board's task with the same number. */
+  const renamedTaskKey = (id) => {
+    const [, prefix, number] = id.match(/^([A-Z][A-Z0-9]{0,9})-(\d+)$/) ?? [];
+    const owner =
+      prefix &&
+      db.prepare("SELECT board_id FROM board_prefixes WHERE prefix=?").get(prefix);
+    if (!owner) return "";
+    const board = getBoard(owner.board_id);
+    return board.prefix === prefix ? "" : `${board.prefix}-${number}`;
+  };
+  const findTask = (id) => {
     const row = db
       .prepare("SELECT data FROM tasks WHERE json_extract(data, '$.id')=?")
       .get(id);
-    if (!row) fail("NOT_FOUND", "Task not found", 404);
-    return JSON.parse(row.data);
+    return row && JSON.parse(row.data);
   };
+  const get = (id) =>
+    findTask(id) ??
+    findTask(renamedTaskKey(id)) ??
+    fail("NOT_FOUND", "Task not found", 404);
   const save = (t) =>
     db
       .prepare("UPDATE tasks SET data=? WHERE json_extract(data, '$.id')=?")
@@ -446,7 +471,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       );
     const p = parsed.data;
     if (command === "list_boards")
-      return readTransaction(() => ({ boards: allBoards() }));
+      return readTransaction(() => ({ boards: withFormerPrefixes(allBoards()) }));
     if (command === "create_board")
       return transaction(() => {
         humanOnly(identity, "create", "boards");
@@ -464,7 +489,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         saveBoard(board);
         reserveBoardPrefix(board.prefix, board.id);
         event(board.id, identity, "created");
-        return board;
+        return withFormerPrefixes([board])[0];
       });
     if (command === "update_board")
       return transaction(() => {
@@ -487,7 +512,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         }
         saveBoard(board);
         event(board.id, identity, "update_board", JSON.stringify(p.patch));
-        return board;
+        return withFormerPrefixes([board])[0];
       });
     if (command === "workspace_info")
       return {
@@ -495,7 +520,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         actor: profileOf(identity.id),
         actors: actorRoster(),
         leaseSeconds: 900,
-        boards: allBoards(),
+        boards: withFormerPrefixes(allBoards()),
         schemaVersion: 11,
       };
     if (command === "update_profile")

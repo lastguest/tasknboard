@@ -70,7 +70,7 @@ test("boards scope task keys, persist selection, and own task deep links", async
   const editBoard = page.getByRole("dialog", { name: "Edit board" });
   await editBoard.getByRole("textbox", { name: "Board prefix" }).fill(nextPrefix);
   await expect(editBoard).toContainText(
-    "Changing this prefix renames existing task keys. Old keys in links or branch references no longer resolve.",
+    "Changing this prefix renames existing task keys. Old keys in links or branch references keep opening the renamed tasks.",
   );
   await editBoard.getByRole("button", { name: "Save changes" }).click();
   await expect(editBoard).toBeHidden();
@@ -78,6 +78,9 @@ test("boards scope task keys, persist selection, and own task deep links", async
   task = boardTasks.tasks.find((item: any) => item.title === taskTitle);
   expect(task?.id).toMatch(new RegExp(`^${nextPrefix}-`));
   expect(task?.boardId).toBe(board.id);
+  await page.getByRole("button", { name: "Edit board" }).click();
+  await expect(editBoard).toContainText(`Former prefixes: ${prefix}-.`);
+  await editBoard.getByRole("button", { name: "Cancel" }).click();
 
   const oldKey = await fetch(`${baseURL}/api/get_task`, {
     method: "POST",
@@ -87,7 +90,8 @@ test("boards scope task keys, persist selection, and own task deep links", async
     },
     body: JSON.stringify({ id: `${prefix}-001` }),
   });
-  expect(oldKey.status).toBe(404);
+  expect(oldKey.status).toBe(200);
+  expect((await oldKey.json()).id).toBe(task.id);
 
   await page.reload();
   await expect(boardSelect).toHaveValue(board.id);
@@ -97,7 +101,8 @@ test("boards scope task keys, persist selection, and own task deep links", async
   await expect(page.locator(".task-card").filter({ hasText: taskTitle })).toHaveCount(0);
   expect((await command<any>("get_task", { id: original.id })).boardId).toBe("BOARD-1");
 
-  await page.goto(`${baseURL}/#task/${task.id}`);
-  await expect(page.getByRole("dialog", { name: /Task details/ })).toBeVisible();
+  // A link with the former key opens the renamed task on its board.
+  await page.goto(`${baseURL}/#task/${prefix}-001`);
+  await expect(page.getByRole("dialog", { name: /Task details/ })).toContainText(task.id);
   await expect(boardSelect).toHaveValue(board.id);
 });

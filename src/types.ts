@@ -89,6 +89,8 @@ export type BoardRecord = {
   id: string;
   name: string;
   prefix: string;
+  /** Retired prefixes whose task keys still resolve on this board. */
+  formerPrefixes: string[];
   version: number;
   createdAt: string;
   updatedAt: string;

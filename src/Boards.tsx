@@ -212,8 +212,10 @@ export function BoardEditor({
               <>
                 {" "}
                 {prefixChanged
-                  ? "Changing this prefix renames existing task keys. Old keys in links or branch references no longer resolve."
+                  ? "Changing this prefix renames existing task keys. Old keys in links or branch references keep opening the renamed tasks."
                   : "You can change this prefix later when you edit this board."}
+                {board.formerPrefixes.length > 0 &&
+                  ` Former prefixes: ${board.formerPrefixes.map((p) => `${p}-`).join(", ")}.`}
               </>
             )}
           </span>

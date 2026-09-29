@@ -11,6 +11,8 @@ type Board = {
   id: `BOARD-${number}`;
   name: string;
   prefix: string;
+  /** Retired prefixes of this board, derived from the prefix reservations. */
+  formerPrefixes: string[];
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -31,7 +33,9 @@ Names are trimmed and contain 1–80 characters. Prefixes are trimmed, converted
 
 `create_task` requires a valid `boardId`. Each task stores that board ID. New task numbers start at `001` on each board and increase within that board. `list_tasks` accepts an optional `boardId`; without it, the server returns tasks from every board.
 
-Changing a board prefix rewrites only task keys on that board and their event task references. The update and all key rewrites commit together. A former task key does not resolve after the rename. The server reserves every prefix to its original board, so another board cannot reuse it. Its owner can reclaim it. Prefix reservations appear in workspace exports.
+Changing a board prefix rewrites only task keys on that board and their event task references. The update and all key rewrites commit together. The server reserves every prefix to its original board, so another board cannot reuse it. Its owner can reclaim it. Prefix reservations appear in workspace exports.
+
+A former task key keeps resolving after the rename. Every command that takes a task ID accepts a key with a former prefix of a board. It acts on the task with the same number under the current prefix of that board, and its result carries the current key. A key resolves through one lookup, also after several renames. A key with a prefix that no board ever used returns `NOT_FOUND`. `list_boards`, `workspace_info`, `create_board`, and `update_board` return `formerPrefixes` on each board. Workspace exports do not repeat it, because they include the reservations.
 
 `list_epics` accepts an optional `boardId`. It returns the workspace epics and counts tasks from that board. Without a board ID, counts include tasks from every board. Epic IDs stay internal keys such as `EPIC-1`; the interface owns custom epic names.
 

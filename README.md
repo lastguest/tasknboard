@@ -39,7 +39,7 @@ when the tests finish. It does not use the user's workspace database.
 
 Select a board on the Board page. Use **New board** to create one, or **Edit board**
 to change its name and task prefix. Each board has its own task number sequence.
-Changing a prefix changes existing task keys on that board; previous keys no longer resolve.
+Changing a prefix changes existing task keys on that board. Old keys keep working: `TNB-001` opens `APP-001` after a change from `TNB` to `APP`.
 Create and rename epics by custom name on their pages.
 
 Views save filters (status, priority, assignee, label, epic, and search) and display settings (board or list, grouping, order) under a name, like Linear's custom views. Filter any board with **Filter**, then choose **Save as view**. A view is personal or shared with the workspace. Star it to keep it under Favorites in the sidebar. The assignee value **Me** means whoever opens the view. Agents read shared views through MCP (`list_views`, and `list_tasks` with `view`). See [docs/contracts/views.md](docs/contracts/views.md).
