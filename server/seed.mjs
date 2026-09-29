@@ -20,7 +20,7 @@ for (const [id, kind, name] of [
 ])
   store.execute("update_profile", { name }, { id, kind });
 const epic = (title, description) =>
-  store.execute("create_epic", { title, description }, actor).id;
+  store.execute("create_epic", { board: "TNB", title, description }, actor).id;
 const foundation = epic(
   "Workspace foundation",
   "Local-first storage, permissions and the agent protocol.",
@@ -42,6 +42,7 @@ for (const [title, label, priority, assignee, status, epic] of samples) {
   let task = store.execute(
     "create_task",
     {
+      board: "TNB",
       title,
       labels: [label],
       priority,

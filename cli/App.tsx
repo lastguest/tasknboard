@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput, usePaste, useWindowSize } from "ink";
 import type { Client } from "../server/client.mjs";
-import type { Status, Task, WorkspaceInfo } from "../src/types.ts";
+import type { Board, Status, Task, WorkspaceInfo } from "../src/types.ts";
 import { activeLease, columns, safeUrl, statusTitle } from "../src/types.ts";
-import { matchCommands, planInput, UsageError, commands } from "./commands.ts";
+import {
+  boardList,
+  commands,
+  defaultBoard,
+  matchCommands,
+  planInput,
+  UsageError,
+} from "./commands.ts";
 import { editLine, emptyLine, insert, type Line } from "./editor.ts";
 
 const accent = "#9de3c1";
@@ -187,11 +194,13 @@ function TaskList({
   selectedId,
   height,
   empty,
+  idWidth,
 }: {
   rows: Row[];
   selectedId?: string;
   height: number;
   empty: string;
+  idWidth: number;
 }) {
   if (!rows.length)
     return (
@@ -237,7 +246,7 @@ function TaskList({
               {active ? "❯ " : "  "}
             </Text>
             <Text color={active ? accent : undefined} dimColor={!active}>
-              {t.id.padEnd(9)}
+              {t.id.padEnd(idWidth)}
             </Text>
             <Text color={priorityColor[t.priority]}>● </Text>
             <Box flexGrow={1} flexShrink={1}>
@@ -265,6 +274,8 @@ export function App({
   const { exit } = useApp();
   const { columns: width, rows: height } = useWindowSize();
   const [info, setInfo] = useState<WorkspaceInfo | null>(null);
+  const [boards, setBoards] = useState<Board[]>([]);
+  const [boardId, setBoardId] = useState<string>();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [detail, setDetail] = useState<Task | null>(null);
   const [selectedId, setSelectedId] = useState<string>();
@@ -279,18 +290,28 @@ export function App({
   const [notice, setNotice] = useState<Notice | null>(null);
   const state = useRef({ view, selectedId });
   state.current = { view, selectedId };
+  // Set as soon as the user switches, so a refresh already in flight is dropped.
+  const shownBoard = useRef<string | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     try {
+      const { boards } = await client.execute("list_boards", {});
+      setBoards(boards);
+      const board = shownBoard.current ?? defaultBoard(boards)?.id;
+      if (!board) return setTasks([]);
+      shownBoard.current = board;
+      setBoardId(board);
       const all: Task[] = [];
       for (let total = Infinity; all.length < total;) {
         const page = await client.execute("list_tasks", {
+          board,
           offset: all.length,
           limit: 100,
         });
         all.push(...page.tasks);
         total = page.tasks.length ? page.total : all.length;
       }
+      if (shownBoard.current !== board) return;
       setTasks(all);
       const { view, selectedId } = state.current;
       if (view === "task" && selectedId)
@@ -344,6 +365,8 @@ export function App({
   const ordered = rows.flatMap((r) => (r.kind === "task" ? [r.task] : []));
   const selected = ordered.find((t) => t.id === selectedId) ?? ordered[0];
   // An open task stays visible when a filter or refresh no longer lists it.
+  const board = boards.find((b) => b.id === boardId);
+  const idWidth = Math.max(9, ...ordered.map((t) => t.id.length + 2));
   const current =
     view === "task"
       ? detail && detail.id === selectedId
@@ -391,7 +414,7 @@ export function App({
   async function run(input: string) {
     let action;
     try {
-      action = planInput(input, current);
+      action = planInput(input, current, { boards, board });
     } catch (e) {
       if (!(e instanceof UsageError)) throw e;
       setNotice({ tone: "error", text: e.message });
@@ -405,6 +428,25 @@ export function App({
     }
     if (action.kind === "refresh") {
       setNotice({ tone: "info", text: "Refreshed." });
+      return void refresh();
+    }
+    if (action.kind === "boards")
+      return setNotice({
+        tone: "info",
+        text: clean(boardList({ boards, board })),
+      });
+    if (action.kind === "board") {
+      const next = action.board;
+      shownBoard.current = next.id;
+      setBoardId(next.id);
+      setTasks([]);
+      setSelectedId(undefined);
+      setQuery("");
+      setView("list");
+      setNotice({
+        tone: "info",
+        text: clean(`Showing ${next.id} ${next.title}.`),
+      });
       return void refresh();
     }
     if (action.kind === "mine") {
@@ -525,8 +567,9 @@ export function App({
           <Text dimColor wrap="truncate-end">
             {info
               ? clean(`${info.name} · ${info.actor.id} (${info.actor.kind})`)
-              : "Connecting…"}{" "}
-            · {client.mode} {client.target}
+              : "Connecting…"}
+            {board ? clean(` · ${board.id} ${board.title}`) : ""} ·{" "}
+            {client.mode} {client.target}
             {mine ? " · my tasks" : ""}
             {query ? ` · filter "${clean(query)}"` : ""}
           </Text>
@@ -553,12 +596,15 @@ export function App({
           rows={rows}
           selectedId={selected?.id}
           height={bodyHeight}
+          idWidth={idWidth}
           empty={
             !online
               ? "Can't load tasks. TasknBoard retries every few seconds."
               : tasks.length
                 ? "No tasks match. Press esc to clear the filter."
-                : "No tasks yet. Type /new <title> to create one."
+                : !board
+                  ? "Loading boards…"
+                  : "No tasks on this board yet. Type /new <title> to create one."
           }
         />
       )}

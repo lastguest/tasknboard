@@ -16,6 +16,8 @@ export type Task = {
   priority: Priority;
   assignee: string;
   labels: string[];
+  /** The board ID, which is also the prefix of the task ID. */
+  board: string;
   /** An epic ID, or "" when the task is in no epic. */
   epic: string;
   version: number;
@@ -26,8 +28,21 @@ export type Task = {
   review?: { summary: string; artifactUrl: string; actor: string };
   events?: TaskEvent[];
 };
-export type Epic = {
+/** A task container. Its ID is the prefix of its task IDs. */
+export type Board = {
   id: string;
+  title: string;
+  showInSidebar: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  /** Non-archived tasks per status, derived by the server. */
+  counts: Record<Status, number>;
+};
+export type Epic = {
+  /** A codename, custom or "EPIC-<n>". */
+  id: string;
+  board: string;
   title: string;
   description: string;
   /** A palette name, or a custom "#rrggbb". */
@@ -52,7 +67,7 @@ export type WorkspaceInfo = {
   name: string;
   actor: Actor;
   actors: Actor[];
-  schemaVersion: 6;
+  schemaVersion: 7;
 };
 export const columns: { id: Status; title: string; color: string }[] = [
   { id: "backlog", title: "Backlog", color: "#88909e" },
@@ -93,11 +108,15 @@ export function labelTone(label: string) {
 /** The server only accepts Done for reviewed work. */
 export const doneLocked = (s: Status) => s !== "in_review" && s !== "done";
 
-/** Tasks in an epic and how many are Done. */
-export function epicProgress(epic: Epic) {
-  const total = Object.values(epic.counts).reduce((sum, n) => sum + n, 0);
-  return { total, done: epic.counts.done, open: total - epic.counts.done };
+/** Tasks in an epic or on a board, and how many are Done. */
+export function epicProgress(record: Pick<Epic, "counts">) {
+  const total = Object.values(record.counts).reduce((sum, n) => sum + n, 0);
+  return { total, done: record.counts.done, open: total - record.counts.done };
 }
+
+/** Orders task IDs by board prefix, then by number ("WEB-2" before "WEB-10"). */
+export const compareTaskIds = (a: string, b: string) =>
+  a.localeCompare(b, "en", { numeric: true });
 
 /**
  * Epic colours, tuned to read on the charcoal surfaces. Names mirror

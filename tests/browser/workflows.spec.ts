@@ -35,6 +35,7 @@ async function connected(page: Page) {
 
 async function apiTask(title: string, assignee = "") {
   return command<any>("create_task", {
+    board: "TNB",
     title,
     assignee,
     description: `${title} context`,

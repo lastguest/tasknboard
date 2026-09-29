@@ -65,7 +65,7 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   const infoResponse = await post("workspace_info");
   assert.equal(infoResponse.status, 200);
   const info = await infoResponse.json();
-  assert.equal(info.schemaVersion, 6);
+  assert.equal(info.schemaVersion, 7);
   assert.deepEqual(info.actors, [
     { id: "remote-agent", kind: "agent", name: "", avatar: "" },
     { id: "reviewer", kind: "human", name: "", avatar: "" },
@@ -74,10 +74,38 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   assert.ok(!JSON.stringify(info).includes(agentToken));
   let task = await (
     await post("create_task", {
+      board: "TNB",
       title: "Shared task",
       labels: ["Product", "UX"],
     })
   ).json();
+  assert.equal(task.id, "TNB-001");
+  assert.equal(
+    (await post("create_board", { id: "AGT", title: "Agent" }, agentToken))
+      .status,
+    403,
+  );
+  const board = await post("create_board", { id: "WEB", title: "Website" });
+  assert.equal(board.status, 200);
+  assert.equal((await post("create_board", { id: "WEB", title: "Again" })).status, 409);
+  const toggled = await post("update_board", {
+    id: "WEB",
+    expectedVersion: 1,
+    patch: { showInSidebar: false },
+  });
+  assert.equal(toggled.status, 200);
+  assert.equal((await toggled.json()).showInSidebar, false);
+  const stale = await post("update_board", {
+    id: "WEB",
+    expectedVersion: 1,
+    patch: { showInSidebar: true },
+  });
+  assert.equal(stale.status, 409);
+  assert.equal((await stale.json()).code, "VERSION_CONFLICT");
+  const webTask = await (
+    await post("create_task", { board: "WEB", title: "Web task" }, agentToken)
+  ).json();
+  assert.equal(webTask.id, "WEB-001");
   const client = new Client({ name: "remote-test", version: "1" });
   t.after(() => client.close());
   await client.connect(
@@ -164,7 +192,8 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
     413,
   );
   const backup = await (await post("export_workspace")).json();
-  assert.equal(backup.schemaVersion, 6);
+  assert.equal(backup.schemaVersion, 7);
+  assert.deepEqual(backup.boards.map((b) => b.id), ["TNB", "WEB"]);
   assert.ok(backup.actors.some((actor) => actor.id === "remote-agent"));
   const databaseBytes = Buffer.concat([
     readFileSync(dbPath),

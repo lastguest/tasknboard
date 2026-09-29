@@ -40,18 +40,23 @@ const tools = [
     true,
   ],
   [
+    "list_boards",
+    "List boards (task containers) with per-status task counts. A board ID is the prefix of its task IDs.",
+    true,
+  ],
+  [
     "list_epics",
-    "List epics (projects that group tasks) with per-status task counts.",
+    "List epics (projects that group tasks on one board) with per-status task counts.",
     true,
   ],
   [
     "create_task",
-    "Create a backlog task in the active workspace for the user, optionally inside an epic.",
+    "Create a backlog task on a board for the user, optionally inside an epic on that board.",
     false,
   ],
   [
     "create_epic",
-    "Create an epic: a project that groups related tasks. Give it a title and optional Markdown description.",
+    "Create an epic on a board: a project that groups related tasks. Give it a title, an optional codename ID, and an optional Markdown description.",
     false,
   ],
   [

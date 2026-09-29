@@ -21,7 +21,7 @@ export function EpicTag({ epic }: { epic: Epic | undefined }) {
     >
       <span
         className="epic-glyph"
-                    style={epicStyle(epic)}
+        style={epicStyle(epic)}
         aria-hidden="true"
       />
       <span className="epic-tag-title">{epic.title}</span>
@@ -238,6 +238,7 @@ function ColorField({
         <EpicTag
           epic={{
             id: "",
+            board: "",
             title: title.trim() || "Epic preview",
             description: "",
             color: value,
@@ -260,12 +261,15 @@ function ColorField({
 
 export function EpicEditor({
   epic,
+  board,
   suggestedColor,
   onClose,
   onSaved,
   onArchived,
 }: {
   epic: Epic | null;
+  /** The board a new epic is created on. */
+  board: string;
   /** The palette colour a new epic starts with. */
   suggestedColor: string;
   onClose: () => void;
@@ -273,6 +277,7 @@ export function EpicEditor({
   onArchived: (epic: Epic) => void;
 }) {
   const [base, setBase] = useState(epic);
+  const [codename, setCodename] = useState("");
   const [title, setTitle] = useState(epic?.title ?? "");
   const [description, setDescription] = useState(epic?.description ?? "");
   const [color, setColor] = useState(epic?.color ?? suggestedColor);
@@ -285,7 +290,7 @@ export function EpicEditor({
     ...(description !== (base?.description ?? "") ? { description } : {}),
     ...(color !== (base?.color ?? suggestedColor) ? { color } : {}),
   };
-  const dirty = Object.keys(patch).length > 0;
+  const dirty = Boolean(codename) || Object.keys(patch).length > 0;
 
   function requestClose() {
     if (pending) return;
@@ -325,7 +330,13 @@ export function EpicEditor({
             expectedVersion: base.version,
             patch,
           })
-        : await command<Epic>("create_epic", { title, description, color });
+        : await command<Epic>("create_epic", {
+            board,
+            ...(codename ? { id: codename } : {}),
+            title,
+            description,
+            color,
+          });
       onSaved(saved, !base);
     } catch (e) {
       setError(errorOf(e));
@@ -445,6 +456,29 @@ export function EpicEditor({
             onChange={(e) => setTitle(e.target.value)}
           />
         </label>
+        {!base && (
+          <label className="field">
+            <span className="field-label">Codename</span>
+            <span className="field-hint" id="epic-codename-hint">
+              Optional, for example Q3-LAUNCH. Capital letters, digits and
+              hyphens. Leave it empty for the next EPIC number. It can't change
+              later.
+            </span>
+            <input
+              maxLength={32}
+              aria-describedby="epic-codename-hint"
+              placeholder="EPIC-n"
+              autoCapitalize="characters"
+              spellCheck={false}
+              value={codename}
+              onChange={(e) =>
+                setCodename(
+                  e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ""),
+                )
+              }
+            />
+          </label>
+        )}
         <ColorField value={color} title={title} onChange={setColor} />
         <div className="field">
           <label className="field-label" htmlFor="epic-description">

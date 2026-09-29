@@ -85,6 +85,13 @@ names remain free text. The UI never guesses kinds from names or claims.
 Comment counts come from persisted comment events. Existing version, lease,
 and authorization checks still apply.
 
+## Boards
+
+The [boards contract](contracts/boards.md) makes a board the container of tasks
+and epics. The board ID is the task ID prefix, and each board keeps its own task
+counter. `showInSidebar` is a shared board setting that the UI reads to fill
+the sidebar Boards section. Only humans manage boards.
+
 ## Epics
 
 The [epics contract](contracts/epics.md) groups tasks into projects. A task has

@@ -37,6 +37,8 @@ npm run test:ui
 The browser suite creates temporary SQLite files outside `data/` and removes them
 when the tests finish. It does not use the user's workspace database.
 
+Boards hold tasks. Each board has an ID, such as `WEB`, that is the prefix of its task IDs (`WEB-001`). Each board numbers its own tasks. A new workspace starts with board `TNB`. The sidebar **Boards** section lists every board that has **Show in the sidebar** on, which is the default. Turn the setting off in **Edit board** to hide a board from the sidebar; the **Boards** page still lists it. Epics group tasks on one board. An epic can have a custom codename, such as `Q3-LAUNCH`; without one it gets the next `EPIC-<n>`. See the [boards contract](docs/contracts/boards.md).
+
 Keyboard: **N** new task, **Cmd/Ctrl K** search, **F** assignee filter, **?** shortcuts, **Esc** close dialog. Drag between columns, or use the Status menu on each card or list row (the keyboard and touch alternative). Every move is validated by the server; a rejected move stays in place with an explanation. Human review is required before Done: an In review task shows **Mark Done** and **Needs changes** in its details. The interface is English in this version.
 
 Editing uses the task's latest version. If the task changed elsewhere, the save is rejected, your draft is kept, and **Load latest** merges: fields you did not touch take the new values, and fields changed on both sides are highlighted so you can choose. Nothing is retried automatically. Unsaved drafts ask before they are discarded.
@@ -138,7 +140,8 @@ Type `/` to open the command menu. Tab completes a command, and Enter runs it.
 
 | Command | Result |
 | --- | --- |
-| `/new <title>` | Create a backlog task |
+| `/board [id]` | Switch to another board, or list the boards |
+| `/new <title>` | Create a backlog task on the current board |
 | `/move <status>`, `/done` | Change the status (`backlog`, `progress`, `review`, `done`) |
 | `/assign [name]`, `/priority <level>` | Change the assignee or priority |
 | `/comment <text>` | Add a comment |
@@ -211,8 +214,9 @@ Tools:
 | ------------------- | --------------------------------------------------------- |
 | `workspace_info`    | Authenticated identity and lease duration                 |
 | `list_tasks`        | Search/filter, limit and offset                           |
+| `list_boards`       | Boards and their task counts                              |
 | `get_task`          | Context, criteria, current version, lease and history     |
-| `create_task`       | Create backlog work                                       |
+| `create_task`       | Create backlog work on a board                            |
 | `claim_task`        | Atomic 15-minute claim and move to In progress            |
 | `heartbeat`         | Renew owned lease; returns a new version                  |
 | `update_task`       | Edit claimed work                                         |
@@ -225,9 +229,10 @@ Always use `expectedVersion` from the latest response. On a conflict, re-read an
 
 ## Browser agents: WebMCP
 
-The page registers seven tools with the native `document.modelContext` API:
-`workspace_info`, `list_tasks`, `get_task`, `create_task`, `update_task`,
-`add_comment`, and `set_standup_notes`. A browser agent can discover these tools
+The page registers ten tools with the native `document.modelContext` API:
+`workspace_info`, `list_tasks`, `get_task`, `list_boards`, `list_epics`,
+`create_task`, `create_epic`, `update_task`, `add_comment`, and
+`set_standup_notes`. A browser agent can discover these tools
 while the app is open. Writes refresh the board. Reads cover the workspace,
 regardless of the current board filters.
 

@@ -534,6 +534,7 @@ export function TaskEditor({
   assignees,
   labels,
   epics,
+  board,
   initialEpic = "",
   latestVersion,
   onClose,
@@ -549,6 +550,8 @@ export function TaskEditor({
   assignees: string[];
   labels: string[];
   epics: Epic[];
+  /** The task's board; a new task is created on it. */
+  board: string;
   initialEpic?: string;
   latestVersion?: number;
   onClose: () => void;
@@ -623,15 +626,17 @@ export function TaskEditor({
   }));
   const epicsById = new Map(epics.map((epic) => [epic.id, epic]));
   const epicTitle = (id: string) => epicsById.get(id)?.title ?? id;
-  // Archived epics cannot take new tasks; the current one stays listed.
+  // Only epics on the task's board. Archived epics cannot take new tasks;
+  // the current one stays listed.
   const epicOptions: ChoiceOption[] = [
     { value: "", label: "No epic" },
     ...epics
       .filter(
         (epic) =>
-          !epic.archived ||
-          epic.id === draft.epic ||
-          epic.id === current?.epic,
+          epic.board === board &&
+          (!epic.archived ||
+            epic.id === draft.epic ||
+            epic.id === current?.epic),
       )
       .map((epic) => ({
         value: epic.id,
@@ -749,6 +754,7 @@ export function TaskEditor({
         onSaved(saved);
       } else {
         const args: Record<string, unknown> = {
+          board,
           title: draft.title,
           priority: draft.priority,
           labels: draft.labels.map((label) => label.trim()).filter(Boolean),

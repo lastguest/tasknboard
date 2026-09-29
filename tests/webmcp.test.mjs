@@ -33,13 +33,28 @@ test("WebMCP validates and executes against the domain, refreshes writes, reject
     },
     lifetime.signal,
   );
-  assert.equal(context.tools.size, 9);
+  assert.equal(context.tools.size, 10);
   const call = async (name, args) =>
     JSON.parse(await context.tools.get(name).execute(args, execution()));
-  const created = await call("create_task", { title: "Browser task" });
+  const created = await call("create_task", { board: "TNB", title: "Browser task" });
+  assert.equal(created.id, "TNB-001");
   assert.equal(refreshes, 1);
+  const { boards } = await call("list_boards", {});
+  assert.deepEqual(
+    boards.map((board) => [board.id, board.counts.backlog]),
+    [["TNB", 1]],
+  );
+  assert.equal(context.tools.get("list_boards").annotations.readOnlyHint, true);
+  await assert.rejects(call("create_task", { title: "No board" }));
+  const epic = await call("create_epic", {
+    board: "TNB",
+    id: "BROWSER",
+    title: "Browser epic",
+  });
+  assert.equal(epic.id, "BROWSER");
+  assert.equal(refreshes, 2);
   assert.equal((await call("list_tasks", {})).total, 1);
-  assert.equal(refreshes, 1);
+  assert.equal(refreshes, 2);
   const updated = await call("update_task", {
     id: created.id,
     expectedVersion: created.version,
@@ -53,7 +68,7 @@ test("WebMCP validates and executes against the domain, refreshes writes, reject
     }),
   );
   assert.equal((await call("get_task", { id: created.id })).title, "Updated");
-  await assert.rejects(call("create_task", { title: "", actor: "admin" }));
+  await assert.rejects(call("create_task", { board: "TNB", title: "", actor: "admin" }));
   assert.equal((await call("list_tasks", {})).total, 1);
   const noted = await call("set_standup_notes", {
     id: updated.id,
@@ -111,7 +126,7 @@ test("WebMCP handles unsupported browsers, registration failure and cancellation
   await assert.rejects(
     context.tools
       .get("create_task")
-      .execute({ title: "Cancelled" }, { signal: cancelled.signal }),
+      .execute({ board: "TNB", title: "Cancelled" }, { signal: cancelled.signal }),
     { name: "AbortError" },
   );
   assert.equal(requests, 0);

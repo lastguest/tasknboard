@@ -17,7 +17,7 @@ async function command(name: string, args: object = {}, token = humanToken) {
   return body;
 }
 async function create(title: string, assignee = "") {
-  return command("create_task", { title, assignee, description: "Original context" });
+  return command("create_task", { board: "TNB", title, assignee, description: "Original context" });
 }
 async function connect(page: Page) {
   await page.addInitScript((value) => sessionStorage.setItem("tasknboard-token", value), humanToken);
@@ -93,6 +93,7 @@ test("Status menu saves and the server rejects an invalid drag", async ({ page }
 
 test("Task sidebar pickers search, stage changes, and save label arrays", async ({ page }) => {
   const task = await command("create_task", {
+    board: "TNB",
     title: `Picker ${key()}`,
     priority: "medium",
     labels: ["Existing"],
@@ -274,11 +275,11 @@ test("WebMCP writes refresh after a read already in flight", async ({ page }) =>
     await route.fulfill({ response: oldResponse });
   });
   await page.goto(baseURL);
-  await expect.poll(() => page.evaluate(() => (window as any).testTools.size)).toBe(9);
+  await expect.poll(() => page.evaluate(() => (window as any).testTools.size)).toBe(10);
   const title = `WebMCP ${key()}`;
   const write = page.waitForResponse((response) => response.url().endsWith("/api/create_task"));
   await page.evaluate((title) => {
-    (window as any).toolWrite = (window as any).testTools.get("create_task").execute({ title }, { signal: new AbortController().signal });
+    (window as any).toolWrite = (window as any).testTools.get("create_task").execute({ board: "TNB", title }, { signal: new AbortController().signal });
   }, title);
   await write;
   release();
@@ -377,7 +378,8 @@ test("Phone navigation, fullscreen dialogs and keyboard focus remain usable", as
   await page.keyboard.press("ControlOrMeta+k");
   await expect(search(page)).toBeFocused();
   await page.keyboard.press("Escape");
-  await nav(page, "Board").click();
+  // Boards is not a task view, so F opens the current board's filter.
+  await nav(page, "Boards").click();
   await page.keyboard.press("f");
   await expect(assigneeFilter(page).getByRole("button").first()).toBeFocused();
 });
@@ -549,6 +551,7 @@ test("Profiles show display names and pictures, and IDs stay unchanged", async (
 test("Markdown descriptions format, upload pasted images, and render safely", async ({ page }) => {
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
   const task = await command("create_task", {
+    board: "TNB",
     title: `Markdown ${key()}`,
     // "| --- | — |" is what macOS smart dashes make of a typed divider row.
     description:
@@ -623,7 +626,7 @@ test("Epics group tasks: create, file, filter, progress and guarded archive", as
   await expect(page.getByRole("progressbar", { name: `${name} progress` })).toHaveAttribute("aria-valuetext", "0 of 1 tasks done");
 
   // An existing task moves in through its Epic picker.
-  await nav(page, "Board").click();
+  await nav(page, "Studio").click();
   await search(page).fill(loose.id);
   await card(page, loose.id).click();
   const details = page.getByRole("dialog", { name: /Task details/ });
@@ -658,4 +661,45 @@ test("Epics group tasks: create, file, filter, progress and guarded archive", as
   await expect(edit.getByRole("alert")).toContainText("still has 2 open tasks");
   await edit.getByRole("button", { name: "Cancel" }).click();
   await expect(edit).toBeHidden();
+});
+
+test("Boards number their own tasks and can hide from the sidebar", async ({ page }) => {
+  const id = `B${key().toUpperCase()}`;
+  const title = `Board ${key()}`;
+  await connect(page);
+  await page.getByRole("button", { name: "New board" }).click();
+  const dialog = page.getByRole("dialog", { name: "New board" });
+  const idField = dialog.getByRole("textbox", { name: /^ID/ });
+  await idField.fill(id.toLowerCase());
+  await expect(idField).toHaveValue(id);
+  await dialog.getByLabel("Title").fill(title);
+  await expect(dialog.getByRole("checkbox", { name: "Show in the sidebar" })).toBeChecked();
+  await dialog.getByRole("button", { name: "Create board" }).click();
+  await expect(dialog).toBeHidden();
+
+  // The new board is listed in the sidebar and numbers its own tasks.
+  await nav(page, title).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(title);
+  await expect(page.getByRole("heading", { name: "No tasks on this board yet." })).toBeVisible();
+  await page.getByRole("button", { name: "Create the first task" }).click();
+  const taskDialog = page.getByRole("dialog", { name: "New task" });
+  await taskDialog.getByLabel("Title").fill(`${title} task`);
+  await taskDialog.getByRole("button", { name: "Create task" }).click();
+  await expect(card(page, `${id}-001`)).toBeVisible();
+  await expect(page.locator(".task-card")).toHaveCount(1);
+
+  // Hiding keeps the board on the Boards page only.
+  await page.getByRole("button", { name: "Edit board" }).click();
+  const edit = page.getByRole("dialog", { name: /Edit board/ });
+  await edit.getByRole("checkbox", { name: "Show in the sidebar" }).uncheck();
+  await edit.getByRole("button", { name: "Save changes" }).click();
+  await expect(edit).toBeHidden();
+  await expect(nav(page, title)).toHaveCount(0);
+  const [saved] = (await command("list_boards")).boards.filter((b: { id: string }) => b.id === id);
+  expect(saved.showInSidebar).toBe(false);
+  await nav(page, "Boards").click();
+  const listed = page.locator(".epic-card").filter({ hasText: title });
+  await expect(listed).toContainText("Hidden from the sidebar");
+  await listed.getByRole("button", { name: title }).click();
+  await expect(card(page, `${id}-001`)).toBeVisible();
 });

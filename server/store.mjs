@@ -76,6 +76,37 @@ export function createStore(path, { clock = Date.now } = {}) {
       }
       db.prepare("INSERT INTO migrations VALUES(6)").run();
     }
+    if (!db.prepare("SELECT version FROM migrations WHERE version=7").get()) {
+      // Boards own task numbering. Existing tasks and epics join board TNB,
+      // which keeps their IDs, versions and activity.
+      db.exec(`CREATE TABLE boards(number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, next_task INTEGER NOT NULL, data TEXT NOT NULL);
+ ALTER TABLE tasks ADD COLUMN id TEXT;
+ CREATE UNIQUE INDEX tasks_by_id ON tasks(id);
+ ALTER TABLE epics ADD COLUMN id TEXT;
+ CREATE UNIQUE INDEX epics_by_id ON epics(id);`);
+      for (const table of ["tasks", "epics"]) {
+        const update = db.prepare(`UPDATE ${table} SET id=?, data=? WHERE number=?`);
+        for (const row of db.prepare(`SELECT number, data FROM ${table}`).all()) {
+          const record = JSON.parse(row.data);
+          record.board = "TNB";
+          update.run(record.id, JSON.stringify(record), row.number);
+        }
+      }
+      const now = new Date(clock()).toISOString();
+      db.prepare(
+        "INSERT INTO boards(id, next_task, data) VALUES('TNB', (SELECT COALESCE(MAX(number), 0) FROM tasks), ?)",
+      ).run(
+        JSON.stringify({
+          id: "TNB",
+          title: "Studio",
+          showInSidebar: true,
+          version: 1,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      );
+      db.prepare("INSERT INTO migrations VALUES(7)").run();
+    }
   });
   const readTransaction = (fn) => {
     db.exec("BEGIN");
@@ -94,52 +125,69 @@ export function createStore(path, { clock = Date.now } = {}) {
       .all()
       .map((r) => JSON.parse(r.data));
   const get = (id) => {
-    const row = db
-      .prepare("SELECT data FROM tasks WHERE number=?")
-      .get(Number(id.slice(4)));
+    const row = db.prepare("SELECT data FROM tasks WHERE id=?").get(id);
     if (!row) fail("NOT_FOUND", "Task not found", 404);
     return JSON.parse(row.data);
   };
   const save = (t) =>
     db
-      .prepare("UPDATE tasks SET data=? WHERE number=?")
-      .run(JSON.stringify(t), Number(t.id.slice(4)));
+      .prepare("UPDATE tasks SET data=? WHERE id=?")
+      .run(JSON.stringify(t), t.id);
+  const allBoards = () =>
+    db
+      .prepare("SELECT data FROM boards ORDER BY number")
+      .all()
+      .map((r) => JSON.parse(r.data));
+  const getBoard = (id) => {
+    const row = db.prepare("SELECT data FROM boards WHERE id=?").get(id);
+    if (!row) fail("NOT_FOUND", `Board ${id} not found`, 404);
+    return JSON.parse(row.data);
+  };
+  const saveBoard = (b) =>
+    db
+      .prepare("UPDATE boards SET data=? WHERE id=?")
+      .run(JSON.stringify(b), b.id);
   const allEpics = () =>
     db
       .prepare("SELECT data FROM epics ORDER BY number")
       .all()
       .map((r) => JSON.parse(r.data));
   const getEpic = (id) => {
-    const row = db
-      .prepare("SELECT data FROM epics WHERE number=?")
-      .get(Number(id.slice(5)));
+    const row = db.prepare("SELECT data FROM epics WHERE id=?").get(id);
     if (!row) fail("NOT_FOUND", "Epic not found", 404);
     return JSON.parse(row.data);
   };
   const saveEpic = (e) =>
     db
-      .prepare("UPDATE epics SET data=? WHERE number=?")
-      .run(JSON.stringify(e), Number(e.id.slice(5)));
-  /** Status counts of non-archived tasks, per epic. Derived on every read. */
-  const withCounts = (epics) => {
+      .prepare("UPDATE epics SET data=? WHERE id=?")
+      .run(JSON.stringify(e), e.id);
+  /**
+   * Status counts of non-archived tasks, grouped by a task field ("epic" or
+   * "board"). Derived on every read.
+   */
+  const withCounts = (records, field) => {
     const counts = new Map(
-      epics.map((e) => [
-        e.id,
+      records.map((r) => [
+        r.id,
         { backlog: 0, in_progress: 0, in_review: 0, done: 0 },
       ]),
     );
     for (const t of all())
-      if (!t.archived && counts.has(t.epic)) counts.get(t.epic)[t.status]++;
-    return epics.map((e) => ({ ...e, counts: counts.get(e.id) }));
+      if (!t.archived && counts.has(t[field])) counts.get(t[field])[t.status]++;
+    return records.map((r) => ({ ...r, counts: counts.get(r.id) }));
   };
-  /** A task may join only an existing, active epic. */
-  const assignableEpic = (id) => {
-    if (id && getEpic(id).archived)
+  /** A task may join only an existing, active epic on its own board. */
+  const assignableEpic = (id, board) => {
+    if (!id) return;
+    const epic = getEpic(id);
+    if (epic.board !== board)
+      fail("EPIC_BOARD_MISMATCH", `${id} belongs to board ${epic.board}`);
+    if (epic.archived)
       fail("EPIC_ARCHIVED", `${id} is archived; choose another epic`);
   };
-  const humanOnly = (identity, action) => {
+  const humanOnly = (identity, action, subject) => {
     if (identity.kind !== "human")
-      fail("FORBIDDEN", `Only humans may ${action} epics`, 403);
+      fail("FORBIDDEN", `Only humans may ${action} ${subject}`, 403);
   };
   const actorRoster = () =>
     db
@@ -244,7 +292,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         actor: identity,
         actors: actorRoster(),
         leaseSeconds: 900,
-        schemaVersion: 6,
+        schemaVersion: 7,
       };
     if (command === "update_profile")
       return transaction(() => {
@@ -288,6 +336,7 @@ export function createStore(path, { clock = Date.now } = {}) {
                 .includes(q)) &&
             (!p.status || t.status === p.status) &&
             (!p.assignee || t.assignee === p.assignee) &&
+            (!p.board || t.board === p.board) &&
             (!p.epic || (t.epic || "none") === p.epic),
         );
         const page = rows.slice(p.offset, p.offset + p.limit);
@@ -300,19 +349,69 @@ export function createStore(path, { clock = Date.now } = {}) {
     }
     if (command === "get_task")
       return readTransaction(() => detail(get(p.id)));
+    if (command === "list_boards")
+      return readTransaction(() => ({
+        boards: withCounts(allBoards(), "board"),
+      }));
+    if (command === "create_board")
+      return transaction(() => {
+        humanOnly(identity, "create", "boards");
+        if (db.prepare("SELECT 1 FROM boards WHERE id=?").get(p.id))
+          fail("BOARD_EXISTS", `Board ${p.id} already exists`);
+        const now = new Date(clock()).toISOString();
+        const board = {
+          id: p.id,
+          title: p.title,
+          showInSidebar: p.showInSidebar,
+          version: 1,
+          createdAt: now,
+          updatedAt: now,
+        };
+        db.prepare("INSERT INTO boards(id, next_task, data) VALUES(?, 0, ?)").run(
+          board.id,
+          JSON.stringify(board),
+        );
+        event(board.id, identity, "create_board");
+        return withCounts([board], "board")[0];
+      });
+    if (command === "update_board")
+      return transaction(() => {
+        humanOnly(identity, "edit", "boards");
+        const board = getBoard(p.id);
+        if (board.version !== p.expectedVersion)
+          fail(
+            "VERSION_CONFLICT",
+            `Board changed. Read it again. Current version: ${board.version}`,
+          );
+        Object.assign(board, p.patch);
+        board.version++;
+        board.updatedAt = new Date(clock()).toISOString();
+        saveBoard(board);
+        event(board.id, identity, "update_board", JSON.stringify(p.patch));
+        return withCounts([board], "board")[0];
+      });
     if (command === "list_epics")
       return readTransaction(() => ({
         epics: withCounts(
-          allEpics().filter((e) => p.includeArchived || !e.archived),
+          allEpics().filter(
+            (e) =>
+              (p.includeArchived || !e.archived) &&
+              (!p.board || e.board === p.board),
+          ),
+          "epic",
         ),
       }));
     if (command === "create_epic")
       return transaction(() => {
-        humanOnly(identity, "create");
+        humanOnly(identity, "create", "epics");
+        getBoard(p.board);
+        if (p.id && db.prepare("SELECT 1 FROM epics WHERE id=?").get(p.id))
+          fail("EPIC_EXISTS", `Epic ${p.id} already exists`);
         const result = db.prepare("INSERT INTO epics(data) VALUES('{}')").run();
         const now = new Date(clock()).toISOString();
         const epic = {
-          id: `EPIC-${result.lastInsertRowid}`,
+          id: p.id ?? `EPIC-${result.lastInsertRowid}`,
+          board: p.board,
           title: p.title,
           description: p.description,
           // Unless chosen, rotate through the palette in creation order.
@@ -324,13 +423,21 @@ export function createStore(path, { clock = Date.now } = {}) {
           createdAt: now,
           updatedAt: now,
         };
-        saveEpic(epic);
+        db.prepare("UPDATE epics SET id=?, data=? WHERE number=?").run(
+          epic.id,
+          JSON.stringify(epic),
+          result.lastInsertRowid,
+        );
         event(epic.id, identity, "created");
-        return withCounts([epic])[0];
+        return withCounts([epic], "epic")[0];
       });
     if (command === "update_epic" || command === "archive_epic")
       return transaction(() => {
-        humanOnly(identity, command === "archive_epic" ? "archive" : "edit");
+        humanOnly(
+          identity,
+          command === "archive_epic" ? "archive" : "edit",
+          "epics",
+        );
         const epic = getEpic(p.id);
         if (epic.archived) fail("ARCHIVED", "Epic is archived");
         if (epic.version !== p.expectedVersion)
@@ -359,15 +466,16 @@ export function createStore(path, { clock = Date.now } = {}) {
           command,
           command === "update_epic" ? JSON.stringify(p.patch) : "",
         );
-        return withCounts([epic])[0];
+        return withCounts([epic], "epic")[0];
       });
     if (command === "export_workspace") {
       if (identity.kind !== "human")
         fail("FORBIDDEN", "Human access required", 403);
       return transaction(() => ({
-        schemaVersion: 6,
+        schemaVersion: 7,
         exportedAt: new Date(clock()).toISOString(),
         actors: actorRoster(),
+        boards: allBoards(),
         epics: allEpics(),
         tasks: all(),
         events: db.prepare("SELECT * FROM events ORDER BY sequence").all(),
@@ -384,12 +492,18 @@ export function createStore(path, { clock = Date.now } = {}) {
     }
     return transaction(() => {
       if (command === "create_task") {
-        assignableEpic(p.epic);
-        const result = db.prepare("INSERT INTO tasks(data) VALUES('{}')").run();
+        getBoard(p.board);
+        assignableEpic(p.epic, p.board);
+        // Numbers are allocated per board and never reused.
+        const { next_task: number } = db
+          .prepare(
+            "UPDATE boards SET next_task=next_task+1 WHERE id=? RETURNING next_task",
+          )
+          .get(p.board);
         const now = new Date(clock()).toISOString();
         const t = {
           ...p,
-          id: `TNB-${String(result.lastInsertRowid).padStart(3, "0")}`,
+          id: `${p.board}-${String(number).padStart(3, "0")}`,
           status: "backlog",
           version: 1,
           createdAt: now,
@@ -397,7 +511,10 @@ export function createStore(path, { clock = Date.now } = {}) {
           lease: null,
           archived: false,
         };
-        save(t);
+        db.prepare("INSERT INTO tasks(id, data) VALUES(?, ?)").run(
+          t.id,
+          JSON.stringify(t),
+        );
         event(t.id, identity, "created");
         return detail(t);
       }
@@ -455,7 +572,7 @@ export function createStore(path, { clock = Date.now } = {}) {
               "Tasks must be reviewed before completion",
             );
           if (p.patch.epic !== undefined && p.patch.epic !== (t.epic ?? ""))
-            assignableEpic(p.patch.epic);
+            assignableEpic(p.patch.epic, t.board);
           Object.assign(t, p.patch);
           if (["in_review", "done"].includes(t.status)) t.lease = null;
         }

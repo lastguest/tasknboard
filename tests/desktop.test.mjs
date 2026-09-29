@@ -87,9 +87,11 @@ test("desktop service uses its assigned port, persists tasks, and exits with its
     req.end();
   });
   assert.equal(rejectedHost, 403);
-  const created = await first.post("create_task", { title: "Desktop persistence" }, { Origin: first.origin });
+  const created = await first.post("create_task", { board: "TNB", title: "Desktop persistence" }, { Origin: first.origin });
   assert.equal(created.status, 200);
   const task = await created.json();
+  assert.equal(task.id, "TNB-001");
+  assert.equal(task.board, "TNB");
   await first.stop();
   await assert.rejects(fetch(first.origin));
 

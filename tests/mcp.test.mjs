@@ -24,25 +24,43 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
   });
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 14);
+  assert.equal(tools.tools.length, 15);
   const call = async (name, args) => {
     const r = await client.callTool({ name, arguments: args });
     assert.notEqual(r.isError, true, JSON.stringify(r));
     return JSON.parse(r.content[0].text);
   };
   const info = await call("workspace_info", {});
-  assert.equal(info.schemaVersion, 6);
+  assert.equal(info.schemaVersion, 7);
   assert.ok(
     info.actors.some((entry) => entry.id === "test-agent" && entry.kind === "agent"),
   );
   assert.deepEqual(await call("list_epics", {}), { epics: [] });
+  const names = tools.tools.map((tool) => tool.name);
+  assert.ok(names.includes("list_boards"));
+  assert.ok(!names.includes("create_board") && !names.includes("update_board"));
+  assert.equal(
+    tools.tools.find((tool) => tool.name === "list_boards").annotations
+      .readOnlyHint,
+    true,
+  );
+  const { boards } = await call("list_boards", {});
+  assert.deepEqual(boards.map((board) => board.id), ["TNB"]);
+  const unknownBoard = await client.callTool({
+    name: "create_task",
+    arguments: { board: "NOPE", title: "Lost" },
+  });
+  assert.equal(unknownBoard.isError, true);
+  assert.equal(JSON.parse(unknownBoard.content[0].text).code, "NOT_FOUND");
   const epicDenied = await client.callTool({
     name: "create_epic",
-    arguments: { title: "Not an MCP tool" },
+    arguments: { board: "TNB", title: "Not an MCP tool" },
   });
   assert.equal(epicDenied.isError, true);
-  let task = await call("create_task", { title: "Real protocol test" });
+  let task = await call("create_task", { board: "TNB", title: "Real protocol test" });
   assert.equal(task.commentCount, 0);
+  assert.equal(task.id, "TNB-001");
+  assert.equal(task.board, "TNB");
   task = await call("claim_task", {
     id: task.id,
     expectedVersion: task.version,

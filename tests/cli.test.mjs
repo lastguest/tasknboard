@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { createElement } from "react";
 import { render } from "ink-testing-library";
-import { planInput, matchCommands, UsageError } from "../cli/commands.ts";
+import { planInput, matchCommands, UsageError, defaultBoard, boardList } from "../cli/commands.ts";
 import { editLine, insert } from "../cli/editor.ts";
 import { App, clean } from "../dist-cli/app.mjs";
 
@@ -17,23 +17,42 @@ const task = (patch = {}) => ({
   priority: "medium", assignee: "", labels: [], version: 4, commentCount: 0, lease: null,
   updatedAt: "2026-09-29T00:00:00.000Z", ...patch,
 });
+const board = (id, patch = {}) => ({
+  id, title: `${id} board`, showInSidebar: true, version: 1,
+  createdAt: "2026-09-29T00:00:00.000Z", updatedAt: "2026-09-29T00:00:00.000Z", counts: {}, ...patch,
+});
+const boards = [board("TNB"), board("WEB")];
+const ctx = { boards, board: boards[0] };
 const key = (patch = {}) => ({ ctrl: false, meta: false, shift: false, ...patch });
 
 test("slash commands map to versioned workspace requests", () => {
-  assert.deepEqual(planInput("/move review", task()).request, {
+  assert.deepEqual(planInput("/move review", task(), ctx).request, {
     name: "update_task",
     args: { id: "TNB-001", expectedVersion: 4, patch: { status: "in_review" } },
   });
-  const review = planInput("/review Done and tested https://ci.example/run/7", task());
+  const review = planInput("/review Done and tested https://ci.example/run/7", task(), ctx);
   assert.deepEqual(review.request.args, {
     id: "TNB-001", expectedVersion: 4, summary: "Done and tested", artifactUrl: "https://ci.example/run/7",
   });
-  assert.equal(planInput("/new  Write docs ", undefined).request.args.title, "Write docs");
-  assert.equal(planInput("/exit", undefined).kind, "quit");
+  assert.equal(planInput("/exit", undefined, ctx).kind, "quit");
   assert.deepEqual(matchCommands("/re").map((c) => c.name), ["release", "review", "refresh"]);
   assert.deepEqual(matchCommands("/move x"), []);
   for (const [input, t] of [["/archive", task()], ["/move", task()], ["/comment hi", undefined], ["/nope", task()]])
-    assert.throws(() => planInput(input, t), UsageError, input);
+    assert.throws(() => planInput(input, t, ctx), UsageError, input);
+});
+
+test("/board switches or lists boards and /new creates on the current board", () => {
+  assert.deepEqual(planInput("/new  Write docs ", undefined, { boards, board: boards[1] }).request, {
+    name: "create_task", args: { board: "WEB", title: "Write docs" },
+  });
+  assert.throws(() => planInput("/new Docs", undefined, { boards: [], board: undefined }), UsageError);
+  assert.deepEqual(planInput("/board web", task(), ctx), { kind: "board", board: boards[1] });
+  assert.deepEqual(planInput("/board", task(), ctx), { kind: "boards" });
+  assert.throws(() => planInput("/board OPS", task(), ctx), (e) =>
+    e instanceof UsageError && e.message === "Choose a board: TNB, WEB.");
+  assert.deepEqual(defaultBoard([board("OLD", { showInSidebar: false }), board("WEB")]).id, "WEB");
+  assert.equal(defaultBoard([board("OLD", { showInSidebar: false })]).id, "OLD");
+  assert.equal(boardList(ctx), "Boards: TNB TNB board (current) · WEB WEB board. Type /board <id> to switch.");
 });
 
 test("the prompt edits text and never keeps line breaks", () => {
@@ -58,7 +77,12 @@ test("the board runs commands, keeps the prompt on a conflict, and refreshes", a
     async execute(name, args) {
       calls.push([name, args]);
       if (name === "workspace_info") return { name: "Studio", actor: { id: "you", kind: "human" }, actors: [], schemaVersion: 3 };
-      if (name === "list_tasks") return { tasks: [task()], total: 1 };
+      if (name === "list_boards") return { boards: [board("OLD", { showInSidebar: false }), board("TNB", { title: "Studio" }), board("WEB2", { title: "Website" })] };
+      if (name === "list_tasks")
+        return args.board === "WEB2"
+          ? { tasks: [task({ id: "WEB2-012", title: "Landing page", status: "backlog" })], total: 1 }
+          : { tasks: [task()], total: 1 };
+      if (name === "create_task") return task({ id: `${args.board}-013`, title: args.title, status: "backlog", version: 1 });
       if (name === "update_task" && conflict) {
         conflict = false;
         throw Object.assign(new Error("Task changed. Read it again."), { code: "VERSION_CONFLICT" });
@@ -75,7 +99,7 @@ test("the board runs commands, keeps the prompt on a conflict, and refreshes", a
     }
   };
   await settle();
-  assert.match(ui.lastFrame(), /Studio · you \(human\)/);
+  assert.match(ui.lastFrame(), /Studio · you \(human\) · TNB Studio/);
   assert.match(ui.lastFrame(), /❯ TNB-001\s+● Ship it/);
 
   await type("/do");
@@ -91,6 +115,17 @@ test("the board runs commands, keeps the prompt on a conflict, and refreshes", a
     id: "TNB-001", expectedVersion: 4, patch: { status: "done" },
   });
   assert.ok(calls.filter(([name]) => name === "list_tasks").length > lists);
+  assert.ok(calls.filter(([name]) => name === "list_tasks").every(([, args]) => args.board === "TNB"));
+
+  await type("/board web2\r");
+  assert.match(ui.lastFrame(), /· WEB2 Website/);
+  assert.match(ui.lastFrame(), /❯ WEB2-012\s+● Landing page/);
+  assert.doesNotMatch(ui.lastFrame(), /TNB-001/);
+  await type("/board nope\r");
+  assert.match(ui.lastFrame(), /Choose a board: OLD, TNB, WEB2\./);
+  await type("\u001b/new Hero copy\r");
+  assert.deepEqual(calls.filter(([name]) => name === "create_task").at(-1)[1], { board: "WEB2", title: "Hero copy" });
+  assert.match(ui.lastFrame(), /Created WEB2-013\./);
   ui.unmount();
 });
 
@@ -101,9 +136,10 @@ test("one-shot commands print JSON and fail with a JSON error", async (t) => {
   delete env.TASKNBOARD_SERVER_URL;
   // Run the executable itself, as the installed `tasknboard` command does.
   const cli = (...args) => run("dist-cli/tasknboard.mjs", args, { env });
-  const created = JSON.parse((await cli("create_task", '{"title":"From the shell"}')).stdout);
+  const created = JSON.parse((await cli("create_task", '{"board":"TNB","title":"From the shell"}')).stdout);
   assert.equal(created.id, "TNB-001");
-  const listed = JSON.parse((await cli("list_tasks")).stdout);
+  assert.deepEqual(JSON.parse((await cli("list_boards")).stdout).boards.map((b) => b.id), ["TNB"]);
+  const listed = JSON.parse((await cli("list_tasks", '{"board":"TNB"}')).stdout);
   assert.deepEqual(listed.tasks.map((t) => t.title), ["From the shell"]);
   await assert.rejects(cli("get_task", "{not json"), (error) => {
     assert.equal(error.code, 1);

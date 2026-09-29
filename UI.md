@@ -7,7 +7,7 @@ Use the existing application, API, and persisted data.
 This document defines functionality and acceptance criteria. It does not prescribe a visual style.
 
 TasknBoard is a task workspace for small teams and coding agents.
-The product name is **TasknBoard**, the internal name is **tasknboard**, and task IDs use **TNB**.
+The product name is **TasknBoard**, the internal name is **tasknboard**, and task IDs use the board ID as prefix (**TNB** for the first board).
 One server and database represent one workspace.
 
 ## Core user needs

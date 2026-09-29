@@ -1,4 +1,4 @@
-import type { Task } from "./types";
+import { compareTaskIds, type Task } from "./types";
 
 const TOKEN_KEY = "tasknboard-token";
 
@@ -72,8 +72,6 @@ export const errorOf = (e: unknown) =>
     ? e
     : new ApiError((e as Error)?.message || "Unexpected error", "UNKNOWN", 0);
 
-export const taskNumber = (id: string) => Number(id.slice(4));
-
 /** Read every page so no task is silently dropped by the API page size. */
 export async function loadTasks() {
   const byId = new Map<string, Task>();
@@ -89,5 +87,5 @@ export async function loadTasks() {
     offset += page.tasks.length;
     if (!page.tasks.length) break;
   } while (offset < total);
-  return [...byId.values()].sort((a, b) => taskNumber(a.id) - taskNumber(b.id));
+  return [...byId.values()].sort((a, b) => compareTaskIds(a.id, b.id));
 }

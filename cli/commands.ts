@@ -1,4 +1,4 @@
-import type { Status, Task } from "../src/types.ts";
+import type { Board, Status, Task } from "../src/types.ts";
 import { columns, priorities, statusTitle } from "../src/types.ts";
 
 export type Request = { name: string; args: Record<string, unknown> };
@@ -6,16 +6,21 @@ export type Request = { name: string; args: Record<string, unknown> };
 /** What a slash command asks the interface to do. */
 export type Action =
   | { kind: "request"; request: Request; message: (task: Task) => string }
+  | { kind: "board"; board: Board }
+  | { kind: "boards" }
   | { kind: "mine" }
   | { kind: "refresh" }
   | { kind: "help" }
   | { kind: "quit" };
 
+/** The boards the interface has loaded, and the one it shows. */
+export type Context = { boards: Board[]; board: Board | undefined };
+
 export type Command = {
   name: string;
   usage: string;
   summary: string;
-  plan: (arg: string, task: Task | undefined) => Action;
+  plan: (arg: string, task: Task | undefined, context: Context) => Action;
 };
 
 /** A mistake in the typed command. Nothing was sent to the workspace. */
@@ -58,6 +63,36 @@ function versioned(
   };
 }
 
+function current(context: Context) {
+  if (!context.board) throw new UsageError("No board is loaded yet.");
+  return context.board;
+}
+
+/** The board IDs, for messages. */
+export function boardIds(boards: Board[]) {
+  return boards.map((b) => b.id).join(", ") || "none";
+}
+
+/** Matches a board by ID, ignoring case. */
+export function findBoard(arg: string, boards: Board[]): Board {
+  const board = boards.find((b) => b.id === arg.trim().toUpperCase());
+  if (!board) throw new UsageError(`Choose a board: ${boardIds(boards)}.`);
+  return board;
+}
+
+/** One line naming every board, marking the current one. */
+export function boardList({ boards, board }: Context) {
+  const names = boards.map(
+    (b) => `${b.id} ${b.title}${b.id === board?.id ? " (current)" : ""}`,
+  );
+  return `Boards: ${names.join(" · ") || "none"}. Type /board <id> to switch.`;
+}
+
+/** The board shown on start: the first sidebar board, else the first board. */
+export function defaultBoard(boards: Board[]): Board | undefined {
+  return boards.find((b) => b.showInSidebar) ?? boards[0];
+}
+
 /** Matches a status by id or title, for example "review" or "in progress". */
 export function findStatus(arg: string): Status {
   const key = arg.trim().toLowerCase().replace(/\s+/g, "_");
@@ -76,12 +111,15 @@ export const commands: Command[] = [
   {
     name: "new",
     usage: "/new <title>",
-    summary: "Create a backlog task",
-    plan: (arg) => ({
+    summary: "Create a backlog task on the current board",
+    plan: (arg, _, context) => ({
       kind: "request",
       request: {
         name: "create_task",
-        args: { title: required(arg, "/new <title>") },
+        args: {
+          board: current(context).id,
+          title: required(arg, "/new <title>"),
+        },
       },
       message: (task) => `Created ${task.id}.`,
     }),
@@ -195,6 +233,15 @@ export const commands: Command[] = [
     },
   },
   {
+    name: "board",
+    usage: "/board [id]",
+    summary: "Switch to another board, or list the boards",
+    plan: (arg, _, context) =>
+      arg
+        ? { kind: "board", board: findBoard(arg, context.boards) }
+        : { kind: "boards" },
+  },
+  {
     name: "mine",
     usage: "/mine",
     summary: "Show only your tasks, or show all again",
@@ -228,7 +275,11 @@ export function matchCommands(input: string): Command[] {
 }
 
 /** Turns one line of input into an action. Throws UsageError on mistakes. */
-export function planInput(input: string, task: Task | undefined): Action {
+export function planInput(
+  input: string,
+  task: Task | undefined,
+  context: Context,
+): Action {
   const [, name = "", arg = ""] =
     /^\/(\S*)\s*([\s\S]*)$/.exec(input.trim()) ?? [];
   const command =
@@ -237,5 +288,5 @@ export function planInput(input: string, task: Task | undefined): Action {
       ? commands.find((c) => c.name === "quit")
       : undefined);
   if (!command) throw new UsageError(`Unknown command /${name}. Type /help.`);
-  return command.plan(arg.trim(), task);
+  return command.plan(arg.trim(), task, context);
 }

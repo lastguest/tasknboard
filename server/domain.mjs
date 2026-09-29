@@ -6,8 +6,32 @@ export const statuses = ["backlog", "in_progress", "in_review", "done"];
 const text = z.string().trim().min(1).max(300);
 const long = z.string().max(20000);
 const version = z.number().int().positive();
-const id = z.string().regex(/^TNB-\d+$/);
-const epicId = z.string().regex(/^EPIC-\d+$/);
+/** A board ID is also the prefix of its task IDs, for example "TNB". */
+const boardId = z
+  .string()
+  .regex(/^[A-Z][A-Z0-9]{1,9}$/, "2–10 capital letters or digits, starting with a letter")
+  // EPIC-<n> task IDs would share event subjects with allocated epics.
+  .refine((v) => v !== "EPIC", "EPIC is reserved for epic IDs");
+const boardTitle = z.string().trim().min(1).max(120);
+const id = z.string().regex(/^[A-Z][A-Z0-9]{1,9}-\d+$/);
+/** Epic IDs the server allocates when no codename is chosen. */
+const allocatedEpicId = /^EPIC-\d+$/;
+/**
+ * An epic ID: EPIC-<n>, or a codename of capital words joined by hyphens,
+ * for example "Q3-LAUNCH". Events share one subject column, so a codename
+ * cannot look like a task ID.
+ */
+const epicId = z
+  .string()
+  .max(32)
+  .regex(
+    /^[A-Z0-9]+(-[A-Z0-9]+)*$/,
+    "Capital letters, digits and single hyphens",
+  )
+  .refine(
+    (v) => allocatedEpicId.test(v) || !id.safeParse(v).success,
+    "Codename looks like a task ID",
+  );
 /** A task's epic: an epic ID, or "" for none. */
 const taskEpic = z.union([z.literal(""), epicId]);
 const epicTitle = z.string().trim().min(1).max(120);
@@ -55,6 +79,7 @@ export const schemas = {
       query: z.string().max(300).optional(),
       status: z.enum(statuses).optional(),
       assignee: z.string().max(80).optional(),
+      board: boardId.optional(),
       epic: z.union([z.literal("none"), epicId]).optional(),
       limit: z.number().int().min(1).max(100).default(100),
       offset: z.number().int().min(0).default(0),
@@ -63,6 +88,7 @@ export const schemas = {
   get_task: z.object({ id }).strict(),
   create_task: z
     .object({
+      board: boardId,
       title: text,
       description: long.default(""),
       acceptance: long.default(""),
@@ -136,11 +162,43 @@ export const schemas = {
         ),
     })
     .strict(),
+  list_boards: z.object({}).strict(),
+  create_board: z
+    .object({
+      id: boardId,
+      title: boardTitle,
+      showInSidebar: z.boolean().default(true),
+    })
+    .strict(),
+  update_board: z
+    .object({
+      id: boardId,
+      expectedVersion: version,
+      patch: z
+        .object({
+          title: boardTitle.optional(),
+          showInSidebar: z.boolean().optional(),
+        })
+        .strict()
+        .refine((v) => Object.keys(v).length > 0, "Empty patch"),
+    })
+    .strict(),
   list_epics: z
-    .object({ includeArchived: z.boolean().default(false) })
+    .object({
+      board: boardId.optional(),
+      includeArchived: z.boolean().default(false),
+    })
     .strict(),
   create_epic: z
     .object({
+      board: boardId,
+      // Without a codename the server allocates EPIC-<n>.
+      id: epicId
+        .refine(
+          (v) => !allocatedEpicId.test(v),
+          "EPIC-<n> codenames are allocated by the server",
+        )
+        .optional(),
       title: epicTitle,
       description: long.default(""),
       color: epicColor.optional(),

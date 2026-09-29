@@ -11,6 +11,7 @@ import { Icon } from "./Icons";
 import { AssigneeFilter, UNASSIGNED } from "./AssigneeFilter";
 import { ApiError, command, errorOf, loadTasks } from "./api";
 import { Standup } from "./Standup";
+import { BoardEditor, BoardsPage } from "./Boards";
 import {
   EpicEditor,
   EpicsPage,
@@ -27,20 +28,25 @@ import {
   epicStyle,
   statusTitle,
   type Actor,
+  type Board as BoardRecord,
   type Epic,
   type Status,
   type Task,
   type WorkspaceInfo,
 } from "./types";
 
-type View = "board" | "mine" | "agents" | "epics" | "epic";
+type View = "boards" | "board" | "mine" | "agents" | "epics" | "epic";
 type Editor =
   | null
-  | { mode: "create"; epic?: string }
+  | { mode: "create"; board: string; epic?: string }
   | { mode: "edit"; task: Task };
 type EpicDialog = null | { epic: Epic | null };
-const viewTitles: Record<Exclude<View, "epic">, string> = {
-  board: "Board",
+type BoardDialog = null | { board: BoardRecord | null };
+const BOARD_KEY = "tasknboard.board";
+/** Views that show tasks, with search, filters and New task. */
+const taskViews: View[] = ["board", "mine", "epic"];
+const viewTitles: Record<Exclude<View, "epic" | "board">, string> = {
+  boards: "Boards",
   mine: "My tasks",
   agents: "Agents",
   epics: "Epics",
@@ -53,6 +59,15 @@ export default function App() {
   const [workspaceInfoLoaded, setWorkspaceInfoLoaded] = useState(false);
   const [workspace, setWorkspace] = useState("Workspace");
   const [view, setView] = useState<View>("board");
+  const [boards, setBoards] = useState<BoardRecord[]>([]);
+  const [boardId, setBoardId] = useState(() => {
+    try {
+      return localStorage.getItem(BOARD_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  const [boardDialog, setBoardDialog] = useState<BoardDialog>(null);
   const [epics, setEpics] = useState<Epic[]>([]);
   const [epicId, setEpicId] = useState("");
   const [epicDialog, setEpicDialog] = useState<EpicDialog>(null);
@@ -78,6 +93,13 @@ export default function App() {
       // Storage unavailable; the preference just won't persist.
     }
   }, [collapsed]);
+  useEffect(() => {
+    try {
+      if (boardId) localStorage.setItem(BOARD_KEY, boardId);
+    } catch {
+      // Storage unavailable; the board choice just won't persist.
+    }
+  }, [boardId]);
   const [sync, setSync] = useState<{
     loaded: boolean;
     connected: boolean;
@@ -95,13 +117,15 @@ export default function App() {
 
   const load = useCallback(async (): Promise<RefreshResult> => {
     try {
-      const [next, info, epicList] = await Promise.all([
+      const [next, info, boardList, epicList] = await Promise.all([
         loadTasks(),
         command<WorkspaceInfo>("workspace_info"),
+        command<{ boards: BoardRecord[] }>("list_boards"),
         // Archived epics still name the finished tasks that keep them.
         command<{ epics: Epic[] }>("list_epics", { includeArchived: true }),
       ]);
       setTasks(next);
+      setBoards(boardList.boards);
       setEpics(epicList.epics);
       setActor(info.actor);
       setActors(info.actors);
@@ -207,6 +231,7 @@ export default function App() {
   const dialogOpen =
     editor !== null ||
     epicDialog !== null ||
+    boardDialog !== null ||
     settings ||
     help ||
     Boolean(opening);
@@ -229,10 +254,10 @@ export default function App() {
         return;
       if (e.key === "n" || e.key === "N") {
         e.preventDefault();
-        setEditor({ mode: "create", epic: view === "epic" ? epicId : undefined });
+        newTask();
       } else if (e.key === "f" || e.key === "F") {
         e.preventDefault();
-        if (view === "agents" || view === "epics") setView("board");
+        if (!taskViews.includes(view)) setView("board");
         requestAnimationFrame(() => filter.current?.focus());
       } else if (e.key === "?") {
         e.preventDefault();
@@ -244,7 +269,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [standup, dialogOpen, view, epicId]);
+  });
 
   const wasPresenting = useRef(false);
   useEffect(() => {
@@ -275,23 +300,51 @@ export default function App() {
     () => new Map(epics.map((epic) => [epic.id, epic])),
     [epics],
   );
-  const activeEpics = epics.filter((epic) => !epic.archived);
+  const sidebarBoards = boards.filter((board) => board.showInSidebar);
+  // Until someone picks a board (or if the remembered one is not in this
+  // workspace), show the first sidebar board.
+  const currentBoard =
+    boards.find((board) => board.id === boardId) ??
+    sidebarBoards[0] ??
+    boards[0];
+  const activeBoard = currentBoard?.id ?? "";
+  const boardTasks = tasks.filter((t) => t.board === activeBoard);
+  const activeEpics = epics.filter(
+    (epic) => !epic.archived && epic.board === activeBoard,
+  );
   const currentEpic = view === "epic" ? epicsById.get(epicId) : undefined;
   const title =
-    view === "epic" ? (currentEpic?.title ?? "Epic") : viewTitles[view];
+    view === "epic"
+      ? (currentEpic?.title ?? "Epic")
+      : view === "board"
+        ? (currentBoard?.title ?? "Board")
+        : viewTitles[view];
   const canManageEpics = workspaceInfoLoaded && actor.kind === "human";
+  const openBoard = (board: BoardRecord) => {
+    setBoardId(board.id);
+    setView("board");
+  };
   const openEpic = (epic: Epic) => {
+    setBoardId(epic.board);
     setEpicId(epic.id);
     setView("epic");
   };
+  // An epic's tasks are created on the epic's board.
   const newTask = () =>
-    setEditor({ mode: "create", epic: view === "epic" ? epicId : undefined });
+    currentBoard &&
+    setEditor(
+      view === "epic" && currentEpic
+        ? { mode: "create", board: currentEpic.board, epic: currentEpic.id }
+        : { mode: "create", board: activeBoard },
+    );
   const q = query.trim().toLowerCase();
   const filtersActive = Boolean(q || assignee);
   const inScope = (t: Task, scope: View = view) =>
     scope === "mine"
       ? workspaceInfoLoaded && t.assignee === actor.id
-      : scope !== "epic" || t.epic === epicId;
+      : scope === "epic"
+        ? t.epic === epicId
+        : t.board === activeBoard;
   const matches = (t: Task, scope: View = view) =>
     inScope(t, scope) &&
     (!assignee ||
@@ -361,12 +414,12 @@ export default function App() {
   async function created(task: Task) {
     setEditor(null);
     await refresh();
-    const shown = !["agents", "epics"].includes(view) && matches(task);
+    const shown = taskViews.includes(view) && matches(task);
     notify({
       tone: "ok",
       title: `Created ${task.id}`,
       body:
-        shown || view === "agents" || view === "epics"
+        shown || !taskViews.includes(view)
           ? "Added to Backlog."
           : "Added to Backlog. Your current filters hide it.",
       actions: [
@@ -377,6 +430,7 @@ export default function App() {
                 label: "Show on board",
                 run: () => {
                   clearFilters();
+                  setBoardId(task.board);
                   setView("board");
                 },
               },
@@ -420,6 +474,28 @@ export default function App() {
       body: isNew ? `“${epic.title}” is ready for tasks.` : undefined,
       actions: isNew
         ? [{ label: "Open", run: () => openEpic(epic) }]
+        : undefined,
+    });
+  }
+
+  function boardSaved(board: BoardRecord, isNew: boolean) {
+    setBoardDialog(null);
+    setBoards((list) =>
+      isNew
+        ? [...list, board]
+        : list.map((b) => (b.id === board.id ? board : b)),
+    );
+    void refresh();
+    notify({
+      tone: "ok",
+      title: isNew ? `Created board ${board.id}` : `Saved board ${board.id}`,
+      body: isNew
+        ? `Its tasks are numbered ${board.id}-001, ${board.id}-002, and so on.`
+        : board.showInSidebar
+          ? undefined
+          : "It is hidden from the sidebar. Find it on the Boards page.",
+      actions: isNew
+        ? [{ label: "Open", run: () => openBoard(board) }]
         : undefined,
     });
   }
@@ -502,7 +578,7 @@ export default function App() {
           <nav aria-labelledby="nav-label" className="nav-main">
             {(
               [
-                ["board", "board"],
+                ["boards", "board"],
                 ["mine", "user"],
                 ["agents", "bot"],
                 ["epics", "folder"],
@@ -542,6 +618,47 @@ export default function App() {
               <Icon name="screen" />
               <span>Stand-up</span>
             </button>
+          </nav>
+          <nav className="nav-epics" aria-labelledby="boards-label">
+            <div className="nav-section-head">
+              <span className="nav-label" id="boards-label">
+                Boards
+              </span>
+              {canManageEpics && (
+                <button
+                  type="button"
+                  className="icon-button nav-add"
+                  aria-label="New board"
+                  title="New board"
+                  onClick={() => setBoardDialog({ board: null })}
+                >
+                  <Icon name="plus" size={14} />
+                </button>
+              )}
+            </div>
+            {sidebarBoards.map((board) => {
+              const { open } = epicProgress(board);
+              const selected = view === "board" && activeBoard === board.id;
+              return (
+                <button
+                  key={board.id}
+                  type="button"
+                  className={`nav-item nav-epic ${selected ? "selected" : ""}`}
+                  aria-current={selected ? "page" : undefined}
+                  title={collapsed ? board.title : undefined}
+                  onClick={() => openBoard(board)}
+                >
+                  <Icon name="board" size={15} />
+                  <span className="nav-epic-title">{board.title}</span>
+                  <small aria-label={`${open} open tasks`}>{open}</small>
+                </button>
+              );
+            })}
+            {sync.loaded && boards.length > 0 && !sidebarBoards.length && (
+              <p className="nav-empty">
+                Every board is hidden. Open one from Boards.
+              </p>
+            )}
           </nav>
           <nav className="nav-epics" aria-labelledby="epics-label">
             <div className="nav-section-head">
@@ -635,6 +752,18 @@ export default function App() {
           <div className="topbar">
             <span className="breadcrumb">
               {workspace} <span className="slash">/</span>{" "}
+              {(view === "epic" || view === "epics") && currentBoard && (
+                <>
+                  <button
+                    type="button"
+                    className="breadcrumb-link"
+                    onClick={() => setView("board")}
+                  >
+                    {currentBoard.title}
+                  </button>{" "}
+                  <span className="slash">/</span>{" "}
+                </>
+              )}
               {view === "epic" && (
                 <>
                   <button
@@ -659,7 +788,7 @@ export default function App() {
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
-                  if (view === "agents" || view === "epics") setView("board");
+                  if (!taskViews.includes(view)) setView("board");
                 }}
               />
               <kbd aria-hidden="true">⌘K</kbd>
@@ -690,17 +819,37 @@ export default function App() {
                   ? currentEpic
                     ? `${currentEpic.id} · ${currentEpic.archived ? "Archived epic" : "Epic"}`
                     : "This epic isn't in the workspace."
+                  : view === "boards"
+                  ? "Task containers. Each board numbers its own tasks with its ID as the prefix."
                   : view === "epics"
-                  ? "Projects that group related tasks. Open one to see its board."
+                  ? `Projects that group related tasks on ${currentBoard?.title ?? "this board"}. Open one to see its tasks.`
                   : view === "agents"
                   ? "Known agents from the workspace roster. A listed agent is not necessarily connected or running."
                   : view === "mine"
                     ? workspaceInfoLoaded
                       ? `Tasks assigned to ${displayName(people, actor.id)}.`
                       : ""
-                    : `All active tasks in ${workspace}.`}
+                    : currentBoard
+                      ? `${currentBoard.id} · All active tasks on this board.`
+                      : ""}
               </p>
             </header>
+            {view === "board" && currentBoard && canManageEpics && (
+              <div className="epic-summary">
+                <div className="epic-summary-row">
+                  <button
+                    type="button"
+                    className="secondary small-button"
+                    onClick={() => setBoardDialog({ board: currentBoard })}
+                  >
+                    Edit board
+                  </button>
+                  {!currentBoard.showInSidebar && (
+                    <span className="small">Hidden from the sidebar.</span>
+                  )}
+                </div>
+              </div>
+            )}
             {sync.error && (
               <div className="banner error-banner" role="alert">
                 <Icon name="alert" size={16} />
@@ -734,10 +883,19 @@ export default function App() {
                 onEdit={() => setEpicDialog({ epic: currentEpic })}
               />
             )}
-            {view === "epics" ? (
+            {view === "boards" ? (
+              <BoardsPage
+                boards={boards}
+                current={activeBoard}
+                canManage={canManageEpics}
+                onOpen={openBoard}
+                onEdit={(board) => setBoardDialog({ board })}
+                onNew={() => setBoardDialog({ board: null })}
+              />
+            ) : view === "epics" ? (
               <EpicsPage
                 epics={activeEpics}
-                unfiled={tasks.filter((t) => !t.epic).length}
+                unfiled={boardTasks.filter((t) => !t.epic).length}
                 canManage={canManageEpics}
                 onOpen={openEpic}
                 onNew={() => setEpicDialog({ epic: null })}
@@ -851,9 +1009,9 @@ export default function App() {
                       </button>
                     </div>
                   </div>
-                ) : tasks.length === 0 ? (
+                ) : scoped.length === 0 && view === "board" ? (
                   <div className="empty-state">
-                    <h2>No tasks yet.</h2>
+                    <h2>No tasks on this board yet.</h2>
                     <p>
                       Create a task with context and acceptance criteria for a
                       teammate or an agent.
@@ -959,7 +1117,7 @@ export default function App() {
       </div>
       {standup && (
         <Standup
-          tasks={tasks}
+          tasks={boardTasks}
           agents={agents}
           connected={sync.connected}
           lastSync={sync.lastSync}
@@ -972,7 +1130,7 @@ export default function App() {
       )}
       {editor && (
         <TaskEditor
-          key={editor.mode === "edit" ? editor.task.id : "create"}
+          key={editor.mode === "edit" ? editor.task.id : `create-${editor.board}`}
           task={editor.mode === "edit" ? editor.task : null}
           actor={actor}
           agents={agents}
@@ -980,6 +1138,7 @@ export default function App() {
           assignees={assignees}
           labels={labels}
           epics={epics}
+          board={editor.mode === "create" ? editor.board : editor.task.board}
           initialEpic={editor.mode === "create" ? editor.epic : undefined}
           latestVersion={
             editor.mode === "edit"
@@ -1005,10 +1164,19 @@ export default function App() {
         <EpicEditor
           key={epicDialog.epic?.id ?? "create"}
           epic={epicDialog.epic}
+          board={epicDialog.epic?.board ?? activeBoard}
           suggestedColor={epicPalette[epics.length % epicPalette.length].id}
           onClose={() => setEpicDialog(null)}
           onSaved={epicSaved}
           onArchived={epicArchived}
+        />
+      )}
+      {boardDialog && (
+        <BoardEditor
+          key={boardDialog.board?.id ?? "create"}
+          board={boardDialog.board}
+          onClose={() => setBoardDialog(null)}
+          onSaved={boardSaved}
         />
       )}
       {help && <ShortcutHelp onClose={() => setHelp(false)} />}

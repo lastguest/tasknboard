@@ -12,8 +12,10 @@ Usage:
 
 Commands: ${Object.keys(schemas).join(", ")}
 
-Example:
-  tasknboard list_tasks '{"status":"in_review"}'
+Examples:
+  tasknboard list_boards
+  tasknboard list_tasks '{"board":"TNB","status":"in_review"}'
+  tasknboard create_task '{"board":"TNB","title":"Write docs"}'
 
 The local SQLite file is TASKNBOARD_DB (default data/tasknboard.sqlite).
 Set TASKNBOARD_SERVER_URL and TASKNBOARD_TOKEN to use a shared server.`;
