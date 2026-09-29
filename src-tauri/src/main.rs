@@ -64,8 +64,7 @@ fn start_service(app: &tauri::App) -> Result<(Service, tauri::Url), Box<dyn std:
     let mut command = Command::new(node);
     #[cfg(windows)]
     command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    let mut command = command
-        .arg(service_script)
+    command.arg(service_script)
         .current_dir(&data)
         .env_clear()
         .env("HOST", "127.0.0.1")
