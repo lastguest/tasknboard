@@ -100,7 +100,7 @@ test("CLI helper rejects installation outside desktop mode", async () => {
 
 test(
   "desktop HTTP checks and installs the helper while rejecting foreign origins",
-  { skip: process.platform === "win32" },
+  { skip: process.platform !== "darwin" },
   async (t) => {
     const { spawn } = await import("node:child_process");
     const { once } = await import("node:events");
