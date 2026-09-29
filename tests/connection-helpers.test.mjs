@@ -61,9 +61,11 @@ test("Windows commands use PowerShell literal strings and invocation", () => {
   assert.match(connectionHelper("codex", windows, "codex").text, /Stefano''s/);
   for (const client of ["codex", "claude"])
     assert.match(connectionHelper(client, windows, client).text, / '--' '/);
-  const pi = connectionHelper("pi", windows, "pi").text;
-  assert.ok(pi.includes("$env:TASKNBOARD_AGENT_ID = 'pi';"));
-  assert.ok(pi.includes("& '/Apps/Stefano''s $(false)/node'"));
+  const pi = connectionHelper("pi", windows, "pi");
+  assert.ok(pi.text.includes("$env:TASKNBOARD_AGENT_ID = 'pi';"));
+  assert.ok(pi.text.includes("& '/Apps/Stefano''s $(false)/node'"));
+  assert.match(pi.instruction, /PowerShell 7\.3 or later/);
+  assert.match(pi.text, /PowerShell 7\.3 or later/);
 });
 
 test("incomplete runtime configuration is rejected instead of crashing the helper", () => {

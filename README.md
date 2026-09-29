@@ -259,7 +259,8 @@ Choose Codex or Claude Code to copy a setup command, or OpenCode to copy its con
 Choose Pi to copy or download a native skill that uses the TasknBoard CLI as an agent.
 Give each concurrent agent a different identity. Copying a helper does not install or connect the client.
 For source runs, build the CLI with `npm run build:cli` before using the Pi skill.
-The desktop app includes the CLI. Windows Pi sessions require the PowerShell tool, as shown in the helper.
+The desktop app includes the CLI. Windows Pi sessions require the PowerShell tool and PowerShell 7.3 or later, as shown in the helper.
+Windows PowerShell 5.1 removes the quotes from JSON arguments, so the CLI rejects them.
 
 Configure your MCP client with the following, replacing **both** paths with absolute paths. Give concurrent agents distinct identities.
 
