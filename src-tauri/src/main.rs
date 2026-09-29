@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
+    env,
     io::{BufRead, BufReader},
     path::PathBuf,
     process::{Child, Command, Stdio},
@@ -8,6 +9,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use tauri::{
     webview::{DownloadEvent, NewWindowResponse},
     Manager, WebviewUrl, WebviewWindowBuilder,
@@ -56,8 +59,13 @@ fn start_service(app: &tauri::App) -> Result<(Service, tauri::Url), Box<dyn std:
     };
     let data = app.path().app_data_dir()?;
     std::fs::create_dir_all(&data)?;
-    let mut child = Command::new(resources.join("node"))
-        .arg(resources.join("server.mjs"))
+    let node = resources.join(if cfg!(windows) { "node.exe" } else { "node" });
+    let service_script = resources.join("server.mjs");
+    let mut command = Command::new(node);
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    let mut command = command
+        .arg(service_script)
         .current_dir(&data)
         .env_clear()
         .env("HOST", "127.0.0.1")
@@ -67,8 +75,20 @@ fn start_service(app: &tauri::App) -> Result<(Service, tauri::Url), Box<dyn std:
         .env("TASKNBOARD_STATIC_DIR", resources.join("dist"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        let system_root = env::var_os("SystemRoot")
+            .or_else(|| env::var_os("WINDIR"))
+            .ok_or("SystemRoot is unavailable")?;
+        command.env("SystemRoot", &system_root).env("WINDIR", system_root);
+        for name in ["TEMP", "TMP", "USERPROFILE"] {
+            if let Some(value) = env::var_os(name) {
+                command.env(name, value);
+            }
+        }
+    }
+    let mut child = command.spawn()?;
     let stdout = child.stdout.take().ok_or("Service stdout is unavailable")?;
     let stderr = child.stderr.take().ok_or("Service stderr is unavailable")?;
     let service = Service(Arc::new(Mutex::new(Some(child))));

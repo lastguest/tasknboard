@@ -16,6 +16,8 @@ export type Task = {
   priority: Priority;
   assignee: string;
   labels: string[];
+  /** An epic ID, or "" when the task is in no epic. */
+  epic: string;
   version: number;
   commentCount: number;
   lease: null | { actor: string; expiresAt: number };
@@ -24,12 +26,33 @@ export type Task = {
   review?: { summary: string; artifactUrl: string; actor: string };
   events?: TaskEvent[];
 };
-export type Actor = { id: string; kind: "human" | "agent" };
+export type Epic = {
+  id: string;
+  title: string;
+  description: string;
+  /** A palette name, or a custom "#rrggbb". */
+  color: string;
+  version: number;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+  /** Non-archived tasks per status, derived by the server. */
+  counts: Record<Status, number>;
+};
+
+export type Actor = {
+  id: string;
+  kind: "human" | "agent";
+  /** Optional profile; empty means "show the ID". */
+  name?: string;
+  /** A small raster data URL, or empty for initials. */
+  avatar?: string;
+};
 export type WorkspaceInfo = {
   name: string;
   actor: Actor;
   actors: Actor[];
-  schemaVersion: 3;
+  schemaVersion: 6;
 };
 export const columns: { id: Status; title: string; color: string }[] = [
   { id: "backlog", title: "Backlog", color: "#88909e" },
@@ -69,3 +92,40 @@ export function labelTone(label: string) {
 
 /** The server only accepts Done for reviewed work. */
 export const doneLocked = (s: Status) => s !== "in_review" && s !== "done";
+
+/** Tasks in an epic and how many are Done. */
+export function epicProgress(epic: Epic) {
+  const total = Object.values(epic.counts).reduce((sum, n) => sum + n, 0);
+  return { total, done: epic.counts.done, open: total - epic.counts.done };
+}
+
+/**
+ * Epic colours, tuned to read on the charcoal surfaces. Names mirror
+ * `epicColors` in server/domain.mjs, which validates them.
+ */
+export const epicPalette = [
+  { id: "aurora", name: "Aurora", hex: "#5eead4" },
+  { id: "lagoon", name: "Lagoon", hex: "#38bdf8" },
+  { id: "cobalt", name: "Cobalt", hex: "#7b93ff" },
+  { id: "iris", name: "Iris", hex: "#a78bfa" },
+  { id: "orchid", name: "Orchid", hex: "#e08cf5" },
+  { id: "flamingo", name: "Flamingo", hex: "#ff7eb6" },
+  { id: "coral", name: "Coral", hex: "#ff8a6b" },
+  { id: "tangerine", name: "Tangerine", hex: "#ffa94d" },
+  { id: "saffron", name: "Saffron", hex: "#f5cf4f" },
+  { id: "lime", name: "Lime", hex: "#b5e655" },
+  { id: "jade", name: "Jade", hex: "#4fdc8f" },
+  { id: "glacier", name: "Glacier", hex: "#a9c4e4" },
+] as const;
+
+/** The CSS colour of an epic; unknown values fall back to Glacier. */
+export function epicColor(epic: Pick<Epic, "color">) {
+  if (/^#[0-9a-f]{6}$/i.test(epic.color)) return epic.color;
+  return (
+    epicPalette.find((swatch) => swatch.id === epic.color)?.hex ?? "#a9c4e4"
+  );
+}
+
+/** Inline style carrying an epic's colour into its CSS as `--epic`. */
+export const epicStyle = (epic: Pick<Epic, "color">) =>
+  ({ "--epic": epicColor(epic) }) as React.CSSProperties;

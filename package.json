@@ -16,7 +16,8 @@
     "seed": "node server/seed.mjs",
     "desktop:prepare": "npm run build && node scripts/desktop-prepare.mjs",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build --bundles app"
+    "desktop:build": "tauri build --bundles app",
+    "desktop:build:windows": "tauri build --bundles nsis"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.1",

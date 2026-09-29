@@ -43,16 +43,17 @@ Editing uses the task's latest version. If the task changed elsewhere, the save 
 
 ## Desktop app
 
-The Tauri app currently builds for macOS on Apple Silicon.
+The Tauri app builds for macOS on Apple Silicon and Windows x64.
 It includes the interface, the service, and a Node runtime.
 The installed app does not require Node or a separate server process.
 The shell starts its service on an available loopback port and stops it when the app exits.
-Desktop data stays in `~/Library/Application Support/app.tasknboard.desktop/tasknboard.sqlite`, outside the app bundle.
+On macOS, desktop data stays in `~/Library/Application Support/app.tasknboard.desktop/tasknboard.sqlite`, outside the app bundle. On Windows, it stays in `%APPDATA%\app.tasknboard.desktop\tasknboard.sqlite`.
 The desktop workspace is separate from `data/tasknboard.sqlite` used by the web development server.
 
 Build prerequisites: Node.js 24 or later, npm, Rust, and the platform's
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
-On macOS, install the Xcode command line tools.
+On macOS, install the Xcode command line tools. On Windows, use an x64 machine
+with the Microsoft C++ Build Tools.
 
 ```bash
 npm ci
@@ -65,12 +66,18 @@ To build the desktop app:
 npm run desktop:build
 ```
 
-The first build downloads the Rust dependencies and the pinned official Node 24.14.0 runtime.
+Build the Windows installer on Windows x64:
+
+```bash
+npm run desktop:build:windows
+```
+
+The first build downloads the Rust dependencies and the pinned official Node 24.14.0 runtime for that platform.
 Later builds reuse the cached archive and check it against Node's published SHA-256 checksum.
-Build on an Apple Silicon Mac. Other platforms are not packaged by this version.
-The app requires macOS 13.5 or later.
-Packaged output is `src-tauri/target/release/bundle/macos/TasknBoard.app`.
-Local builds use ad-hoc signing. They are not notarized for public distribution.
+Build macOS on an Apple Silicon Mac; build Windows on Windows x64. The app requires macOS 13.5 or later.
+The macOS app is written to `src-tauri/target/release/bundle/macos/TasknBoard.app`.
+The Windows NSIS installer is written to `src-tauri/target/release/bundle/nsis/` and installs for the current user.
+Local macOS builds use ad-hoc signing and are not notarized. Local Windows installers are unsigned.
 
 `desktop:dev` rebuilds the interface before launch. Restart it after frontend changes.
 Use `npm run dev` for the ordinary web interface with hot reload.

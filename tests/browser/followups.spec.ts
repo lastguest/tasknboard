@@ -26,6 +26,13 @@ async function connect(page: Page) {
 }
 const card = (page: Page, id: string) => page.getByRole("button", { name: new RegExp(`^${id}:`) });
 const search = (page: Page) => page.getByRole("searchbox");
+const assigneeFilter = (page: Page) => page.getByRole("group", { name: "Filter by assignee" });
+async function filterBy(page: Page, name: string) {
+  const face = assigneeFilter(page).getByRole("button", { name, exact: true });
+  if (await face.count()) return face.click();
+  await assigneeFilter(page).getByRole("button", { name: /more assignees$/ }).click();
+  await page.getByRole("dialog", { name: "Filter by assignee" }).getByText(name, { exact: true }).click();
+}
 const nav = (page: Page, name: string) => page.locator(".sidebar").getByRole("button", { name: new RegExp(`^${name}(?:\\s|$)`) });
 
 // Each test creates its own identifiable records in the runner's disposable database.
@@ -40,17 +47,17 @@ test("Board, List and My tasks combine filters and agree on counts", async ({ pa
   await expect(page.locator(".task-card")).toHaveCount(2);
   await expect(page.locator(".task-card .kind-tag")).toHaveCount(0);
   await expect(page.locator(".result-summary")).toContainText("Showing 2 of");
-  await page.getByLabel("Filter by assignee").selectOption("reviewer");
+  await filterBy(page, "reviewer");
   await expect(page.locator(".task-card")).toHaveCount(1);
   await expect(page.locator(".task-card .comment-count")).toHaveText("1 comment");
   await expect(page.locator("#column-backlog + .count")).toHaveText("1");
   await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "List" }).click();
   await expect(page.locator("tbody tr")).toHaveCount(1);
-  await expect(page.locator('[data-label="Comments"]')).toHaveText("1");
+  await expect(page.locator("tbody .comment-count")).toHaveText("1 comment");
   await expect(card(page, mine.id)).toBeVisible();
   await nav(page, "My tasks").click();
   await expect(page.locator("tbody tr")).toHaveCount(1);
-  await page.getByLabel("Filter by assignee").selectOption("Helpful bot");
+  await filterBy(page, "Helpful bot");
   await expect(page.getByRole("heading", { name: "No tasks match these filters." })).toBeVisible();
   await page.getByRole("button", { name: "Clear filters", exact: true }).first().click();
   await expect(card(page, mine.id)).toBeVisible();
@@ -73,7 +80,15 @@ test("Status menu saves and the server rejects an invalid drag", async ({ page }
   await page.locator('section[aria-labelledby="column-done"]').dispatchEvent("drop", { dataTransfer: transfer });
   await expect(page.getByRole("alert")).toContainText("must be reviewed before completion");
   await expect(status).toHaveValue("in_progress");
-  expect((await command("get_task", { id: task.id })).status).toBe("in_progress");
+  await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "List" }).click();
+  await page.getByRole("button", { name: `Status of ${task.id}: In progress. Choose status` }).click();
+  const picker = page.getByRole("dialog", { name: `Status of ${task.id}` });
+  await expect(picker.getByRole("radio", { name: "Done (after review)" })).toBeDisabled();
+  await picker.getByText("In review", { exact: true }).click();
+  await expect(picker).toBeHidden();
+  await expect(page.getByRole("button", { name: `Status of ${task.id}: In review. Choose status` })).toBeVisible();
+  await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "Board" }).click();
+  expect((await command("get_task", { id: task.id })).status).toBe("in_review");
 });
 
 test("Task sidebar pickers search, stage changes, and save label arrays", async ({ page }) => {
@@ -194,7 +209,7 @@ test("Stand-up fixes participant order, saves claimed-task notes and restores st
   await create(`Unassigned ${key()}`);
   await connect(page);
   await search(page).fill(task.id);
-  await page.getByLabel("Filter by assignee").selectOption("browser-agent");
+  await filterBy(page, "browser-agent");
   await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "List" }).click();
   await nav(page, "Stand-up").click();
   await expect(page.getByRole("heading", { name: "Team overview" })).toBeVisible();
@@ -231,7 +246,7 @@ test("Stand-up fixes participant order, saves claimed-task notes and restores st
   await page.keyboard.press("Escape");
   await expect(page.locator(".standup-shell")).toBeHidden();
   await expect(search(page)).toHaveValue(task.id);
-  await expect(page.getByLabel("Filter by assignee")).toHaveValue("browser-agent");
+  await expect(assigneeFilter(page).getByRole("button", { name: "browser-agent", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
 });
 
@@ -259,7 +274,7 @@ test("WebMCP writes refresh after a read already in flight", async ({ page }) =>
     await route.fulfill({ response: oldResponse });
   });
   await page.goto(baseURL);
-  await expect.poll(() => page.evaluate(() => (window as any).testTools.size)).toBe(7);
+  await expect.poll(() => page.evaluate(() => (window as any).testTools.size)).toBe(9);
   const title = `WebMCP ${key()}`;
   const write = page.waitForResponse((response) => response.url().endsWith("/api/create_task"));
   await page.evaluate((title) => {
@@ -340,7 +355,7 @@ test("Phone navigation, fullscreen dialogs and keyboard focus remain usable", as
   await page.keyboard.press("Escape");
   await nav(page, "Board").click();
   await page.keyboard.press("f");
-  await expect(page.getByLabel("Filter by assignee")).toBeFocused();
+  await expect(assigneeFilter(page).getByRole("button").first()).toBeFocused();
 });
 
 test("Needs changes explains retained review evidence", async ({ page }) => {
@@ -451,4 +466,172 @@ test("Escape leaves fullscreen, including an entry that completes after exit", a
     (window as any).finishFullscreen();
   });
   await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
+});
+
+test("Profiles show display names and pictures, and IDs stay unchanged", async ({ page }) => {
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  try {
+    await command("update_profile", { name: "Build Bot", avatar: `data:image/png;base64,${png}` }, agentToken);
+    const task = await create(`Profile ${key()}`, "browser-agent");
+    await connect(page);
+    const taskCard = page.locator("article", { has: card(page, task.id) });
+    await expect(taskCard).toContainText("Build Bot");
+    await expect(taskCard.locator(".avatar img")).toHaveCount(1);
+
+    await nav(page, "Settings").click();
+    const settings = page.getByRole("dialog", { name: "Settings" });
+    await expect(settings.getByRole("heading", { name: "Profile" })).toBeVisible();
+    await settings.getByLabel("Display name").fill("Riley Reviewer");
+    await settings.getByLabel("Profile picture file").setInputFiles({
+      name: "me.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(png, "base64"),
+    });
+    await expect(settings.getByRole("button", { name: "Change picture" })).toBeVisible();
+    await settings.getByRole("button", { name: "Save profile" }).click();
+    await expect(settings.getByRole("status")).toContainText("Profile saved");
+    await settings.getByRole("button", { name: "Close dialog" }).click();
+    await expect(page.locator(".workspace-status")).toContainText("Riley Reviewer · human");
+    await expect(page.locator(".workspace-status .avatar img")).toHaveCount(1);
+
+    await nav(page, "Settings").click();
+    await expect(settings.getByLabel("Display name")).toHaveValue("Riley Reviewer");
+    await expect(settings.getByRole("button", { name: "Change picture" })).toBeVisible();
+    await expect(settings.locator(".profile-row .avatar img")).toHaveCount(1);
+    await settings.getByRole("button", { name: "Data" }).click();
+    await settings.getByRole("button", { name: "Profile" }).click();
+    await expect(settings.getByLabel("Display name")).toHaveValue("Riley Reviewer");
+    await expect(settings.getByRole("button", { name: "Change picture" })).toBeVisible();
+    await expect(settings.locator(".profile-row .avatar img")).toHaveCount(1);
+    await settings.getByRole("button", { name: "Close dialog" }).click();
+
+    const info = await command("workspace_info");
+    expect(info.actor.id).toBe("reviewer");
+    expect(info.actors.find((a: { id: string }) => a.id === "reviewer").avatar).toMatch(/^data:image\/jpeg;base64,/);
+
+    await card(page, task.id).click();
+    const details = page.getByRole("dialog", { name: /Task details/ });
+    await details.getByRole("button", { name: "Assignee: Build Bot. Choose assignee" }).click();
+    const picker = page.getByRole("dialog", { name: "Choose assignee" });
+    await picker.getByRole("searchbox").fill("reviewer");
+    await expect(picker.getByText("Riley Reviewer")).toBeVisible();
+  } finally {
+    // Later tests identify the human by its plain ID.
+    await command("update_profile", { name: "", avatar: "" });
+    await command("update_profile", { name: "", avatar: "" }, agentToken);
+  }
+});
+
+test("Markdown descriptions format, upload pasted images, and render safely", async ({ page }) => {
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  const task = await command("create_task", {
+    title: `Markdown ${key()}`,
+    // "| --- | — |" is what macOS smart dashes make of a typed divider row.
+    description:
+      "- [ ] First step\n\n<img src=x onerror=alert(1)> [bad](javascript:alert(1))\n\n| Column | Column |\n| --- | — |\n| Cell | Cell |\nDrag tasks",
+  });
+  await connect(page);
+  await card(page, task.id).click();
+  const dialog = page.getByRole("dialog", { name: /Task details/ });
+  const preview = dialog.locator(".md-preview");
+  // Existing descriptions open rendered; raw HTML and script URLs stay inert text.
+  await expect(preview).toContainText("<img src=x onerror=alert(1)>");
+  await expect(preview.locator("img, a[href^='javascript']")).toHaveCount(0);
+  await expect(preview.getByRole("columnheader")).toHaveText(["Column", "Column"]);
+  await expect(preview.getByRole("cell")).toHaveText(["Cell", "Cell"]);
+  await expect(preview.locator("p").last()).toHaveText("Drag tasks");
+  await preview.getByRole("checkbox", { name: "Mark item done" }).check();
+
+  await dialog.getByRole("button", { name: "Write", exact: true }).click();
+  const editor = dialog.getByLabel("Context", { exact: true });
+  await expect(editor).toHaveValue(/^- \[x\] First step/);
+  await editor.fill("Ship it");
+  await editor.selectText();
+  await dialog.getByRole("button", { name: "Bold" }).click();
+  await expect(editor).toHaveValue("**Ship it**");
+  await editor.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(el.value.length, el.value.length));
+  await editor.press("Enter");
+  await editor.pressSequentially("1. One");
+  await editor.press("Enter");
+  await expect(editor).toHaveValue("**Ship it**\n1. One\n2. ");
+  await editor.evaluate((el, data) => {
+    const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+    const clip = new DataTransfer();
+    clip.items.add(new File([bytes], "shot.png", { type: "image/png" }));
+    el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: clip, bubbles: true, cancelable: true }));
+  }, png);
+  await expect(editor).toHaveValue(/!\[shot\]\(\/files\/[0-9a-f]{32}\)$/);
+
+  await dialog.getByRole("button", { name: "Preview" }).click();
+  await expect(preview.locator("strong")).toHaveText("Ship it");
+  const image = preview.getByRole("img", { name: "shot" });
+  await expect(image).toHaveJSProperty("naturalWidth", 1);
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog).toBeHidden();
+  const saved = await command("get_task", { id: task.id });
+  expect(saved.description).toMatch(/^\*\*Ship it\*\*\n1\. One\n2\. \n!\[shot\]\(\/files\/[0-9a-f]{32}\)$/);
+});
+
+test("Epics group tasks: create, file, filter, progress and guarded archive", async ({ page }) => {
+  const name = `Epic ${key()}`;
+  const loose = await create(`Loose ${key()}`);
+  await connect(page);
+  await nav(page, "Epics").click();
+  await page.getByRole("button", { name: "New epic" }).first().click();
+  const epicDialog = page.getByRole("dialog", { name: "New epic" });
+  await epicDialog.getByLabel("Title").fill(name);
+  await epicDialog.getByRole("radio", { name: "Flamingo" }).check();
+  await expect(epicDialog.locator(".epic-color-preview")).toContainText("Flamingo");
+  await epicDialog.getByRole("button", { name: "Create epic" }).click();
+  await expect(epicDialog).toBeHidden();
+  const [epic] = (await command("list_epics")).epics.filter((e: { title: string }) => e.title === name);
+
+  // Opening the epic shows its own board; New task starts inside it.
+  await page.locator(".nav-epics").getByRole("button", { name: new RegExp(`^${name}`) }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(name);
+  await expect(page.getByRole("heading", { name: "No tasks in this epic yet." })).toBeVisible();
+  await page.getByRole("button", { name: "New task in this epic" }).click();
+  const taskDialog = page.getByRole("dialog", { name: "New task" });
+  await expect(taskDialog.getByRole("button", { name: `Epic: ${name}. Choose epic` })).toBeVisible();
+  await taskDialog.getByLabel("Title").fill(`${name} first task`);
+  await taskDialog.getByRole("button", { name: "Create task" }).click();
+  await expect(page.locator(".task-card")).toHaveCount(1);
+  await expect(page.getByRole("progressbar", { name: `${name} progress` })).toHaveAttribute("aria-valuetext", "0 of 1 tasks done");
+
+  // An existing task moves in through its Epic picker.
+  await nav(page, "Board").click();
+  await search(page).fill(loose.id);
+  await card(page, loose.id).click();
+  const details = page.getByRole("dialog", { name: /Task details/ });
+  await details.getByRole("button", { name: "Epic: None. Choose epic" }).click();
+  await page.getByRole("dialog", { name: "Choose epic" }).getByText(name, { exact: true }).click();
+  await details.getByRole("button", { name: "Save changes" }).click();
+  await expect(details).toBeHidden();
+  await expect(page.locator(".task-card .epic-tag")).toContainText(name);
+  expect((await command("get_task", { id: loose.id })).epic).toBe(epic.id);
+  await search(page).fill("");
+  await page.locator(".nav-epics").getByRole("button", { name: new RegExp(`^${name}`) }).click();
+  await expect(page.locator(".task-card")).toHaveCount(2);
+  await expect(page.locator(".task-card .epic-tag")).toHaveCount(0);
+
+  expect(epic.color).toBe("flamingo");
+
+  // A custom colour is saved as hex and tints the epic everywhere.
+  await page.getByRole("button", { name: "Edit epic" }).click();
+  const edit = page.getByRole("dialog", { name: /Edit epic/ });
+  await edit.getByLabel("Custom color").fill("#12ab9c");
+  await expect(edit.locator(".epic-color-preview")).toContainText("Custom #12ab9c");
+  await edit.getByRole("button", { name: "Save changes" }).click();
+  await expect(edit).toBeHidden();
+  await expect(page.locator(".page-title .epic-glyph")).toHaveCSS("background-color", "rgb(18, 171, 156)");
+  const recolored = (await command("list_epics")).epics.find((e: { id: string }) => e.id === epic.id);
+  expect(recolored.color).toBe("#12ab9c");
+
+  // Open work blocks archiving; the server explains why.
+  await page.getByRole("button", { name: "Edit epic" }).click();
+  await edit.getByRole("button", { name: "Archive epic…" }).click();
+  await edit.getByRole("button", { name: "Archive", exact: true }).click();
+  await expect(edit.getByRole("alert")).toContainText("still has 2 open tasks");
+  await edit.getByRole("button", { name: "Cancel" }).click();
+  await expect(edit).toBeHidden();
 });

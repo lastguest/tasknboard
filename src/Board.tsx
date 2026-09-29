@@ -6,33 +6,25 @@ import {
   labelTone,
   priorities,
   statusTitle,
+  type Epic,
   type Status,
   type Task,
 } from "./types";
+import { EpicTag } from "./Epics";
 import { Icon } from "./Icons";
 import { formatUtcTimestamp } from "./formatting";
+import { Avatar, usePersonName } from "./People";
+import { StatusPicker } from "./Dialogs";
 
-export function Avatar({ name, agent }: { name: string; agent: boolean }) {
-  const initials = name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => [...part][0])
-    .join("")
-    .toUpperCase();
-  return (
-    <span className={`avatar ${agent ? "bot" : ""} ${name ? "" : "none"}`}>
-      {agent ? <Icon name="bot" size={15} /> : initials || "—"}
-    </span>
-  );
-}
+export { Avatar };
 
 export function Assignee({ name, agent }: { name: string; agent: boolean }) {
+  const label = usePersonName(name);
   return (
-    <span className="assignee">
+    <span className="assignee" title={label === name ? undefined : name}>
       <Avatar name={name} agent={agent} />
       <span className={name ? "assignee-name" : "assignee-name unassigned"}>
-        {name || "Unassigned"}
+        {label || "Unassigned"}
       </span>
       {agent && <span className="kind-tag">Agent</span>}
     </span>
@@ -58,23 +50,117 @@ function PriorityMark({ task }: { task: Task }) {
   );
 }
 
+/** Signal bars, filled up to the priority level, as on Linear cards. */
+function PriorityBars({ task }: { task: Task }) {
+  const level = priorities.findIndex((p) => p.id === task.priority) + 1;
+  const title = `${priorities[level - 1]?.title} priority`;
+  return (
+    <span className={`card-chip priority-chip ${task.priority}`} title={title}>
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+        {[4, 7, 10].map((h, i) => (
+          <rect
+            key={h}
+            x={1.5 + i * 4}
+            y={12 - h}
+            width="3"
+            height={h}
+            rx="1"
+            className={i < level ? "on" : "off"}
+          />
+        ))}
+      </svg>
+      <span className="sr-only">{title}</span>
+    </span>
+  );
+}
+
+/** Progress-circle status glyph shared by column headers and cards. */
+export function StatusIcon({ status, size = 14 }: { status: Status; size?: number }) {
+  const color = columns.find((c) => c.id === status)?.color;
+  const fill = { backlog: 0, in_progress: 0.5, in_review: 0.75, done: 1 }[status];
+  // A circle of radius 2.5 stroked 5 wide paints a pie slice via its dash.
+  const pie = 2 * Math.PI * 2.5;
+  return (
+    <svg
+      className="status-icon"
+      width={size}
+      height={size}
+      viewBox="0 0 14 14"
+      fill="none"
+      aria-hidden="true"
+      style={{ color }}
+    >
+      {status === "done" ? (
+        <>
+          <circle cx="7" cy="7" r="6.5" fill="currentColor" />
+          <path
+            d="m4.4 7.2 1.8 1.8 3.5-3.7"
+            stroke="var(--bg)"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </>
+      ) : (
+        <>
+          <circle
+            cx="7"
+            cy="7"
+            r="5.75"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeDasharray={status === "backlog" ? "1.4 1.6" : undefined}
+          />
+          {fill > 0 && (
+            <circle
+              cx="7"
+              cy="7"
+              r="2.5"
+              stroke="currentColor"
+              strokeWidth="5"
+              strokeDasharray={`${pie * fill} ${pie}`}
+              transform="rotate(-90 7 7)"
+            />
+          )}
+        </>
+      )}
+    </svg>
+  );
+}
+
+const shortDate = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+});
+
+function updatedLabel(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : `Updated ${shortDate.format(date)}`;
+}
+
 export function Label({ label }: { label: string }) {
   if (!label) return null;
-  return <span className={`label tone-${labelTone(label)}`}>{label}</span>;
+  return (
+    <span className="label">
+      <span className={`label-dot tone-${labelTone(label)}`} aria-hidden="true" />
+      {label}
+    </span>
+  );
 }
 
 export function ClaimChip({ task }: { task: Task }) {
   const lease = activeLease(task);
+  const holder = usePersonName(lease?.actor ?? "");
   if (!lease) return null;
   const expiry = formatUtcTimestamp(lease.expiresAt);
   return (
     <span
       className="claim-chip"
-      title={`Claimed by ${lease.actor} until ${expiry}`}
+      title={`Claimed by ${holder} until ${expiry}`}
     >
       <Icon name="lock" size={12} />
       <span>
-        Claimed by {lease.actor} · expires {expiry}
+        Claimed by {holder} · expires {expiry}
       </span>
     </span>
   );
@@ -119,6 +205,8 @@ export function StatusSelect({
 type BoardProps = {
   tasks: Task[];
   agents: Set<string>;
+  /** Show each task's epic. Omitted inside an epic, where it is implied. */
+  epics?: ReadonlyMap<string, Epic>;
   onOpen: (t: Task) => void;
   onMove?: (t: Task, s: Status) => void;
   onNew?: () => void;
@@ -130,6 +218,7 @@ type BoardProps = {
 export function TaskCard({
   task,
   agents,
+  epics,
   onOpen,
   onMove,
   pending,
@@ -139,11 +228,14 @@ export function TaskCard({
   pending?: Status;
 }) {
   const commentLabel = `${task.commentCount} ${task.commentCount === 1 ? "comment" : "comments"}`;
+  const assigneeName = usePersonName(task.assignee);
+  const agent = agents.has(task.assignee);
   const signal = task.standup?.blocker
     ? "has-blocker"
     : task.standup?.highlight
       ? "has-highlight"
       : "";
+  const updated = updatedLabel(task.updatedAt);
   return (
     <article
       className={`task-card ${signal} ${pending ? "is-pending" : ""}`}
@@ -156,16 +248,22 @@ export function TaskCard({
     >
       <div className="card-top">
         <span className="task-id">{task.id}</span>
-        {task.status === "done" ? (
-          <span className="done-check" title="Done">
-            <Icon name="check" size={12} />
-            <span className="sr-only">Done</span>
+        <span
+          className="card-assignee"
+          title={
+            task.assignee
+              ? `Assigned to ${assigneeName}${agent ? " (agent)" : ""}`
+              : "Unassigned"
+          }
+        >
+          <Avatar name={task.assignee} agent={agent} />
+          <span className="sr-only">
+            {task.assignee ? `Assigned to ${assigneeName}` : "Unassigned"}
           </span>
-        ) : (
-          <PriorityMark task={task} />
-        )}
+        </span>
       </div>
       <h3 className="task-title">
+        <StatusIcon status={pending ?? task.status} />
         <button
           type="button"
           className="card-open"
@@ -175,8 +273,11 @@ export function TaskCard({
           {task.title}
         </button>
       </h3>
-      <div className="task-labels">
+      <div className="card-props">
+        <PriorityBars task={task} />
+        {task.epic && <EpicTag epic={epics?.get(task.epic)} />}
         {task.labels.map((label) => <Label key={label} label={label} />)}
+        <ClaimChip task={task} />
       </div>
       {task.standup?.blocker && (
         <div className="task-signal blocker">
@@ -191,15 +292,20 @@ export function TaskCard({
         </div>
       )}
       <div className="card-bottom">
-        <Assignee name={task.assignee} agent={agents.has(task.assignee)} />
-        <span className="comment-count" aria-hidden="true">
-          {commentLabel}
-        </span>
+        {updated && <span className="card-date">{updated}</span>}
+        {task.commentCount > 0 && (
+          <span className="comment-count" title={commentLabel}>
+            <Icon name="comment" size={13} />
+            <span aria-hidden="true">{task.commentCount}</span>
+            <span className="sr-only">
+              {task.commentCount === 1 ? " comment" : " comments"}
+            </span>
+          </span>
+        )}
+        {onMove && !presentation && (
+          <StatusSelect task={task} pending={pending} onMove={onMove} />
+        )}
       </div>
-      <ClaimChip task={task} />
-      {onMove && !presentation && (
-        <StatusSelect task={task} pending={pending} onMove={onMove} />
-      )}
     </article>
   );
 }
@@ -207,6 +313,7 @@ export function TaskCard({
 export function Board({
   tasks,
   agents,
+  epics,
   onOpen,
   onMove,
   onNew,
@@ -228,7 +335,7 @@ export function Board({
           <thead>
             <tr>
               <th scope="col">Task</th>
-              <th scope="col">Comments</th>
+              {epics && <th scope="col">Epic</th>}
               <th scope="col">Status</th>
               <th scope="col">Priority</th>
               <th scope="col">Assignee</th>
@@ -248,23 +355,41 @@ export function Board({
                   >
                     {t.title}
                   </button>
+                  {t.commentCount > 0 && (
+                    <span
+                      className="comment-count"
+                      title={`${t.commentCount} ${t.commentCount === 1 ? "comment" : "comments"}`}
+                    >
+                      <Icon name="comment" size={13} />
+                      <span aria-hidden="true">{t.commentCount}</span>
+                      <span className="sr-only">
+                        {t.commentCount === 1 ? " comment" : " comments"}
+                      </span>
+                    </span>
+                  )}
                   <ClaimChip task={t} />
                 </td>
-                <td
-                  data-label="Comments"
-                  aria-label={`${t.commentCount} ${t.commentCount === 1 ? "comment" : "comments"}`}
-                >
-                  {t.commentCount}
-                </td>
+                {epics && (
+                  <td data-label="Epic">
+                    {t.epic ? (
+                      <EpicTag epic={epics.get(t.epic)} />
+                    ) : (
+                      <span className="small">None</span>
+                    )}
+                  </td>
+                )}
                 <td data-label="Status">
                   {onMove ? (
-                    <StatusSelect
+                    <StatusPicker
                       task={t}
                       pending={pending.get(t.id)}
                       onMove={onMove}
                     />
                   ) : (
-                    statusTitle(t.status)
+                    <span className="status-cell">
+                      <StatusIcon status={t.status} />
+                      {statusTitle(t.status)}
+                    </span>
                   )}
                 </td>
                 <td data-label="Priority">
@@ -318,7 +443,7 @@ export function Board({
             }}
           >
             <header>
-              <span className="status-dot" style={{ background: col.color }} />
+              <StatusIcon status={col.id} />
               <h2 id={`column-${col.id}`}>{col.title}</h2>
               <span className="count" aria-label={`${cards.length} tasks`}>
                 {cards.length}
@@ -341,6 +466,7 @@ export function Board({
                   key={t.id}
                   task={t}
                   agents={agents}
+                  epics={epics}
                   onOpen={onOpen}
                   onMove={canDrag ? onMove : undefined}
                   pending={pending.get(t.id)}
