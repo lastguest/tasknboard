@@ -46,6 +46,27 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
       reject(new Error("Server exited"));
     });
   });
+  assert.equal(
+    (
+      await fetch("http://127.0.0.1:14319/api/mcp-config", {
+        headers: { Authorization: `Bearer ${agentToken}` },
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await fetch("http://127.0.0.1:14319/api/mcp-config")).status,
+    401,
+  );
+  const sharedMcpResponse = await fetch(
+    "http://127.0.0.1:14319/api/mcp-config",
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  assert.equal(sharedMcpResponse.status, 200);
+  const sharedMcpStatus = await sharedMcpResponse.json();
+  assert.deepEqual(sharedMcpStatus, { mode: "shared" });
+  assert.ok(!JSON.stringify(sharedMcpStatus).includes(dbPath));
+  assert.ok(!JSON.stringify(sharedMcpStatus).includes(process.execPath));
   const post = (cmd, args = {}, bearer = token, extra = {}) =>
     fetch(`http://127.0.0.1:14319/api/${cmd}`, {
       method: "POST",
@@ -65,15 +86,22 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   const infoResponse = await post("workspace_info");
   assert.equal(infoResponse.status, 200);
   const info = await infoResponse.json();
-  assert.equal(info.schemaVersion, 6);
+  assert.equal(info.schemaVersion, 11);
+  assert.equal(info.boards[0].id, "BOARD-1");
+  assert.equal(Object.hasOwn(info, "settings"), false);
+  assert.match(
+    infoResponse.headers.get("content-security-policy") ?? "",
+    /img-src[^;]*https:\/\/gravatar\.com/,
+  );
   assert.deepEqual(info.actors, [
-    { id: "remote-agent", kind: "agent", name: "", avatar: "" },
-    { id: "reviewer", kind: "human", name: "", avatar: "" },
+    { id: "remote-agent", kind: "agent", name: "", avatar: "", useGravatar: false, gravatarUrl: "" },
+    { id: "reviewer", kind: "human", name: "", avatar: "", useGravatar: false, gravatarUrl: "" },
   ]);
   assert.ok(!JSON.stringify(info).includes(token));
   assert.ok(!JSON.stringify(info).includes(agentToken));
   let task = await (
     await post("create_task", {
+      boardId: info.boards[0].id,
       title: "Shared task",
       labels: ["Product", "UX"],
     })
@@ -164,7 +192,8 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
     413,
   );
   const backup = await (await post("export_workspace")).json();
-  assert.equal(backup.schemaVersion, 6);
+  assert.equal(backup.schemaVersion, 11);
+  assert.equal(backup.boards[0].id, "BOARD-1");
   assert.ok(backup.actors.some((actor) => actor.id === "remote-agent"));
   const databaseBytes = Buffer.concat([
     readFileSync(dbPath),

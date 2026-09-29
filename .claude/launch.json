@@ -71,6 +71,69 @@
         "PORT": "4313",
         "TASKNBOARD_DB": "/private/tmp/claude-501/-Users-lastguest-Projects-tasknboard/a9bab6cd-3523-472a-a61f-f3cf9842976e/scratchpad/epics.sqlite"
       }
+    },
+    {
+      "name": "pulls-github",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-lastguest-Projects-tasknboard/88e92f00-9930-41d2-941e-6d10b9bcaf9f/scratchpad/fake-github.mjs"
+      ],
+      "port": 4399,
+      "autoPort": false
+    },
+    {
+      "name": "pulls-api",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "server/http.mjs"
+      ],
+      "port": 4321,
+      "autoPort": false,
+      "env": {
+        "PORT": "4321",
+        "TASKNBOARD_DB": "/private/tmp/claude-501/-Users-lastguest-Projects-tasknboard/88e92f00-9930-41d2-941e-6d10b9bcaf9f/scratchpad/pulls.sqlite",
+        "TASKNBOARD_GITHUB_API": "http://127.0.0.1:4399",
+        "TASKNBOARD_ALLOWED_HOSTS": "127.0.0.1:4321,localhost:4321,127.0.0.1:5181,localhost:5181"
+      }
+    },
+    {
+      "name": "pulls-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--config",
+        "/private/tmp/claude-501/-Users-lastguest-Projects-tasknboard/88e92f00-9930-41d2-941e-6d10b9bcaf9f/scratchpad/vite.pulls.mjs"
+      ],
+      "port": 5181,
+      "autoPort": false
+    },
+    {
+      "name": "views-api",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "server/http.mjs"
+      ],
+      "port": 4316,
+      "autoPort": false,
+      "env": {
+        "PORT": "4316",
+        "TASKNBOARD_DB": "/private/tmp/claude-501/-Users-lastguest-Projects-tasknboard/2d116ad0-2a32-4951-b1f9-eceb01509ef5/scratchpad/views.sqlite"
+      }
+    },
+    {
+      "name": "keys-api",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "server/http.mjs"
+      ],
+      "port": 4314,
+      "autoPort": false,
+      "env": {
+        "PORT": "4314",
+        "TASKNBOARD_DB": "/private/tmp/claude-501/-Users-lastguest-Projects-tasknboard/d06fd91c-f8f8-4588-babb-2f7342a2a3f7/scratchpad/keys.sqlite"
+      }
     }
   ]
 }

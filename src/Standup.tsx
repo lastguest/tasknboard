@@ -3,7 +3,7 @@ import { Assignee, Board } from "./Board";
 import { Dialog, ErrorNote } from "./Dialogs";
 import { Icon } from "./Icons";
 import { Markdown } from "./Markdown";
-import { ApiError, command, errorOf } from "./api";
+import { ApiError, command, errorOf, taskNumber } from "./api";
 import { statusTitle, type Actor, type Task } from "./types";
 import { Avatar, displayName, usePeople } from "./People";
 
@@ -223,7 +223,7 @@ export function Standup({
           Number(Boolean(a.standup?.blocker)) ||
         Number(Boolean(b.standup?.highlight)) -
           Number(Boolean(a.standup?.highlight)) ||
-        Number(a.id.slice(4)) - Number(b.id.slice(4)),
+        taskNumber(a.id) - taskNumber(b.id),
     );
 
   // Relative moves use the latest index, so fast key repeats are not lost.

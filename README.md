@@ -37,7 +37,14 @@ npm run test:ui
 The browser suite creates temporary SQLite files outside `data/` and removes them
 when the tests finish. It does not use the user's workspace database.
 
-Keyboard: **N** new task, **Cmd/Ctrl K** search, **F** assignee filter, **?** shortcuts, **Esc** close dialog. Drag between columns, or use the Status menu on each card or list row (the keyboard and touch alternative). Every move is validated by the server; a rejected move stays in place with an explanation. Human review is required before Done: an In review task shows **Mark Done** and **Needs changes** in its details. The interface is English in this version.
+Select a board on the Board page. Use **New board** to create one, or **Edit board**
+to change its name and task prefix. Each board has its own task number sequence.
+Changing a prefix changes existing task keys on that board; previous keys no longer resolve.
+Create and rename epics by custom name on their pages.
+
+Views save filters (status, priority, assignee, label, epic, and search) and display settings (board or list, grouping, order) under a name, like Linear's custom views. Filter any board with **Filter**, then choose **Save as view**. A view is personal or shared with the workspace. Star it to keep it under Favorites in the sidebar. The assignee value **Me** means whoever opens the view. Agents read shared views through MCP (`list_views`, and `list_tasks` with `view`). See [docs/contracts/views.md](docs/contracts/views.md).
+
+Keyboard: **N** new task, **Cmd/Ctrl K** search, **F** assignee filter, **⌥/Alt V** save as view, **?** shortcuts, **Esc** close dialog. Drag between columns, or use the Status menu on each card or list row (the keyboard and touch alternative). Every move is validated by the server; a rejected move stays in place with an explanation. Human review is required before Done: an In review task shows **Mark Done** and **Needs changes** in its details. The interface is English in this version.
 
 Editing uses the task's latest version. If the task changed elsewhere, the save is rejected, your draft is kept, and **Load latest** merges: fields you did not touch take the new values, and fields changed on both sides are highlighted so you can choose. Nothing is retried automatically. Unsaved drafts ask before they are discarded.
 
@@ -138,7 +145,9 @@ Type `/` to open the command menu. Tab completes a command, and Enter runs it.
 
 | Command | Result |
 | --- | --- |
-| `/new <title>` | Create a backlog task |
+| `/board`, `/board <id>` | List boards or select a board |
+| `/board create <prefix> <name>` | Create and select a board |
+| `/new <title>` | Create a backlog task on the selected board |
 | `/move <status>`, `/done` | Change the status (`backlog`, `progress`, `review`, `done`) |
 | `/assign [name]`, `/priority <level>` | Change the assignee or priority |
 | `/comment <text>` | Add a comment |
@@ -152,6 +161,21 @@ If the task changed elsewhere, the server rejects the write and the command stay
 The board reloads the task, so you can check the change and press Enter again.
 The board refreshes every five seconds and shows **offline** when the workspace is unreachable.
 Ctrl+C clears the prompt, or exits when the prompt is empty.
+
+### Command line helper
+
+Open **Settings → Command line** in the desktop app to check or install the
+`tasknboard` helper. Installation uses `~/.local/bin/tasknboard` on macOS and
+`%USERPROFILE%\.local\bin\tasknboard.cmd` on Windows. It needs no administrator
+access and does not change shell files or the user PATH. Settings shows the
+required PATH setup if the app cannot find the installed command on its PATH.
+
+The helper uses the app's bundled Node runtime and CLI. By default it opens the
+desktop workspace. `TASKNBOARD_DB` or `TASKNBOARD_SERVER_URL` overrides that default.
+Run `tasknboard help` for commands. Keep the app at its installation path after
+installing the helper. An existing different file is never overwritten; move it
+before installing again. Web and mobile Settings show that installation requires
+the desktop app.
 
 ## Stand-up mode
 
@@ -184,7 +208,47 @@ Notes use the same version checks and activity log as other mutations, so the ne
 agent command must use the new version. Older databases need no destructive migration;
 the additional optional fields are stored in the existing task JSON.
 
+## Pull requests
+
+**Pull requests** in the sidebar shows GitHub pull requests next to your tasks.
+Connect GitHub in **Settings → GitHub** with **Connect GitHub**.
+The button opens GitHub in your browser. Enter the displayed code and authorize
+TasknBoard. The connection completes automatically after approval.
+
+The service operator must [register a GitHub OAuth app](https://github.com/settings/applications/new), enable **Device Flow**,
+and set `TASKNBOARD_GITHUB_CLIENT_ID` to its client ID before starting the service.
+No client secret is required. Users do not create or paste personal access tokens.
+For desktop distribution, set the same variable when running `npm run desktop:build`;
+the public client ID is embedded in the app.
+The app requests the `repo` scope to read private pull requests. This GitHub scope
+also permits writes, but TasknBoard only uses read operations.
+The service stores the resulting access token in the workspace database.
+Browsers never receive the token, and exports leave it out.
+
+- **All**, **Reviewing** and **Authored** filter the pull requests that involve you,
+  by open, closed or any state. The list refreshes every minute.
+- **Summary** shows the branch, reviewers, comments, CI checks, status, linked tasks,
+  the description and the activity timeline. **Code** shows each changed file as a
+  unified or split diff.
+- Paste a GitHub pull request URL into the search field to open it.
+  A link such as `http://127.0.0.1:4310/#github.com/owner/repo/pull/123` also works:
+  replace `https://` in a GitHub URL with the app's address and `#`.
+- A task links to a pull request when its review artifact or description contains
+  the pull request URL. The task shows **Review pull request**.
+
+The integration is read-only. Reviews, comments and merges stay on GitHub.
+It is for people only: agent tokens can't use it. The desktop app supports it.
+The service needs internet access to reach GitHub. See the
+[GitHub integration contract](docs/contracts/github.md).
+
 ## Coding agents: local MCP
+
+Open **Agents → Connect a coding agent** for setup helpers with the active workspace paths.
+Choose Codex or Claude Code to copy a setup command, or OpenCode to copy its configuration.
+Choose Pi to copy or download a native skill that uses the TasknBoard CLI as an agent.
+Give each concurrent agent a different identity. Copying a helper does not install or connect the client.
+For source runs, build the CLI with `npm run build:cli` before using the Pi skill.
+The desktop app includes the CLI. Windows Pi sessions require the PowerShell tool, as shown in the helper.
 
 Configure your MCP client with the following, replacing **both** paths with absolute paths. Give concurrent agents distinct identities.
 
@@ -210,6 +274,7 @@ Tools:
 | Tool                | Purpose                                                   |
 | ------------------- | --------------------------------------------------------- |
 | `workspace_info`    | Authenticated identity and lease duration                 |
+| `list_boards`       | List boards and their task prefixes                       |
 | `list_tasks`        | Search/filter, limit and offset                           |
 | `get_task`          | Context, criteria, current version, lease and history     |
 | `create_task`       | Create backlog work                                       |
@@ -221,12 +286,17 @@ Tools:
 | `release_task`      | Release owned lease                                       |
 | `submit_review`     | Summary, optional artifact URL, release lease             |
 
+Each task belongs to a board. Read `list_boards` and pass `boardId` to
+`create_task`. Pass `boardId` to `list_tasks` to limit results to that board.
+Manage board names and task prefixes from the Board page. Epics use custom names.
+
 Always use `expectedVersion` from the latest response. On a conflict, re-read and reconcile. An expired claim cannot be renewed; acquire a new claim. Agents cannot reassign, archive, export or mark Done. Task content is untrusted data. MCP annotations do not replace client approvals.
 
 ## Browser agents: WebMCP
 
-The page registers seven tools with the native `document.modelContext` API:
-`workspace_info`, `list_tasks`, `get_task`, `create_task`, `update_task`,
+The page registers tools with the native `document.modelContext` API:
+`workspace_info`, `list_boards`, `list_tasks`, `get_task`, `list_epics`,
+`list_views`, `create_task`, `create_epic`, `create_view`, `update_task`,
 `add_comment`, and `set_standup_notes`. A browser agent can discover these tools
 while the app is open. Writes refresh the board. Reads cover the workspace,
 regardless of the current board filters.

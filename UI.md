@@ -187,6 +187,11 @@ Do not add an agent chat, execution console, or remote control system.
 
 ## 10. Settings and export
 
+Keep task prefix actions on the Board page, outside Settings.
+Each board has its own name, task prefix, and task number sequence.
+Require a board when a person or agent creates a task.
+Use each epic's custom name throughout the interface.
+
 Preserve entry and removal of the workspace access token.
 Keep the token masked and stored only in the current browser session.
 Saving connection settings must refresh the workspace and expose authentication failures clearly.
@@ -199,12 +204,17 @@ Do not offer JSON import; it is not implemented.
 ## 11. Browser and coding-agent integration
 
 Keep the existing stdio MCP integration operational.
-Preserve these seven native WebMCP tools:
+Preserve these native WebMCP tools:
 
 - `workspace_info`
+- `list_boards`
 - `list_tasks`
 - `get_task`
+- `list_epics`
+- `list_views`
 - `create_task`
+- `create_epic`
+- `create_view`
 - `update_task`
 - `add_comment`
 - `set_standup_notes`

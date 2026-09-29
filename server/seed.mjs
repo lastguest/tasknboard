@@ -2,6 +2,7 @@ import { createStore } from "./store.mjs";
 import { dbPath } from "./config.mjs";
 const store = createStore(dbPath),
   actor = { id: "you", kind: "human" };
+const boardId = store.execute("list_boards", {}, actor).boards[0].id;
 if (store.execute("list_tasks", {}, actor).total)
   throw new Error("Demo seed only works on an empty workspace");
 store.registerActors([
@@ -42,6 +43,7 @@ for (const [title, label, priority, assignee, status, epic] of samples) {
   let task = store.execute(
     "create_task",
     {
+      boardId,
       title,
       labels: [label],
       priority,

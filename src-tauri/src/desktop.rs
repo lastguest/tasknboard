@@ -70,11 +70,21 @@ fn start_service(app: &tauri::App) -> Result<(Service, tauri::Url), Box<dyn std:
         .env("HOST", "127.0.0.1")
         .env("PORT", "0")
         .env("TASKNBOARD_DESKTOP", "1")
+        .env("TASKNBOARD_USER_HOME", app.path().home_dir()?)
+        .env("TASKNBOARD_RESOURCES", &resources)
+        .env("PATH", env::var_os("PATH").unwrap_or_default())
         .env("TASKNBOARD_DB", data.join("tasknboard.sqlite"))
         .env("TASKNBOARD_STATIC_DIR", resources.join("dist"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // The public OAuth client ID can be embedded when packaging the desktop app.
+    if let Some(client_id) = env::var("TASKNBOARD_GITHUB_CLIENT_ID")
+        .ok()
+        .or_else(|| option_env!("TASKNBOARD_GITHUB_CLIENT_ID").map(str::to_owned))
+    {
+        command.env("TASKNBOARD_GITHUB_CLIENT_ID", client_id);
+    }
     #[cfg(windows)]
     {
         let system_root = env::var_os("SystemRoot")

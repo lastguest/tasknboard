@@ -3,9 +3,13 @@ import { columns, priorities, statusTitle } from "../src/types.ts";
 
 export type Request = { name: string; args: Record<string, unknown> };
 
+export type CommandContext = { boardId?: string };
+
 /** What a slash command asks the interface to do. */
 export type Action =
-  | { kind: "request"; request: Request; message: (task: Task) => string }
+  | { kind: "request"; request: Request; message: (result: { id: string }) => string }
+  | { kind: "boards" }
+  | { kind: "select-board"; boardId: string }
   | { kind: "mine" }
   | { kind: "refresh" }
   | { kind: "help" }
@@ -15,7 +19,7 @@ export type Command = {
   name: string;
   usage: string;
   summary: string;
-  plan: (arg: string, task: Task | undefined) => Action;
+  plan: (arg: string, task: Task | undefined, context: CommandContext) => Action;
 };
 
 /** A mistake in the typed command. Nothing was sent to the workspace. */
@@ -74,17 +78,43 @@ export function findStatus(arg: string): Status {
 
 export const commands: Command[] = [
   {
+    name: "board",
+    usage: "/board [id | create <prefix> <name>]",
+    summary: "List boards, select one, or create a board",
+    plan: (arg, _task, context) => {
+      if (!arg) return { kind: "boards" };
+      const create = /^create\s+(\S+)\s+([\s\S]+)$/i.exec(arg);
+      if (create) {
+        const [, prefix, name] = create;
+        return {
+          kind: "request",
+          request: { name: "create_board", args: { name: name.trim(), prefix } },
+          message: (board) => `Created board ${board.id}.`,
+        };
+      }
+      return {
+        kind: "select-board",
+        boardId: required(arg, "/board <id>").toUpperCase(),
+      };
+    },
+  },
+  {
     name: "new",
     usage: "/new <title>",
-    summary: "Create a backlog task",
-    plan: (arg) => ({
-      kind: "request",
-      request: {
-        name: "create_task",
-        args: { title: required(arg, "/new <title>") },
-      },
-      message: (task) => `Created ${task.id}.`,
-    }),
+    summary: "Create a backlog task on the selected board",
+    plan: (arg, _task, context) => {
+      const title = required(arg, "/new <title>");
+      if (!context.boardId)
+        throw new UsageError("Select a board first with /board <id>.");
+      return {
+        kind: "request",
+        request: {
+          name: "create_task",
+          args: { boardId: context.boardId, title },
+        },
+        message: (task) => `Created ${task.id}.`,
+      };
+    },
   },
   {
     name: "move",
@@ -228,7 +258,11 @@ export function matchCommands(input: string): Command[] {
 }
 
 /** Turns one line of input into an action. Throws UsageError on mistakes. */
-export function planInput(input: string, task: Task | undefined): Action {
+export function planInput(
+  input: string,
+  task: Task | undefined,
+  context: CommandContext = {},
+): Action {
   const [, name = "", arg = ""] =
     /^\/(\S*)\s*([\s\S]*)$/.exec(input.trim()) ?? [];
   const command =
@@ -237,5 +271,5 @@ export function planInput(input: string, task: Task | undefined): Action {
       ? commands.find((c) => c.name === "quit")
       : undefined);
   if (!command) throw new UsageError(`Unknown command /${name}. Type /help.`);
-  return command.plan(arg.trim(), task);
+  return command.plan(arg.trim(), task, context);
 }

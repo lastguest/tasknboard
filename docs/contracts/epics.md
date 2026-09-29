@@ -1,11 +1,13 @@
 # Epics contract
 
 An epic is a project: a named folder of tasks. A task belongs to at most one epic.
+The interface identifies each epic by its custom name. Create or change that
+name on the epic page. Internal IDs connect records; they are not epic names.
 
 ## Records
 
 An epic is `{ id, title, description, color, version, archived, createdAt, updatedAt, counts }`.
-IDs are `EPIC-<n>`, allocated like task numbers and never reused. `title` is
+Internal IDs are allocated once and never reused. `title` is
 1–120 characters after trimming. `description` is Markdown, up to 20,000
 characters, rendered with the same rules as task descriptions. `color` is a
 palette name (`aurora`, `lagoon`, `cobalt`, `iris`, `orchid`, `flamingo`,
@@ -45,8 +47,15 @@ needs the task's version and respects another actor's active lease.
 Migration 6 adds an `epics` table and sets `epic: ""` on existing tasks without
 changing their versions or activity. Epic writes append events (`created`,
 `update_epic`, `archive_epic`) whose subject ID is the epic ID. Task activity
-never includes them. `workspace_info` and `export_workspace` report
-`schemaVersion: 6`, and the export includes every epic, including archived ones.
+never includes them. `workspace_info` and `export_workspace` reported
+`schemaVersion: 6` (7 since [views](views.md)), and the export includes every
+epic, including archived ones.
 
 MCP exposes `list_epics` to agents. WebMCP exposes `list_epics` and
 `create_epic` to the signed-in browser user.
+
+## Names and internal IDs
+
+Create or edit an epic on its page. The interface displays its custom name.
+Internal epic IDs connect tasks and saved filters. The interface has no epic
+prefix setting. Task prefixes belong to [boards](boards.md).

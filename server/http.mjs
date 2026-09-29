@@ -1,8 +1,11 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
 import { createStore } from "./store.mjs";
+import { createCliHelper } from "./cli-helper.mjs";
+import { createGitHub } from "./github.mjs";
 import { imageDataUrlLimit } from "./domain.mjs";
 import { dbPath, localActor, tokensFromEnvironment } from "./config.mjs";
 const host = process.env.HOST || "127.0.0.1",
@@ -16,6 +19,16 @@ if (
   throw new Error("Remote binding requires TASKNBOARD_TOKENS");
 const store = createStore(dbPath),
   root = resolve(process.env.TASKNBOARD_STATIC_DIR || "dist");
+const mcpEntry =
+  desktop && process.env.TASKNBOARD_RESOURCES
+    ? resolve(process.env.TASKNBOARD_RESOURCES, "mcp.mjs")
+    : fileURLToPath(new URL("./mcp.mjs", import.meta.url));
+const cliEntry =
+  desktop && process.env.TASKNBOARD_RESOURCES
+    ? resolve(process.env.TASKNBOARD_RESOURCES, "cli.mjs")
+    : fileURLToPath(new URL("../dist-cli/tasknboard.mjs", import.meta.url));
+const github = createGitHub(store);
+const cliHelper = createCliHelper();
 store.registerActors(
   Object.keys(tokens).length ? Object.values(tokens) : [localActor],
 );
@@ -32,7 +45,7 @@ const server = createServer(async (req, res) => {
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'",
+      "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com https://gravatar.com; frame-ancestors 'none'",
     );
     const requestHost = req.headers.host || "";
     const allowedHosts = (
@@ -72,6 +85,56 @@ const server = createServer(async (req, res) => {
         }
         actor = tokens[key];
       }
+      if (url.pathname === "/api/cli-helper") {
+        if (actor.kind !== "human") {
+          json(res, 403, { code: "FORBIDDEN", message: "Only a person can manage the CLI helper." });
+        } else if (req.method === "GET") {
+          json(res, 200, await cliHelper.status());
+        } else if (req.method === "POST") {
+          json(res, 200, await cliHelper.install());
+        } else {
+          json(res, 405, { message: "Use GET or POST" });
+        }
+        return;
+      }
+      if (url.pathname === "/api/mcp-config") {
+        if (req.method !== "GET") {
+          json(res, 405, { message: "Use GET" });
+        } else if (actor.kind !== "human") {
+          json(res, 403, {
+            code: "FORBIDDEN",
+            message: "Only a person can view MCP configuration.",
+          });
+        } else if (Object.keys(tokens).length) {
+          json(res, 200, { mode: "shared" });
+        } else {
+          json(res, 200, {
+            mode: "local",
+            platform: process.platform,
+            config: {
+              mcpServers: {
+                tasknboard: {
+                  command: process.execPath,
+                  args: [mcpEntry],
+                  env: {
+                    TASKNBOARD_DB: dbPath,
+                    TASKNBOARD_AGENT_ID: "codex",
+                  },
+                },
+              },
+            },
+            cli: {
+              command: process.execPath,
+              args: [cliEntry],
+              env: {
+                TASKNBOARD_DB: dbPath,
+                TASKNBOARD_AGENT_ID: "pi",
+              },
+            },
+          });
+        }
+        return;
+      }
       if (req.method !== "POST") {
         json(res, 405, { message: "Use POST" });
         return;
@@ -98,7 +161,10 @@ const server = createServer(async (req, res) => {
         json(res, 400, { message: "Invalid JSON" });
         return;
       }
-      json(res, 200, store.execute(url.pathname.slice(5), args, actor));
+      const name = url.pathname.slice(5);
+      // GitHub commands call out to GitHub, so they run outside the store.
+      const result = await github.execute(name, args, actor);
+      json(res, 200, result ?? store.execute(name, args, actor));
       return;
     }
     if (!["GET", "HEAD"].includes(req.method)) {

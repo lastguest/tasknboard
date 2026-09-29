@@ -8,7 +8,8 @@ React/Vite → HTTP adapter → commands + domain validation → SQLite.
 MCP stdio → same commands locally OR authenticated HTTP commands remotely.
 No business rules in React or MCP. Node 24 SQLite, WAL, versioned migrations,
 transactional writes, per-task optimistic concurrency, auditable events.
-One workspace per database/server. No external AI service, Redis or ORM.
+One workspace per database/server, with separate boards. Each board owns a task
+prefix and number sequence. Each task belongs to one board. No external AI service, Redis or ORM.
 
 ## Persistence modes
 
@@ -91,6 +92,23 @@ The [epics contract](contracts/epics.md) groups tasks into projects. A task has
 at most one epic. Epic counts are derived from tasks when read. Only humans
 manage epics, and an epic with open work cannot be archived.
 
+## Views
+
+The [views contract](contracts/views.md) saves task filters and display
+settings under a name. `server/views.mjs` holds the only matching and ordering
+rules. The store applies them in `list_tasks({ view })`, and the interface
+applies them to the live board, so both agree. Workspace views are shared.
+Personal views exist only for their owner. Stars are per person and are not
+versioned.
+
 The UI loads WebMCP validation only when the browser exposes
 `document.modelContext`. Ordinary browsers do not download that chunk. Polling
 pauses while the document is hidden and resumes with an immediate refresh.
+
+## GitHub pull requests
+
+The [GitHub integration contract](contracts/github.md) describes the read-only
+Pull requests section. `server/github.mjs` calls GitHub from the service.
+The browser never holds the GitHub token. These commands are asynchronous and
+are separate from the synchronous store. They use no task version or event.
+The store only saves the token in its internal `settings` table.

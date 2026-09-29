@@ -25,13 +25,18 @@ type Command = (
 
 const tools = [
   [
+    "list_boards",
+    "List boards and their task prefixes. Use a board ID to create tasks or filter task lists.",
+    true,
+  ],
+  [
     "workspace_info",
     "Read the current workspace and authenticated browser session identity.",
     true,
   ],
   [
     "list_tasks",
-    "Search workspace tasks, including tasks outside the visible board filters. Use limit and offset to page through all results.",
+    "Search workspace tasks. Pass boardId to select one board; omit it to search all boards. Use limit and offset to page through all results.",
     true,
   ],
   [
@@ -45,13 +50,23 @@ const tools = [
     true,
   ],
   [
+    "list_views",
+    "List the user's saved views: named task filters (shared with the workspace, or personal). Pass a view ID to list_tasks for its tasks.",
+    true,
+  ],
+  [
     "create_task",
-    "Create a backlog task in the active workspace for the user, optionally inside an epic.",
+    "Create a backlog task on the explicit boardId from list_boards, optionally inside an epic.",
     false,
   ],
   [
     "create_epic",
     "Create an epic: a project that groups related tasks. Give it a title and optional Markdown description.",
+    false,
+  ],
+  [
+    "create_view",
+    "Save a view: a named set of task filters (conditions on status, priority, assignee, label, epic; assignee \"@me\" means the viewer) with display settings. Personal unless shared is true.",
     false,
   ],
   [

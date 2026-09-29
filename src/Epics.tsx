@@ -94,7 +94,6 @@ export function EpicsPage({
                     style={epicStyle(epic)}
                     aria-hidden="true"
                   />
-                  <span className="task-id">{epic.id}</span>
                   <span className="epic-open-count">{open} open</span>
                 </div>
                 <h2>
@@ -186,16 +185,21 @@ const epicErrors: Record<string, string> = {
   ARCHIVED: "This epic has been archived. Nothing was saved.",
 };
 
-/** Create or edit an epic. Only people manage epics; the server enforces it. */
 /** Palette swatches plus a custom colour, as one radio group. */
-function ColorField({
+export function ColorField({
   value,
   title,
   onChange,
+  name = "epic-color",
+  preview,
 }: {
   value: string;
   title: string;
   onChange: (color: string) => void;
+  /** The radio group's name, unique per form. */
+  name?: string;
+  /** Replaces the epic tag preview. */
+  preview?: React.ReactNode;
 }) {
   const custom = value.startsWith("#");
   const hex = epicColor({ color: value });
@@ -212,7 +216,7 @@ function ColorField({
           >
             <input
               type="radio"
-              name="epic-color"
+              name={name}
               checked={value === swatch.id}
               onChange={() => onChange(swatch.id)}
             />
@@ -235,7 +239,7 @@ function ColorField({
         </label>
       </div>
       <span className="epic-color-preview">
-        <EpicTag
+        {preview ?? <EpicTag
           epic={{
             id: "",
             title: title.trim() || "Epic preview",
@@ -247,7 +251,7 @@ function ColorField({
             updatedAt: "",
             counts: { backlog: 0, in_progress: 0, in_review: 0, done: 0 },
           }}
-        />
+        />}
         <span className="small">
           {custom
             ? `Custom ${hex}`
@@ -258,6 +262,7 @@ function ColorField({
   );
 }
 
+/** Create or edit an epic. Only people manage epics; the server enforces it. */
 export function EpicEditor({
   epic,
   suggestedColor,
@@ -421,9 +426,7 @@ export function EpicEditor({
     <Dialog
       title={
         base ? (
-          <>
-            <span className="task-id">{base.id}</span> Edit epic
-          </>
+          "Edit epic"
         ) : (
           "New epic"
         )
@@ -434,7 +437,7 @@ export function EpicEditor({
     >
       <form id="epic-form" className="task-form" onSubmit={save} noValidate>
         <label className="field">
-          <span className="field-label">Title</span>
+          <span className="field-label">Name</span>
           <input
             className="title-input"
             data-autofocus=""
@@ -482,7 +485,7 @@ export function EpicEditor({
               aria-label="Confirm archive"
             >
               <p>
-                Archive {base.id}? It leaves the sidebar and Epics page. Done
+                Archive {base.title}? It leaves the sidebar and Epics page. Done
                 tasks keep it, and it stays in the JSON export. Epics with open
                 tasks can't be archived.
               </p>

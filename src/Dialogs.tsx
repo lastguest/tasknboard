@@ -18,8 +18,10 @@ import { ApiError, command, errorOf, token } from "./api";
 import { formatUtcTimestamp } from "./formatting";
 import { Assignee, Label, StatusIcon } from "./Board";
 import { Icon } from "./Icons";
+import { CliHelper } from "./CliHelper";
 import { MarkdownEditor } from "./Markdown";
 import { EpicTag } from "./Epics";
+import { GitHubSettings, parsePullRef, pullHash } from "./PullRequests";
 import {
   Avatar,
   displayName,
@@ -528,6 +530,8 @@ type Pending = null | "save" | "comment" | "review" | "archive" | "reload";
 
 export function TaskEditor({
   task,
+  boardName,
+  boardId,
   actor,
   agents,
   actors,
@@ -543,6 +547,8 @@ export function TaskEditor({
   onArchived,
 }: {
   task: Task | null;
+  boardName: string;
+  boardId: string;
   actor: Actor;
   agents: Set<string>;
   actors: Actor[];
@@ -622,7 +628,7 @@ export function TaskEditor({
     label: priority.title,
   }));
   const epicsById = new Map(epics.map((epic) => [epic.id, epic]));
-  const epicTitle = (id: string) => epicsById.get(id)?.title ?? id;
+  const epicTitle = (id: string) => epicsById.get(id)?.title ?? "Unavailable epic";
   // Archived epics cannot take new tasks; the current one stays listed.
   const epicOptions: ChoiceOption[] = [
     { value: "", label: "No epic" },
@@ -636,7 +642,7 @@ export function TaskEditor({
       .map((epic) => ({
         value: epic.id,
         label: epic.title,
-        detail: epic.archived ? `${epic.id} · Archived` : epic.id,
+        detail: epic.archived ? "Archived" : undefined,
         disabled: epic.archived && epic.id !== current?.epic,
         icon: (
           <span
@@ -749,6 +755,7 @@ export function TaskEditor({
         onSaved(saved);
       } else {
         const args: Record<string, unknown> = {
+          boardId,
           title: draft.title,
           priority: draft.priority,
           labels: draft.labels.map((label) => label.trim()).filter(Boolean),
@@ -924,7 +931,8 @@ export function TaskEditor({
         >
           {!current && (
             <p className="small form-intro">
-              New tasks start in <strong>Backlog</strong>.
+              This task will be created on <strong>{boardName}</strong> in{" "}
+              <strong>Backlog</strong>.
             </p>
           )}
           {stale && !pending && (
@@ -1209,6 +1217,16 @@ export function TaskEditor({
                     Submitted by <PersonName id={current.review.actor} />
                   </p>
                   <p className="review-summary">{current.review.summary}</p>
+                  {artifact && parsePullRef(artifact) && (
+                    <a
+                      className="artifact-link"
+                      href={pullHash(parsePullRef(artifact)!)}
+                      // The board shows the pull request once this dialog closes.
+                      onClick={requestClose}
+                    >
+                      <Icon name="pull" size={13} /> Review pull request
+                    </a>
+                  )}
                   {artifact ? (
                     <a
                       className="artifact-link"
@@ -1511,17 +1529,19 @@ function Field({
 export function Settings({
   actor,
   connected,
+  initialPage,
   onClose,
   onReconnect,
 }: {
   actor: Actor;
   connected: boolean;
+  initialPage?: SettingsPage;
   onClose: () => void;
   onReconnect: () => Promise<RefreshResult>;
 }) {
-  const profileActor = usePeople().get(actor.id) ?? actor;
+  const profileActor = { ...(usePeople().get(actor.id) ?? {}), ...actor };
   const [page, setPage] = useState<SettingsPage>(
-    connected ? "profile" : "connection",
+    connected ? (initialPage ?? "profile") : "connection-data",
   );
   const [search, setSearch] = useState("");
   const tokenId = useId();
@@ -1601,18 +1621,19 @@ export function Settings({
       keywords: "name display picture photo avatar image me",
     },
     {
-      id: "connection",
-      label: "Connection",
+      id: "connection-data",
+      label: "Connection & data",
       icon: "plug",
       group: "Workspace",
-      keywords: "token access auth server sign in status",
+      keywords:
+        "token access auth server sign in status workspace export import download json backup archive activity",
     },
     {
-      id: "data",
-      label: "Data",
-      icon: "database",
-      group: "Workspace",
-      keywords: "export import download json backup archive activity",
+      id: "github",
+      label: "GitHub",
+      icon: "github",
+      group: "Integrations",
+      keywords: "github pull request pr review code diff token integration",
     },
     {
       id: "shortcuts",
@@ -1620,6 +1641,13 @@ export function Settings({
       icon: "keyboard",
       group: "App",
       keywords: shortcuts.flat().join(" "),
+    },
+    {
+      id: "cli",
+      label: "Command line",
+      icon: "screen",
+      group: "App",
+      keywords: "cli terminal helper command install tasknboard desktop",
     },
   ];
   const q = search.trim().toLowerCase();
@@ -1683,7 +1711,7 @@ export function Settings({
                 onSaved={onReconnect}
               />
             )}
-            {page === "connection" && (
+            {page === "connection-data" && (
               <>
                 <SettingsGroup title="Status">
                   <SettingsRow
@@ -1775,39 +1803,44 @@ export function Settings({
                     )}
                   </form>
                 </SettingsGroup>
+                <SettingsGroup title="Backup">
+                  <SettingsRow
+                    title="Export workspace"
+                    hint="Download all tasks, archived work, and the full activity log as JSON."
+                  >
+                    <button
+                      type="button"
+                      className="secondary small-button"
+                      onClick={exportWorkspace}
+                      disabled={exporting}
+                    >
+                      <Icon name="download" size={14} />
+                      {exporting ? "Exporting…" : "Export workspace"}
+                    </button>
+                  </SettingsRow>
+                  <SettingsRow
+                    title="Import"
+                    hint="Restoring from an export file is not available."
+                  >
+                    <span className="settings-pill off">Unavailable</span>
+                  </SettingsRow>
+                  {exported && (
+                    <p
+                      className={`settings-row-note ${exported.ok ? "small ok" : "inline-error"}`}
+                      role={exported.ok ? "status" : "alert"}
+                    >
+                      {exported.text}
+                    </p>
+                  )}
+                </SettingsGroup>
               </>
             )}
-            {page === "data" && (
-              <SettingsGroup title="Backup">
-                <SettingsRow
-                  title="Export workspace"
-                  hint="Download all tasks, archived work, and the full activity log as JSON."
-                >
-                  <button
-                    type="button"
-                    className="secondary small-button"
-                    onClick={exportWorkspace}
-                    disabled={exporting}
-                  >
-                    <Icon name="download" size={14} />
-                    {exporting ? "Exporting…" : "Export workspace"}
-                  </button>
-                </SettingsRow>
-                <SettingsRow
-                  title="Import"
-                  hint="Restoring from an export file is not available."
-                >
-                  <span className="settings-pill off">Unavailable</span>
-                </SettingsRow>
-                {exported && (
-                  <p
-                    className={`settings-row-note ${exported.ok ? "small ok" : "inline-error"}`}
-                    role={exported.ok ? "status" : "alert"}
-                  >
-                    {exported.text}
-                  </p>
-                )}
-              </SettingsGroup>
+            {page === "github" && (
+              <GitHubSettings
+                canManage={connected && actor.kind === "human"}
+                Group={SettingsGroup}
+                Row={SettingsRow}
+              />
             )}
             {page === "shortcuts" && (
               <SettingsGroup
@@ -1821,6 +1854,14 @@ export function Settings({
                 ))}
               </SettingsGroup>
             )}
+            {page === "cli" && (
+              <SettingsGroup
+                title="CLI helper"
+                note="Install and verify the command line helper for this desktop app."
+              >
+                <CliHelper />
+              </SettingsGroup>
+            )}
           </div>
         </div>
       </div>
@@ -1828,7 +1869,12 @@ export function Settings({
   );
 }
 
-type SettingsPage = "profile" | "connection" | "data" | "shortcuts";
+export type SettingsPage =
+  | "profile"
+  | "connection-data"
+  | "github"
+  | "shortcuts"
+  | "cli";
 
 const AVATAR_PIXELS = 128;
 
@@ -1875,15 +1921,26 @@ function ProfileSettings({
   onSaved: () => Promise<RefreshResult>;
 }) {
   const nameId = useId();
+  const gravatarToggleId = useId();
+  const gravatarEmailId = useId();
   const fileInput = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(actor.name ?? "");
   const [avatar, setAvatar] = useState(actor.avatar ?? "");
+  const [useGravatar, setUseGravatar] = useState(
+    Boolean(actor.useGravatar),
+  );
+  const [gravatarEmail, setGravatarEmail] = useState(
+    actor.gravatarEmail ?? "",
+  );
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState<null | { ok: boolean; text: string }>(null);
   const dirty =
-    name.trim() !== (actor.name ?? "") || avatar !== (actor.avatar ?? "");
+    name.trim() !== (actor.name ?? "") ||
+    avatar !== (actor.avatar ?? "") ||
+    useGravatar !== Boolean(actor.useGravatar) ||
+    gravatarEmail.trim().toLowerCase() !== (actor.gravatarEmail ?? "");
   const preview = new Map([
-    [actor.id, { ...actor, name: name.trim(), avatar }],
+    [actor.id, { ...actor, name: name.trim(), avatar, useGravatar }],
   ]);
 
   async function choose(file: File | undefined) {
@@ -1903,7 +1960,13 @@ function ProfileSettings({
     setSaving(true);
     setNote(null);
     try {
-      await command("update_profile", { name: name.trim(), avatar });
+      await command("update_profile", {
+        name: name.trim(),
+        avatar,
+        useGravatar,
+        gravatarEmail: gravatarEmail.trim(),
+      });
+      setGravatarEmail(gravatarEmail.trim().toLowerCase());
       await onSaved();
       setNote({ ok: true, text: "Profile saved. Everyone sees it on their next refresh." });
     } catch (err) {
@@ -1982,6 +2045,45 @@ function ProfileSettings({
             onChange={(e) => setName(e.target.value)}
           />
         </div>
+        <div className="settings-row settings-row-stack gravatar-row">
+          <div className="settings-row-text">
+            <label className="settings-row-title" htmlFor={gravatarToggleId}>
+              Use Gravatar
+            </label>
+            <span className="settings-row-hint">
+              Use your Gravatar picture. Your uploaded picture stays saved.
+            </span>
+          </div>
+          <input
+            id={gravatarToggleId}
+            type="checkbox"
+            checked={useGravatar}
+            onChange={(e) => setUseGravatar(e.target.checked)}
+          />
+        </div>
+        {(useGravatar || Boolean(actor.gravatarEmail)) && (
+          <div className="settings-row settings-row-stack">
+            <div className="settings-row-text">
+              <label className="settings-row-title" htmlFor={gravatarEmailId}>
+                Gravatar email
+              </label>
+              <span className="settings-row-hint">
+                {useGravatar
+                  ? "Only you can see this address. Changes show after you save."
+                  : "Only you can see this address. Clear it to remove it from your profile."}
+              </span>
+            </div>
+            <input
+              id={gravatarEmailId}
+              type="email"
+              autoComplete="email"
+              maxLength={254}
+              required={useGravatar}
+              value={gravatarEmail}
+              onChange={(e) => setGravatarEmail(e.target.value)}
+            />
+          </div>
+        )}
       </SettingsGroup>
       <div className="form-actions">
         {note && (
@@ -2046,6 +2148,7 @@ export const shortcuts: [string, string][] = [
   ["N", "Create a task"],
   ["⌘/Ctrl K", "Focus search"],
   ["F", "Focus the assignee filter"],
+  ["⌥/Alt V", "Save the current filters as a view"],
   ["?", "Open keyboard help"],
   ["[", "Collapse / expand the sidebar"],
   ["Esc", "Close a dialog, or exit stand-up"],

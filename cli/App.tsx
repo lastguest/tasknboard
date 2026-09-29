@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput, usePaste, useWindowSize } from "ink";
 import type { Client } from "../server/client.mjs";
-import type { Status, Task, WorkspaceInfo } from "../src/types.ts";
+import type { BoardRecord, Status, Task, WorkspaceInfo } from "../src/types.ts";
 import { activeLease, columns, safeUrl, statusTitle } from "../src/types.ts";
-import { matchCommands, planInput, UsageError, commands } from "./commands.ts";
+import {
+  matchCommands,
+  planInput,
+  UsageError,
+  commands,
+} from "./commands.ts";
 import { editLine, emptyLine, insert, type Line } from "./editor.ts";
 
 const accent = "#9de3c1";
@@ -15,7 +20,7 @@ const statusColor = Object.fromEntries(
 const menuSize = 8;
 
 type Notice = { tone: "ok" | "error" | "info"; text: string };
-type View = "list" | "task" | "help";
+type View = "list" | "task" | "boards" | "help";
 type Styled = { text: string; color?: string; bold?: boolean; dim?: boolean };
 
 /** Task text comes from other users. Control characters must never reach the terminal. */
@@ -96,6 +101,7 @@ function taskLines(task: Task, width: number): Styled[] {
   };
   const lease = activeLease(task);
   out.push({ text: `${task.id}  ${clean(task.title)}`, bold: true });
+  out.push({ text: `Board ${clean(task.boardId)}`, dim: true });
   out.push({
     text: [
       statusTitle(task.status),
@@ -140,6 +146,21 @@ function taskLines(task: Task, width: number): Styled[] {
     }
   }
   return out;
+}
+
+function boardLines(boards: BoardRecord[], selectedId?: string): Styled[] {
+  return [
+    { text: "Boards", bold: true, color: accent },
+    ...(boards.length
+      ? boards.map((board) => ({
+          text: `${board.id === selectedId ? "●" : "○"} ${board.id}  ${clean(board.name)} · ${clean(board.prefix)}`,
+          color: board.id === selectedId ? accent : undefined,
+        }))
+      : [{ text: "No boards yet. Create one with /board create <prefix> <name>." }]),
+    { text: "" },
+    { text: "Use /board <id> to select a board." },
+    { text: "Use /board create <prefix> <name> to create and select one." },
+  ];
 }
 
 function helpLines(): Styled[] {
@@ -239,6 +260,7 @@ function TaskList({
             <Text color={active ? accent : undefined} dimColor={!active}>
               {t.id.padEnd(9)}
             </Text>
+            <Text dimColor>{`[${clean(t.boardId)}] `}</Text>
             <Text color={priorityColor[t.priority]}>● </Text>
             <Box flexGrow={1} flexShrink={1}>
               <Text wrap="truncate-end" bold={active}>
@@ -268,6 +290,7 @@ export function App({
   const [tasks, setTasks] = useState<Task[]>([]);
   const [detail, setDetail] = useState<Task | null>(null);
   const [selectedId, setSelectedId] = useState<string>();
+  const [boardId, setBoardId] = useState<string>();
   const [view, setView] = useState<View>("list");
   const [line, setLine] = useState<Line>(emptyLine);
   const [menuIndex, setMenuIndex] = useState(0);
@@ -278,28 +301,64 @@ export function App({
   const [online, setOnline] = useState(true);
   const [notice, setNotice] = useState<Notice | null>(null);
   const state = useRef({ view, selectedId });
+  const boardIdRef = useRef(boardId);
+  const refreshGeneration = useRef(0);
+  const detailGeneration = useRef(0);
   state.current = { view, selectedId };
 
   const refresh = useCallback(async () => {
+    const requestedBoardId = boardId;
+    if (requestedBoardId !== boardIdRef.current) return;
+    const generation = ++refreshGeneration.current;
+    const isCurrent = () =>
+      generation === refreshGeneration.current &&
+      requestedBoardId === boardIdRef.current;
     try {
       const all: Task[] = [];
       for (let total = Infinity; all.length < total;) {
         const page = await client.execute("list_tasks", {
+          ...(requestedBoardId ? { boardId: requestedBoardId } : {}),
           offset: all.length,
           limit: 100,
         });
+        if (!isCurrent()) return;
         all.push(...page.tasks);
         total = page.tasks.length ? page.total : all.length;
       }
       setTasks(all);
       const { view, selectedId } = state.current;
-      if (view === "task" && selectedId)
-        setDetail(await client.execute("get_task", { id: selectedId }));
+      if (view === "task" && selectedId) {
+        const detailRequest = ++detailGeneration.current;
+        const task = await client.execute("get_task", { id: selectedId });
+        if (!isCurrent() || detailRequest !== detailGeneration.current) return;
+        setDetail(task);
+      }
+      if (!isCurrent()) return;
       setOnline(true);
     } catch (e) {
+      if (!isCurrent()) return;
       setOnline(false);
       setNotice({ tone: "error", text: errorText(e) });
     }
+  }, [boardId, client]);
+
+  function selectBoard(nextBoardId: string) {
+    boardIdRef.current = nextBoardId;
+    refreshGeneration.current++;
+    detailGeneration.current++;
+    setTasks([]);
+    setDetail(null);
+    setSelectedId(undefined);
+    setBoardId(nextBoardId);
+    setOnline(true);
+  }
+
+  const refreshBoards = useCallback(async () => {
+    const result = await client.execute("list_boards", {});
+    setInfo((current) =>
+      current ? { ...current, boards: result.boards } : current,
+    );
+    return result.boards as BoardRecord[];
   }, [client]);
 
   useEffect(() => {
@@ -307,10 +366,13 @@ export function App({
       .execute("workspace_info")
       .then(setInfo)
       .catch((e) => setNotice({ tone: "error", text: errorText(e) }));
+  }, [client]);
+
+  useEffect(() => {
     void refresh();
     const timer = setInterval(() => void refresh(), pollMs);
     return () => clearInterval(timer);
-  }, [client, pollMs, refresh]);
+  }, [pollMs, refresh]);
 
   // Plain text in the prompt filters live; Enter keeps it as the active filter.
   const filter = (line.text && !line.text.startsWith("/") ? line.text : query)
@@ -320,13 +382,14 @@ export function App({
     () =>
       tasks.filter(
         (t) =>
+          (!boardId || t.boardId === boardId) &&
           (!mine || t.assignee === info?.actor.id) &&
           (!filter ||
             `${t.id} ${t.title} ${t.assignee} ${t.labels.join(" ")}`
               .toLowerCase()
               .includes(filter)),
       ),
-    [tasks, mine, filter, info],
+    [tasks, boardId, mine, filter, info],
   );
   const rows = useMemo(
     () =>
@@ -366,9 +429,11 @@ export function App({
   const pageLines =
     view === "help"
       ? helpLines()
-      : view === "task" && current
-        ? taskLines(current, width)
-        : [];
+      : view === "boards"
+        ? boardLines(info?.boards ?? [], boardId)
+        : view === "task" && current
+          ? taskLines(current, width)
+          : [];
   const maxScroll = Math.max(0, pageLines.length - bodyHeight);
 
   useEffect(() => {
@@ -379,19 +444,33 @@ export function App({
 
   function openTask(task: Task | undefined) {
     if (!task) return;
+    const requestGeneration = ++detailGeneration.current;
+    const requestedBoardId = boardIdRef.current;
     setView("task");
     setScroll(0);
     setDetail(null);
     client
       .execute("get_task", { id: task.id })
-      .then(setDetail)
-      .catch((e) => setNotice({ tone: "error", text: errorText(e) }));
+      .then((detail) => {
+        if (
+          requestGeneration === detailGeneration.current &&
+          requestedBoardId === boardIdRef.current
+        )
+          setDetail(detail);
+      })
+      .catch((e) => {
+        if (
+          requestGeneration === detailGeneration.current &&
+          requestedBoardId === boardIdRef.current
+        )
+          setNotice({ tone: "error", text: errorText(e) });
+      });
   }
 
   async function run(input: string) {
     let action;
     try {
-      action = planInput(input, current);
+      action = planInput(input, current, { boardId });
     } catch (e) {
       if (!(e instanceof UsageError)) throw e;
       setNotice({ tone: "error", text: e.message });
@@ -403,8 +482,59 @@ export function App({
       setScroll(0);
       return setView("help");
     }
+    if (action.kind === "boards") {
+      setBusy(true);
+      try {
+        await refreshBoards();
+        setScroll(0);
+        setView("boards");
+      } catch (e) {
+        setNotice({ tone: "error", text: errorText(e) });
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    if (action.kind === "select-board") {
+      setBusy(true);
+      try {
+        const boards = await refreshBoards();
+        const board = boards.find(
+          (item) => item.id.toLowerCase() === action.boardId.toLowerCase(),
+        );
+        if (!board) {
+          const choices = boards.map((item) => item.id).join(", ");
+          setNotice({
+            tone: "error",
+            text: choices
+              ? `Choose a board: ${choices}, or /board create <prefix> <name>.`
+              : "No boards are available. Use /board create <prefix> <name>.",
+          });
+          setLine({ text: input, cursor: input.length });
+          return;
+        }
+        selectBoard(board.id);
+        setScroll(0);
+        setView("list");
+        setNotice({ tone: "info", text: `Selected board ${board.id}.` });
+      } catch (e) {
+        setNotice({ tone: "error", text: errorText(e) });
+        setLine({ text: input, cursor: input.length });
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     if (action.kind === "refresh") {
+      const requestedBoardId = boardIdRef.current;
       setNotice({ tone: "info", text: "Refreshed." });
+      try {
+        await refreshBoards();
+      } catch (e) {
+        if (requestedBoardId === boardIdRef.current)
+          setNotice({ tone: "error", text: errorText(e) });
+      }
+      if (requestedBoardId !== boardIdRef.current) return;
       return void refresh();
     }
     if (action.kind === "mine") {
@@ -416,12 +546,28 @@ export function App({
     }
     setBusy(true);
     try {
-      const task: Task = await client.execute(
+      const result = await client.execute(
         action.request.name,
         action.request.args,
       );
-      setNotice({ tone: "ok", text: action.message(task) });
-      if (action.request.name === "create_task") setSelectedId(task.id);
+      setNotice({ tone: "ok", text: action.message(result) });
+      if (action.request.name === "create_task") setSelectedId(result.id);
+      if (action.request.name === "create_board") {
+        const board: BoardRecord = result;
+        setInfo((current) =>
+          current
+            ? {
+                ...current,
+                boards: [
+                  ...current.boards.filter((item) => item.id !== board.id),
+                  board,
+                ],
+              }
+            : current,
+        );
+        selectBoard(board.id);
+        setView("list");
+      }
       if (action.request.name === "archive_task") setView("list");
     } catch (e) {
       setLine({ text: input, cursor: input.length });
@@ -483,6 +629,7 @@ export function App({
         const command = matches[menuIndex];
         if (command.usage === `/${command.name}`)
           return void run(command.usage);
+        if (command.name === "board") return void run("/board");
         const text = `/${command.name} `;
         return setLine({ text, cursor: text.length });
       }
@@ -524,7 +671,9 @@ export function App({
         <Box flexGrow={1} flexShrink={1}>
           <Text dimColor wrap="truncate-end">
             {info
-              ? clean(`${info.name} · ${info.actor.id} (${info.actor.kind})`)
+              ? clean(
+                  `${info.name} · ${info.actor.id} (${info.actor.kind}) · ${boardId ? `${info.boards.find((board) => board.id === boardId)?.name ?? boardId} · ${boardId}` : "All boards"}`,
+                )
               : "Connecting…"}{" "}
             · {client.mode} {client.target}
             {mine ? " · my tasks" : ""}
@@ -558,7 +707,9 @@ export function App({
               ? "Can't load tasks. TasknBoard retries every few seconds."
               : tasks.length
                 ? "No tasks match. Press esc to clear the filter."
-                : "No tasks yet. Type /new <title> to create one."
+                : boardId
+                  ? "No tasks on this board. Type /new <title> to create one."
+                  : "No tasks yet. Use /board to list or create a board before /new."
           }
         />
       )}

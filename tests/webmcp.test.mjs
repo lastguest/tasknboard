@@ -33,10 +33,12 @@ test("WebMCP validates and executes against the domain, refreshes writes, reject
     },
     lifetime.signal,
   );
-  assert.equal(context.tools.size, 9);
+  assert.equal(context.tools.size, 12);
   const call = async (name, args) =>
     JSON.parse(await context.tools.get(name).execute(args, execution()));
-  const created = await call("create_task", { title: "Browser task" });
+  const { boards } = await call("list_boards", {});
+  await assert.rejects(call("create_task", { title: "Missing board" }));
+  const created = await call("create_task", { title: "Browser task", boardId: boards[0].id });
   assert.equal(refreshes, 1);
   assert.equal((await call("list_tasks", {})).total, 1);
   assert.equal(refreshes, 1);

@@ -17,7 +17,7 @@ async function command(name: string, args: object = {}, token = humanToken) {
   return body;
 }
 async function create(title: string, assignee = "") {
-  return command("create_task", { title, assignee, description: "Original context" });
+  return command("create_task", { boardId: "BOARD-1", title, assignee, description: "Original context" });
 }
 async function connect(page: Page) {
   await page.addInitScript((value) => sessionStorage.setItem("tasknboard-token", value), humanToken);
@@ -52,11 +52,11 @@ test("Board, List and My tasks combine filters and agree on counts", async ({ pa
   await expect(page.locator(".task-card .comment-count")).toHaveText("1 comment");
   await expect(page.locator("#column-backlog + .count")).toHaveText("1");
   await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "List" }).click();
-  await expect(page.locator("tbody tr")).toHaveCount(1);
+  await expect(page.locator("tbody tr:not(.group-row)")).toHaveCount(1);
   await expect(page.locator("tbody .comment-count")).toHaveText("1 comment");
   await expect(card(page, mine.id)).toBeVisible();
   await nav(page, "My tasks").click();
-  await expect(page.locator("tbody tr")).toHaveCount(1);
+  await expect(page.locator("tbody tr:not(.group-row)")).toHaveCount(1);
   await filterBy(page, "Helpful bot");
   await expect(page.getByRole("heading", { name: "No tasks match these filters." })).toBeVisible();
   await page.getByRole("button", { name: "Clear filters", exact: true }).first().click();
@@ -93,6 +93,7 @@ test("Status menu saves and the server rejects an invalid drag", async ({ page }
 
 test("Task sidebar pickers search, stage changes, and save label arrays", async ({ page }) => {
   const task = await command("create_task", {
+    boardId: "BOARD-1",
     title: `Picker ${key()}`,
     priority: "medium",
     labels: ["Existing"],
@@ -274,11 +275,11 @@ test("WebMCP writes refresh after a read already in flight", async ({ page }) =>
     await route.fulfill({ response: oldResponse });
   });
   await page.goto(baseURL);
-  await expect.poll(() => page.evaluate(() => (window as any).testTools.size)).toBe(9);
+  await expect.poll(() => page.evaluate(() => (window as any).testTools.size)).toBe(12);
   const title = `WebMCP ${key()}`;
   const write = page.waitForResponse((response) => response.url().endsWith("/api/create_task"));
   await page.evaluate((title) => {
-    (window as any).toolWrite = (window as any).testTools.get("create_task").execute({ title }, { signal: new AbortController().signal });
+    (window as any).toolWrite = (window as any).testTools.get("create_task").execute({ title, boardId: "BOARD-1" }, { signal: new AbortController().signal });
   }, title);
   await write;
   release();
@@ -320,7 +321,7 @@ test("Initial My tasks hides placeholder identity and ordinary browsers skip Web
   await nav(page, "My tasks").click();
   await expect(page.locator(".page-title p")).toBeEmpty();
   release();
-  await expect(page.locator(".page-title p")).toHaveText("Tasks assigned to reviewer.");
+  await expect(page.locator(".page-title p")).toHaveText("Tasks assigned to reviewer on Default.");
   expect(scripts.some((url) => /\/webmcp-/.test(url))).toBe(false);
 });
 
@@ -328,8 +329,8 @@ test("Settings offers Change server only inside the iOS shell", async ({ page })
   await connect(page);
   await nav(page, "Settings").click();
   let settings = page.getByRole("dialog", { name: "Settings" });
-  await settings.getByRole("button", { name: "Connection" }).click();
-  await expect(settings.getByRole("heading", { name: "Connection" })).toBeVisible();
+  await settings.getByRole("button", { name: "Connection & data" }).click();
+  await expect(settings.getByRole("heading", { name: "Connection & data" })).toBeVisible();
   await expect(settings.getByRole("button", { name: "Change server" })).toHaveCount(0);
 
   // The iOS shell injects this contract into every page it loads.
@@ -342,7 +343,7 @@ test("Settings offers Change server only inside the iOS shell", async ({ page })
   await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
   await nav(page, "Settings").click();
   settings = page.getByRole("dialog", { name: "Settings" });
-  await settings.getByRole("button", { name: "Connection" }).click();
+  await settings.getByRole("button", { name: "Connection & data" }).click();
   await expect(settings).toContainText(`Server: ${new URL(baseURL).origin}`);
   await settings.getByRole("button", { name: "Change server" }).click();
   expect(await page.evaluate(() => (window as any).serverChangeRequested)).toBe(true);
@@ -522,7 +523,7 @@ test("Profiles show display names and pictures, and IDs stay unchanged", async (
     await expect(settings.getByLabel("Display name")).toHaveValue("Riley Reviewer");
     await expect(settings.getByRole("button", { name: "Change picture" })).toBeVisible();
     await expect(settings.locator(".profile-row .avatar img")).toHaveCount(1);
-    await settings.getByRole("button", { name: "Data" }).click();
+    await settings.getByRole("button", { name: "Connection & data" }).click();
     await settings.getByRole("button", { name: "Profile" }).click();
     await expect(settings.getByLabel("Display name")).toHaveValue("Riley Reviewer");
     await expect(settings.getByRole("button", { name: "Change picture" })).toBeVisible();
@@ -549,6 +550,7 @@ test("Profiles show display names and pictures, and IDs stay unchanged", async (
 test("Markdown descriptions format, upload pasted images, and render safely", async ({ page }) => {
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
   const task = await command("create_task", {
+    boardId: "BOARD-1",
     title: `Markdown ${key()}`,
     // "| --- | — |" is what macOS smart dashes make of a typed divider row.
     description:
@@ -597,18 +599,19 @@ test("Markdown descriptions format, upload pasted images, and render safely", as
 });
 
 test("Epics group tasks: create, file, filter, progress and guarded archive", async ({ page }) => {
-  const name = `Epic ${key()}`;
+  let name = `Project ${key()}`;
   const loose = await create(`Loose ${key()}`);
   await connect(page);
   await nav(page, "Epics").click();
   await page.getByRole("button", { name: "New epic" }).first().click();
   const epicDialog = page.getByRole("dialog", { name: "New epic" });
-  await epicDialog.getByLabel("Title").fill(name);
+  await epicDialog.getByLabel("Name").fill(name);
   await epicDialog.getByRole("radio", { name: "Flamingo" }).check();
   await expect(epicDialog.locator(".epic-color-preview")).toContainText("Flamingo");
   await epicDialog.getByRole("button", { name: "Create epic" }).click();
   await expect(epicDialog).toBeHidden();
   const [epic] = (await command("list_epics")).epics.filter((e: { title: string }) => e.title === name);
+  await expect(page.locator("body")).not.toContainText(/\bEPIC-\d+\b/);
 
   // Opening the epic shows its own board; New task starts inside it.
   await page.locator(".nav-epics").getByRole("button", { name: new RegExp(`^${name}`) }).click();
@@ -650,6 +653,21 @@ test("Epics group tasks: create, file, filter, progress and guarded archive", as
   await expect(page.locator(".page-title .epic-glyph")).toHaveCSS("background-color", "rgb(18, 171, 156)");
   const recolored = (await command("list_epics")).epics.find((e: { id: string }) => e.id === epic.id);
   expect(recolored.color).toBe("#12ab9c");
+
+  // Epic names can be edited to normal human text and replace the old title everywhere.
+  const renamed = `Mobile onboarding / ${key()}`;
+  await page.getByRole("button", { name: "Edit epic" }).click();
+  await edit.getByLabel("Name").fill(renamed);
+  await edit.getByRole("button", { name: "Save changes" }).click();
+  await expect(edit).toBeHidden();
+  name = renamed;
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(name);
+  await nav(page, "Epics").click();
+  const renamedCard = page.locator(".epic-card").filter({ hasText: name });
+  await expect(renamedCard).toBeVisible();
+  await expect(renamedCard.locator(".task-id")).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText(/\bEPIC-\d+\b/);
+  await page.locator(".epic-card").getByRole("button", { name, exact: true }).click();
 
   // Open work blocks archiving; the server explains why.
   await page.getByRole("button", { name: "Edit epic" }).click();

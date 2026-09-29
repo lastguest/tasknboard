@@ -22,18 +22,14 @@ const paths: Record<string, React.ReactNode> = {
   priorityMedium: <path d="M5 9h14M5 15h14" />,
   priorityLow: <path d="M5 12h14" />,
   plus: <path d="M12 5v14M5 12h14" />,
+  hash: <path d="M9 3 7 21M17 3l-2 18M4 8h17M3 16h17" />,
   user: (
     <>
       <circle cx="12" cy="7" r="3" />
       <path d="M5 21v-3a7 7 0 0 1 14 0v3z" />
     </>
   ),
-  bot: (
-    <>
-      <rect x="4" y="7" width="16" height="13" rx="4" />
-      <path d="M12 3v4M8 12v2M16 12v2M9 17h6M1 11v5M23 11v5" />
-    </>
-  ),
+  cursor: <path d="M4.04 4.69a.5.5 0 0 1 .65-.65l16 6.5a.5.5 0 0 1-.06.95l-6.13 1.58a2 2 0 0 0-1.43 1.43l-1.58 6.13a.5.5 0 0 1-.95.06z" />,
   settings: (
     <>
       <circle cx="12" cy="12" r="3" />
@@ -91,6 +87,10 @@ const paths: Record<string, React.ReactNode> = {
     </>
   ),
   folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
+  layers: <path d="m12 3 9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5" />,
+  star: <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z" />,
+  filter: <path d="M3 5h18l-7 8.5V19l-4 2v-7.5z" />,
+  sliders: <path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M14 4v4M8 10v4M16 16v4" />,
   plug: <path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v4" />,
   database: (
     <>
@@ -149,6 +149,55 @@ const paths: Record<string, React.ReactNode> = {
       <circle cx="9" cy="10" r="1.8" />
       <path d="m21 16-5-5-9 9" />
     </>
+  ),
+  pull: (
+    <>
+      <circle cx="6" cy="5.5" r="2.5" />
+      <circle cx="6" cy="18.5" r="2.5" />
+      <circle cx="18" cy="18.5" r="2.5" />
+      <path d="M6 8v8M18 16V9a3 3 0 0 0-3-3h-4M13 3.5 10.5 6 13 8.5" />
+    </>
+  ),
+  pullClosed: (
+    <>
+      <circle cx="6" cy="5.5" r="2.5" />
+      <circle cx="6" cy="18.5" r="2.5" />
+      <circle cx="18" cy="18.5" r="2.5" />
+      <path d="M6 8v8M18 16v-4M15.5 3.5l5 5M20.5 3.5l-5 5" />
+    </>
+  ),
+  merge: (
+    <>
+      <circle cx="6" cy="5.5" r="2.5" />
+      <circle cx="6" cy="18.5" r="2.5" />
+      <circle cx="18" cy="12" r="2.5" />
+      <path d="M6 8v8M6 8a6 6 0 0 0 6 4h3.5" />
+    </>
+  ),
+  branch: (
+    <>
+      <circle cx="6" cy="18.5" r="2.5" />
+      <circle cx="6" cy="5.5" r="2.5" />
+      <circle cx="18" cy="7" r="2.5" />
+      <path d="M6 8v8M18 9.5a6 6 0 0 1-6 6H8.5" />
+    </>
+  ),
+  commit: (
+    <>
+      <circle cx="12" cy="12" r="3.5" />
+      <path d="M2 12h6.5M15.5 12H22" />
+    </>
+  ),
+  eye: (
+    <>
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  chevronDown: <path d="m6 9 6 6 6-6" />,
+  chevronRight: <path d="m9 6 6 6-6 6" />,
+  github: (
+    <path d="M9 19c-4.5 1.4-4.5-2.5-6-3m12 5v-3.5a3 3 0 0 0-.9-2.4c3-.3 6.1-1.5 6.1-6.6a5.2 5.2 0 0 0-1.4-3.6 4.8 4.8 0 0 0-.1-3.6s-1.1-.3-3.7 1.4a12.8 12.8 0 0 0-6.8 0C5.6 1 4.5 1.3 4.5 1.3a4.8 4.8 0 0 0-.1 3.6A5.2 5.2 0 0 0 3 8.5c0 5.1 3.1 6.3 6.1 6.6a3 3 0 0 0-.9 2.4V21" />
   ),
 };
 

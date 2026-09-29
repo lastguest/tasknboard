@@ -1,3 +1,4 @@
+import type { ViewDisplay, ViewFilters } from "../server/views.mjs";
 export type Status = "backlog" | "in_progress" | "in_review" | "done";
 export type Priority = "low" | "medium" | "high";
 export type TaskEvent = {
@@ -9,6 +10,7 @@ export type TaskEvent = {
 };
 export type Task = {
   id: string;
+  boardId: string;
   title: string;
   description: string;
   acceptance: string;
@@ -40,6 +42,34 @@ export type Epic = {
   counts: Record<Status, number>;
 };
 
+export type {
+  ViewCondition,
+  ViewDisplay,
+  ViewField,
+  ViewFilters,
+  ViewGroup,
+  ViewOrder,
+} from "../server/views.mjs";
+
+/** A saved view: named filters and display settings (docs/contracts/views.md). */
+export type SavedView = {
+  id: string;
+  name: string;
+  description: string;
+  /** A palette name, or a custom "#rrggbb", like epics. */
+  color: string;
+  owner: string;
+  /** Workspace view when true; otherwise only the owner sees it. */
+  shared: boolean;
+  filters: ViewFilters;
+  display: ViewDisplay;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  /** Starred by the reader; per person. */
+  favorite: boolean;
+};
+
 export type Actor = {
   id: string;
   kind: "human" | "agent";
@@ -47,12 +77,28 @@ export type Actor = {
   name?: string;
   /** A small raster data URL, or empty for initials. */
   avatar?: string;
+  /** Whether the shared roster should display this actor's Gravatar. */
+  useGravatar?: boolean;
+  /** Server-generated Gravatar image URL; never contains the email address. */
+  gravatarUrl?: string;
+  /** Present only on the authenticated actor's own profile response. */
+  gravatarEmail?: string;
+};
+/** A board that owns task IDs and scopes task queries. */
+export type BoardRecord = {
+  id: string;
+  name: string;
+  prefix: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
 };
 export type WorkspaceInfo = {
   name: string;
   actor: Actor;
   actors: Actor[];
-  schemaVersion: 6;
+  boards: BoardRecord[];
+  schemaVersion: number;
 };
 export const columns: { id: Status; title: string; color: string }[] = [
   { id: "backlog", title: "Backlog", color: "#88909e" },

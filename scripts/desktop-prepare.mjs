@@ -7,10 +7,12 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  stat,
   rm,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, relative } from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -88,7 +90,9 @@ try {
     .find((line) => line.trim().endsWith(` ${archiveName}`));
   const expectedSha256 = checksumLine?.trim().split(/\s+/)[0];
   if (!/^[a-f0-9]{64}$/i.test(expectedSha256 || "")) {
-    throw new Error(`Official SHASUMS256.txt has no checksum for ${archiveName}.`);
+    throw new Error(
+      `Official SHASUMS256.txt has no checksum for ${archiveName}.`,
+    );
   }
 
   await mkdir(cacheDir, { recursive: true });
@@ -105,7 +109,10 @@ try {
   if (actualSha256.toLowerCase() !== expectedSha256.toLowerCase()) {
     await rm(archivePath, { force: true });
     const archiveResponse = await fetchOfficial(archiveUrl);
-    await pipeline(archiveResponse.body, createWriteStream(downloadedArchivePath));
+    await pipeline(
+      archiveResponse.body,
+      createWriteStream(downloadedArchivePath),
+    );
     actualSha256 = createHash("sha256")
       .update(await readFile(downloadedArchivePath))
       .digest("hex");
@@ -160,6 +167,79 @@ try {
     external: ["node:*"],
     sourcemap: false,
   });
+  await build({
+    entryPoints: [join(root, "server", "mcp.mjs")],
+    outfile: join(resourcesDir, "mcp.mjs"),
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node24",
+    external: ["node:*"],
+    sourcemap: false,
+  });
+
+  // Keep package-relative runtime assets and optional imports intact.
+  const cliBuild = await build({
+    entryPoints: [join(root, "cli", "main.tsx")],
+    outfile: join(resourcesDir, "cli.mjs"),
+    bundle: true,
+    packages: "external",
+    platform: "node",
+    format: "esm",
+    target: "node24",
+    jsx: "automatic",
+    metafile: true,
+  });
+  await rm(join(resourcesDir, "node_modules"), {
+    recursive: true,
+    force: true,
+  });
+  const copied = new Set();
+  async function copyPackage(name, from) {
+    const resolver = createRequire(join(from, "package.json"));
+    let source;
+    for (const directory of resolver.resolve.paths(name) || []) {
+      const candidate = join(directory, name);
+      try {
+        await stat(join(candidate, "package.json"));
+        source = candidate;
+        break;
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+    }
+    if (!source) throw new Error(`Missing CLI runtime dependency: ${name}`);
+    if (copied.has(source)) return;
+    copied.add(source);
+    const destination = join(
+      resourcesDir,
+      "node_modules",
+      relative(join(root, "node_modules"), source),
+    );
+    await cp(source, destination, { recursive: true });
+    const manifest = JSON.parse(
+      await readFile(join(source, "package.json"), "utf8"),
+    );
+    const dependencies = { ...manifest.dependencies };
+    for (const [peer, version] of Object.entries(
+      manifest.peerDependencies || {},
+    )) {
+      if (!manifest.peerDependenciesMeta?.[peer]?.optional)
+        dependencies[peer] = version;
+    }
+    for (const dependency of Object.keys(dependencies))
+      await copyPackage(dependency, source);
+  }
+  for (const output of Object.values(cliBuild.metafile.outputs)) {
+    for (const entry of output.imports) {
+      if (!entry.external || entry.path.startsWith("node:")) continue;
+      const parts = entry.path.split("/");
+      await copyPackage(
+        parts[0].startsWith("@") ? parts.slice(0, 2).join("/") : parts[0],
+        root,
+      );
+    }
+  }
 
   await rm(join(resourcesDir, "dist"), { recursive: true, force: true });
   await cp(distDir, join(resourcesDir, "dist"), { recursive: true });

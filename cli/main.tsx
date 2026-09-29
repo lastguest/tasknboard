@@ -13,10 +13,18 @@ Usage:
 Commands: ${Object.keys(schemas).join(", ")}
 
 Example:
-  tasknboard list_tasks '{"status":"in_review"}'
+  tasknboard list_boards
+  tasknboard create_board '{"name":"Engineering","prefix":"ENG"}'
+  tasknboard create_task '{"boardId":"BOARD-1","title":"Ship it"}'
+  tasknboard list_tasks '{"boardId":"BOARD-1","status":"in_review"}'
 
 The local SQLite file is TASKNBOARD_DB (default data/tasknboard.sqlite).
 Set TASKNBOARD_SERVER_URL and TASKNBOARD_TOKEN to use a shared server.`;
+
+function connectCli() {
+  const id = process.env.TASKNBOARD_AGENT_ID;
+  return connect(id ? { actor: { id, kind: "agent" } } : undefined);
+}
 
 async function once(name: string, json = "{}") {
   let args;
@@ -27,7 +35,7 @@ async function once(name: string, json = "{}") {
       code: "USAGE",
     });
   }
-  const client = connect();
+  const client = connectCli();
   try {
     console.log(JSON.stringify(await client.execute(name, args), null, 2));
   } finally {
@@ -36,6 +44,13 @@ async function once(name: string, json = "{}") {
 }
 
 async function interactive() {
+  if (process.env.TASKNBOARD_AGENT_ID) {
+    console.error(
+      "The interactive board is for human sessions; use one-shot commands as an agent.",
+    );
+    process.exitCode = 2;
+    return;
+  }
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error(
       "The interactive board needs a terminal. Run `tasknboard help` for scripting commands.",
@@ -43,7 +58,7 @@ async function interactive() {
     process.exitCode = 2;
     return;
   }
-  const client = connect();
+  const client = connectCli();
   try {
     const app = render(<App client={client} />, {
       alternateScreen: true,

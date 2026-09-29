@@ -35,6 +35,7 @@ async function connected(page: Page) {
 
 async function apiTask(title: string, assignee = "") {
   return command<any>("create_task", {
+    boardId: "BOARD-1",
     title,
     assignee,
     description: `${title} context`,
@@ -52,6 +53,31 @@ test("Settings, task workflow, agent review, archive, and export", async ({ page
   await expect(page.getByRole("alert")).toContainText("valid access token");
   await page.locator(".sidebar").getByRole("button", { name: "Settings" }).click();
   const settings = page.getByRole("dialog", { name: "Settings" });
+  await expect(settings.getByRole("button", { name: "Task keys" })).toHaveCount(0);
+  await expect(
+    settings.getByRole("heading", { name: "Connection & data" }),
+  ).toBeVisible();
+  await expect(
+    settings.getByRole("button", { name: "Data", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    settings.getByRole("button", { name: "Connection", exact: true }),
+  ).toHaveCount(0);
+  const settingsSearch = settings.getByLabel("Search settings");
+  const connectionDataNav = settings.getByRole("button", {
+    name: "Connection & data",
+    exact: true,
+  });
+  await settingsSearch.fill("export");
+  await expect(connectionDataNav).toBeVisible();
+  await connectionDataNav.click();
+  await settingsSearch.fill("token");
+  await expect(connectionDataNav).toBeVisible();
+  await expect(settings.getByLabel("Workspace access token")).toBeVisible();
+  await expect(
+    settings.getByRole("button", { name: "Export workspace" }),
+  ).toBeVisible();
+
   const tokenField = settings.getByLabel("Workspace access token");
   await tokenField.fill(wrongToken);
   await settings.getByRole("button", { name: "Save connection" }).click();
@@ -134,7 +160,10 @@ test("Settings, task workflow, agent review, archive, and export", async ({ page
 
   await page.locator(".sidebar").getByRole("button", { name: "Settings" }).click();
   const exportDialog = page.getByRole("dialog", { name: "Settings" });
-  await exportDialog.getByRole("button", { name: "Data" }).click();
+  await exportDialog.getByRole("button", { name: "Connection & data" }).click();
+  await expect(
+    exportDialog.getByRole("heading", { name: "Connection & data" }),
+  ).toBeVisible();
   const downloadEvent = page.waitForEvent("download");
   await exportDialog.getByRole("button", { name: "Export workspace" }).click();
   const download = await downloadEvent;

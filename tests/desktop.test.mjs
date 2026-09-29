@@ -13,6 +13,8 @@ test("desktop service uses its assigned port, persists tasks, and exits with its
   const assets = join(directory, "assets");
   await mkdir(assets);
   await writeFile(join(assets, "index.html"), "<!doctype html><title>Desktop fixture</title>");
+  await writeFile(join(assets, "mcp.mjs"), "// MCP fixture");
+  const database = join(directory, "workspace.sqlite");
   const children = [];
   t.after(async () => {
     for (const child of children) {
@@ -35,7 +37,8 @@ test("desktop service uses its assigned port, persists tasks, and exits with its
         HOST: "127.0.0.1",
         PORT: "0",
         TASKNBOARD_DESKTOP: "1",
-        TASKNBOARD_DB: join(directory, "workspace.sqlite"),
+        TASKNBOARD_DB: database,
+        TASKNBOARD_RESOURCES: assets,
         TASKNBOARD_STATIC_DIR: assets,
         TASKNBOARD_ALLOWED_HOSTS: "",
         TASKNBOARD_TOKENS: "{}",
@@ -77,6 +80,18 @@ test("desktop service uses its assigned port, persists tasks, and exits with its
 
   const first = await start();
   assert.match(await (await fetch(first.origin)).text(), /Desktop fixture/);
+  const mcpResponse = await fetch(`${first.origin}/api/mcp-config`);
+  assert.equal(mcpResponse.status, 200);
+  const mcpStatus = await mcpResponse.json();
+  assert.equal(mcpStatus.mode, "local");
+  assert.deepEqual(mcpStatus.config.mcpServers.tasknboard, {
+    command: process.execPath,
+    args: [join(assets, "mcp.mjs")],
+    env: {
+      TASKNBOARD_DB: database,
+      TASKNBOARD_AGENT_ID: "codex",
+    },
+  });
   assert.equal((await first.post("list_tasks", {}, { Origin: "https://untrusted.example" })).status, 403);
   const rejectedHost = await new Promise((resolveResponse, reject) => {
     const req = request(first.origin, { headers: { Host: "untrusted.example" } }, (res) => {
@@ -87,9 +102,16 @@ test("desktop service uses its assigned port, persists tasks, and exits with its
     req.end();
   });
   assert.equal(rejectedHost, 403);
-  const created = await first.post("create_task", { title: "Desktop persistence" }, { Origin: first.origin });
+  const created = await first.post("create_task", { title: "Desktop persistence", boardId: "BOARD-1" }, { Origin: first.origin });
   assert.equal(created.status, 200);
   const task = await created.json();
+  const boardResponse = await first.post("create_board", { name: "Operations", prefix: "OPS" }, { Origin: first.origin });
+  assert.equal(boardResponse.status, 200);
+  const board = await boardResponse.json();
+  const otherResponse = await first.post("create_task", { title: "Other board", boardId: board.id }, { Origin: first.origin });
+  assert.equal(otherResponse.status, 200);
+  const other = await otherResponse.json();
+  assert.equal(other.id, "OPS-001");
   await first.stop();
   await assert.rejects(fetch(first.origin));
 
@@ -97,5 +119,7 @@ test("desktop service uses its assigned port, persists tasks, and exits with its
   const restored = await second.post("get_task", { id: task.id });
   assert.equal(restored.status, 200);
   assert.equal((await restored.json()).title, "Desktop persistence");
+  const boardTasks = await (await second.post("list_tasks", { boardId: board.id })).json();
+  assert.deepEqual(boardTasks.tasks.map((item) => item.id), [other.id]);
   await second.stop();
 });

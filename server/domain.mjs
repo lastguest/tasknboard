@@ -1,4 +1,12 @@
 import { z } from "zod";
+import {
+  viewFields,
+  viewOps,
+  viewLayouts,
+  viewGroups,
+  viewOrders,
+  ME,
+} from "./views.mjs";
 /** 5 MB of image bytes, base64-encoded inside a data URL. */
 export const imageBytesLimit = 5 * 1024 * 1024;
 export const imageDataUrlLimit = Math.ceil(imageBytesLimit / 3) * 4 + 32;
@@ -6,8 +14,19 @@ export const statuses = ["backlog", "in_progress", "in_review", "done"];
 const text = z.string().trim().min(1).max(300);
 const long = z.string().max(20000);
 const version = z.number().int().positive();
-const id = z.string().regex(/^TNB-\d+$/);
-const epicId = z.string().regex(/^EPIC-\d+$/);
+/** Task and epic keys are "<PREFIX>-<n>". */
+const key = z.string().regex(/^[A-Z][A-Z0-9]{0,9}-\d+$/, "Key like ABC-12 required");
+const id = key;
+const epicId = key;
+const boardId = z.string().regex(/^BOARD-\d+$/);
+/** 2–10 letters or digits, starting with a letter. Entered case is ignored. */
+export const keyPrefix = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z][A-Z0-9]{1,9}$/, "2–10 letters or digits, starting with a letter")
+  .refine((v) => !["EPIC", "VIEW", "BOARD"].includes(v), "EPIC, VIEW, and BOARD are reserved");
+const boardName = z.string().trim().min(1).max(80);
 /** A task's epic: an epic ID, or "" for none. */
 const taskEpic = z.union([z.literal(""), epicId]);
 const epicTitle = z.string().trim().min(1).max(120);
@@ -34,6 +53,54 @@ const epicColor = z.union([
     .regex(/^#[0-9a-fA-F]{6}$/, "Palette name or #rrggbb colour required")
     .transform((hex) => hex.toLowerCase()),
 ]);
+const viewId = z.string().regex(/^VIEW-\d+$/);
+/** Valid values per view field; "" means none (unassigned, no epic, no labels). */
+const viewValue = {
+  status: z.enum(statuses),
+  priority: z.enum(["low", "medium", "high"]),
+  assignee: z.union([z.literal(ME), z.string().max(80)]),
+  label: z.union([z.literal(""), z.string().trim().min(1).max(40)]),
+  epic: taskEpic,
+};
+const viewCondition = z
+  .object({
+    field: z.enum(viewFields),
+    op: z.enum(viewOps),
+    values: z.array(z.string()).min(1).max(50),
+  })
+  .strict()
+  .superRefine((condition, ctx) => {
+    condition.values.forEach((value, index) => {
+      if (!viewValue[condition.field].safeParse(value).success)
+        ctx.addIssue({
+          code: "custom",
+          path: ["values", index],
+          message: `Not a valid ${condition.field} value`,
+        });
+    });
+  })
+  .transform((condition) => ({
+    ...condition,
+    values: [
+      ...new Set(
+        condition.values.map((value) => viewValue[condition.field].parse(value)),
+      ),
+    ],
+  }));
+const viewFilters = z
+  .object({
+    query: z.string().trim().max(300).default(""),
+    conditions: z.array(viewCondition).max(20).default([]),
+  })
+  .strict();
+const viewDisplay = z
+  .object({
+    layout: z.enum(viewLayouts).default("board"),
+    groupBy: z.enum(viewGroups).default("status"),
+    orderBy: z.enum(viewOrders).default("created"),
+  })
+  .strict();
+const viewName = z.string().trim().min(1).max(80);
 const labels = z.array(z.string().trim().min(1).max(40))
   .transform((values) => [...new Set(values)]);
 const patch = z
@@ -56,6 +123,8 @@ export const schemas = {
       status: z.enum(statuses).optional(),
       assignee: z.string().max(80).optional(),
       epic: z.union([z.literal("none"), epicId]).optional(),
+      boardId: boardId.optional(),
+      view: viewId.optional(),
       limit: z.number().int().min(1).max(100).default(100),
       offset: z.number().int().min(0).default(0),
     })
@@ -63,6 +132,7 @@ export const schemas = {
   get_task: z.object({ id }).strict(),
   create_task: z
     .object({
+      boardId,
       title: text,
       description: long.default(""),
       acceptance: long.default(""),
@@ -121,6 +191,14 @@ export const schemas = {
             ),
         ])
         .optional(),
+      useGravatar: z.boolean().optional(),
+      // Omit to keep the saved address. Empty clears it while Gravatar is off.
+      gravatarEmail: z
+        .string()
+        .trim()
+        .max(254)
+        .pipe(z.union([z.literal(""), z.email().max(254)]))
+        .optional(),
     })
     .strict()
     .refine((v) => Object.keys(v).length > 0, "Empty profile"),
@@ -137,7 +215,10 @@ export const schemas = {
     })
     .strict(),
   list_epics: z
-    .object({ includeArchived: z.boolean().default(false) })
+    .object({
+      includeArchived: z.boolean().default(false),
+      boardId: boardId.optional(),
+    })
     .strict(),
   create_epic: z
     .object({
@@ -161,6 +242,54 @@ export const schemas = {
     })
     .strict(),
   archive_epic: z.object({ id: epicId, expectedVersion: version }).strict(),
+  list_views: z.object({}).strict(),
+  create_view: z
+    .object({
+      name: viewName,
+      description: long.default(""),
+      color: epicColor.optional(),
+      shared: z.boolean().default(false),
+      filters: viewFilters.default({ query: "", conditions: [] }),
+      display: viewDisplay.default({
+        layout: "board",
+        groupBy: "status",
+        orderBy: "created",
+      }),
+    })
+    .strict(),
+  update_view: z
+    .object({
+      id: viewId,
+      expectedVersion: version,
+      patch: z
+        .object({
+          name: viewName.optional(),
+          description: long.optional(),
+          color: epicColor.optional(),
+          shared: z.boolean().optional(),
+          filters: viewFilters.optional(),
+          display: viewDisplay.optional(),
+        })
+        .strict()
+        .refine((v) => Object.keys(v).length > 0, "Empty patch"),
+    })
+    .strict(),
+  delete_view: z.object({ id: viewId, expectedVersion: version }).strict(),
+  favorite_view: z.object({ id: viewId, favorite: z.boolean() }).strict(),
+  list_boards: z.object({}).strict(),
+  create_board: z
+    .object({ name: boardName, prefix: keyPrefix })
+    .strict(),
+  update_board: z
+    .object({
+      id: boardId,
+      expectedVersion: version,
+      patch: z
+        .object({ name: boardName.optional(), prefix: keyPrefix.optional() })
+        .strict()
+        .refine((v) => Object.keys(v).length > 0, "Empty patch"),
+    })
+    .strict(),
   workspace_info: z.object({}).strict(),
   export_workspace: z.object({}).strict(),
 };

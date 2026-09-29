@@ -72,15 +72,17 @@ export const errorOf = (e: unknown) =>
     ? e
     : new ApiError((e as Error)?.message || "Unexpected error", "UNKNOWN", 0);
 
-export const taskNumber = (id: string) => Number(id.slice(4));
+export const taskNumber = (id: string) =>
+  Number(id.slice(id.lastIndexOf("-") + 1));
 
 /** Read every page so no task is silently dropped by the API page size. */
-export async function loadTasks() {
+export async function loadTasks(boardId: string) {
   const byId = new Map<string, Task>();
   let offset = 0,
     total = 0;
   do {
     const page = await command<{ tasks: Task[]; total: number }>("list_tasks", {
+      boardId,
       limit: 100,
       offset,
     });

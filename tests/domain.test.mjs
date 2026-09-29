@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,7 +18,11 @@ function fixture(t) {
       now += 900001;
     },
     make: () =>
-      store.execute("create_task", { title: "Implement something" }, human),
+      store.execute(
+        "create_task",
+        { boardId: "BOARD-1", title: "Implement something" },
+        human,
+      ),
   };
 }
 test("claim exclusion, agent ownership, heartbeat and review lifecycle", (t) => {
@@ -137,7 +142,7 @@ test("strict validation blocks unrecognized fields and unsafe artifact URLs", (t
   const s = fixture(t);
   const task = s.make();
   assert.throws(
-    () => s.execute("create_task", { title: "", actor: "fake" }, human),
+    () => s.execute("create_task", { boardId: "BOARD-1", title: "", actor: "fake" }, human),
     { code: "VALIDATION" },
   );
   assert.throws(
@@ -187,19 +192,28 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
     { id: "TasknBoard Agent", kind: "human", token: "must-not-be-kept" },
   ]);
   const info = s.execute("workspace_info", {}, human);
-  assert.equal(info.schemaVersion, 6);
-  assert.deepEqual(info.actor, human);
+  assert.equal(info.schemaVersion, 11);
+  assert.equal(info.boards[0].id, "BOARD-1");
+  assert.equal(Object.hasOwn(info, "settings"), false);
+  assert.deepEqual(info.actor, {
+    ...human,
+    name: "",
+    avatar: "",
+    useGravatar: false,
+    gravatarUrl: "",
+    gravatarEmail: "",
+  });
   assert.deepEqual(info.actors, [
-    { id: "Morgan", kind: "agent", name: "", avatar: "" },
-    { id: "TasknBoard Agent", kind: "human", name: "", avatar: "" },
-    { ...human, name: "", avatar: "" },
+    { id: "Morgan", kind: "agent", name: "", avatar: "", useGravatar: false, gravatarUrl: "" },
+    { id: "TasknBoard Agent", kind: "human", name: "", avatar: "", useGravatar: false, gravatarUrl: "" },
+    { ...human, name: "", avatar: "", useGravatar: false, gravatarUrl: "" },
   ]);
   assert.ok(!JSON.stringify(info).includes("must-not-be-kept"));
   assert.throws(
     () =>
       s.execute(
         "create_task",
-        { title: "Should not be created" },
+        { boardId: "BOARD-1", title: "Should not be created" },
         {
           id: "Morgan",
           kind: "human",
@@ -209,7 +223,8 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
   );
   assert.equal(s.execute("list_tasks", {}, human).total, 0);
   const backup = s.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 6);
+  assert.equal(backup.schemaVersion, 11);
+  assert.equal(backup.boards[0].id, "BOARD-1");
   assert.deepEqual(backup.actors, info.actors);
 });
 test("actors edit only their own display name and picture", (t) => {
@@ -221,16 +236,26 @@ test("actors edit only their own display name and picture", (t) => {
     { name: "  Ada Lovelace ", avatar: picture },
     human,
   );
-  assert.deepEqual(own, { ...human, name: "Ada Lovelace", avatar: picture });
+  assert.deepEqual(own, {
+    ...human,
+    name: "Ada Lovelace",
+    avatar: picture,
+    useGravatar: false,
+    gravatarUrl: "",
+    gravatarEmail: "",
+  });
   assert.deepEqual(s.execute("update_profile", { avatar: "" }, human), {
     ...human,
     name: "Ada Lovelace",
     avatar: "",
+    useGravatar: false,
+    gravatarUrl: "",
+    gravatarEmail: "",
   });
   const roster = s.execute("workspace_info", {}, human).actors;
   assert.deepEqual(
     roster.find((entry) => entry.id === "Morgan"),
-    { id: "Morgan", kind: "human", name: "", avatar: "" },
+    { id: "Morgan", kind: "human", name: "", avatar: "", useGravatar: false, gravatarUrl: "" },
   );
   for (const avatar of [
     "https://example.com/me.png",
@@ -245,6 +270,74 @@ test("actors edit only their own display name and picture", (t) => {
   });
   assert.throws(
     () => s.execute("update_profile", { id: "Morgan", name: "X" }, human),
+    { code: "VALIDATION" },
+  );
+});
+test("Gravatar email stays private, normalizes for hashing, and does not replace uploaded avatars", (t) => {
+  const s = fixture(t);
+  s.registerActors([{ id: "Morgan", kind: "human" }]);
+  const picture = "data:image/png;base64,iVBORw0KGgo=";
+  const email = "test.user@example.com";
+  const hash = createHash("sha256").update(email).digest("hex");
+  const url = `https://gravatar.com/avatar/${hash}?s=128&d=404`;
+  const saved = s.execute(
+    "update_profile",
+    {
+      avatar: picture,
+      useGravatar: true,
+      gravatarEmail: "  Test.User@Example.com  ",
+    },
+    human,
+  );
+  assert.equal(saved.gravatarEmail, email);
+  assert.equal(saved.gravatarUrl, url);
+  assert.equal(saved.avatar, picture);
+
+  const info = s.execute("workspace_info", {}, human);
+  const publicSelf = info.actors.find((actor) => actor.id === human.id);
+  assert.equal(info.actor.gravatarEmail, email);
+  assert.equal(publicSelf.gravatarUrl, url);
+  assert.equal(Object.hasOwn(publicSelf, "gravatarEmail"), false);
+  const otherInfo = s.execute("workspace_info", {}, {
+    id: "Morgan",
+    kind: "human",
+  });
+  assert.equal(otherInfo.actor.gravatarEmail, "");
+  assert.ok(!JSON.stringify(otherInfo.actors).includes(email));
+
+  const disabled = s.execute("update_profile", { useGravatar: false }, human);
+  assert.equal(disabled.useGravatar, false);
+  assert.equal(disabled.gravatarUrl, "");
+  assert.equal(disabled.gravatarEmail, email);
+  assert.equal(disabled.avatar, picture);
+  assert.throws(
+    () =>
+      s.execute(
+        "update_profile",
+        { useGravatar: true, gravatarEmail: "" },
+        human,
+      ),
+    { code: "VALIDATION" },
+  );
+  const cleared = s.execute(
+    "update_profile",
+    { useGravatar: false, gravatarEmail: "" },
+    human,
+  );
+  assert.equal(cleared.gravatarEmail, "");
+  assert.equal(cleared.gravatarUrl, "");
+  assert.equal(cleared.avatar, picture);
+  assert.throws(
+    () => s.execute("update_profile", { useGravatar: true }, human),
+    { code: "VALIDATION" },
+  );
+  assert.throws(
+    () =>
+      s.execute(
+        "update_profile",
+        { gravatarEmail: "not-an-email" },
+        human,
+      ),
     { code: "VALIDATION" },
   );
 });
@@ -310,7 +403,11 @@ test("database persistence and independent connections enforce version checks", 
     second.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  const task = first.execute("create_task", { title: "Persist me" }, human);
+  const task = first.execute(
+    "create_task",
+    { boardId: "BOARD-1", title: "Persist me" },
+    human,
+  );
   first.execute("claim_task", { id: task.id, expectedVersion: 1 }, a);
   assert.throws(
     () => second.execute("claim_task", { id: task.id, expectedVersion: 1 }, b),
@@ -439,7 +536,7 @@ test("labels support multiple tags, normalization, clearing and strict validatio
   const s = fixture(t);
   let task = s.execute(
     "create_task",
-    { title: "Tagged task", labels: [" UX ", "Product", "UX"] },
+    { boardId: "BOARD-1", title: "Tagged task", labels: [" UX ", "Product", "UX"] },
     human,
   );
   assert.deepEqual(task.labels, ["UX", "Product"]);
@@ -468,7 +565,7 @@ test("labels support multiple tags, normalization, clearing and strict validatio
     );
   }
   assert.throws(
-    () => s.execute("create_task", { title: "Old field", label: "UX" }, human),
+    () => s.execute("create_task", { boardId: "BOARD-1", title: "Old field", label: "UX" }, human),
     { code: "VALIDATION" },
   );
   task = s.execute(
@@ -489,7 +586,11 @@ test("stored single labels upgrade once without changing task history", async (t
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "workspace.sqlite");
   let store = createStore(path);
-  const task = store.execute("create_task", { title: "Existing task" }, human);
+  const task = store.execute(
+    "create_task",
+    { boardId: "BOARD-1", title: "Existing task" },
+    human,
+  );
   store.close();
   const db = new DatabaseSync(path);
   const { labels, events, commentCount, ...legacy } = task;
@@ -582,7 +683,7 @@ test("epics group tasks, derive counts, and filter lists", (t) => {
   });
   const inside = s.execute(
     "create_task",
-    { title: "Welcome screen", epic: epic.id },
+    { boardId: "BOARD-1", title: "Welcome screen", epic: epic.id },
     human,
   );
   assert.equal(inside.epic, epic.id);
@@ -669,11 +770,15 @@ test("epic writes are human-only, versioned and validated", (t) => {
       { code: "VALIDATION" },
     );
   assert.throws(
-    () => s.execute("create_task", { title: "Lost", epic: "EPIC-99" }, human),
+    () => s.execute("create_task", { boardId: "BOARD-1", title: "Lost", epic: "EPIC-99" }, human),
     { code: "NOT_FOUND" },
   );
   assert.throws(
-    () => s.execute("create_task", { title: "Bad", epic: "TNB-1" }, human),
+    () => s.execute("create_task", { boardId: "BOARD-1", title: "Bad", epic: "TNB-1" }, human),
+    { code: "NOT_FOUND" },
+  );
+  assert.throws(
+    () => s.execute("create_task", { boardId: "BOARD-1", title: "Bad", epic: "epic-1" }, human),
     { code: "VALIDATION" },
   );
   assert.throws(() => s.execute("list_tasks", { epic: "" }, human), {
@@ -685,7 +790,7 @@ test("agents file claimed tasks into epics under lease rules", (t) => {
   const epic = s.execute("create_epic", { title: "Search" }, human);
   const created = s.execute(
     "create_task",
-    { title: "Agent-made", epic: epic.id },
+    { boardId: "BOARD-1", title: "Agent-made", epic: epic.id },
     a,
   );
   assert.equal(created.epic, epic.id);
@@ -719,10 +824,10 @@ test("agents file claimed tasks into epics under lease rules", (t) => {
 test("an epic archives only without open work and then rejects new tasks", (t) => {
   const s = fixture(t);
   let epic = s.execute("create_epic", { title: "Launch" }, human);
-  let open = s.execute("create_task", { title: "Open", epic: epic.id }, human);
+  let open = s.execute("create_task", { boardId: "BOARD-1", title: "Open", epic: epic.id }, human);
   let finished = s.execute(
     "create_task",
-    { title: "Finished", epic: epic.id },
+    { boardId: "BOARD-1", title: "Finished", epic: epic.id },
     human,
   );
   for (const status of ["in_review", "done"])
@@ -768,7 +873,7 @@ test("an epic archives only without open work and then rejects new tasks", (t) =
     { code: "ARCHIVED" },
   );
   assert.throws(
-    () => s.execute("create_task", { title: "Late", epic: epic.id }, human),
+    () => s.execute("create_task", { boardId: "BOARD-1", title: "Late", epic: epic.id }, human),
     { code: "EPIC_ARCHIVED" },
   );
   // Done work keeps its project through unrelated edits.
@@ -789,7 +894,11 @@ test("existing tasks join no epic once, without a version change", async (t) => 
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "workspace.sqlite");
   let store = createStore(path);
-  const task = store.execute("create_task", { title: "Before epics" }, human);
+  const task = store.execute(
+    "create_task",
+    { boardId: "BOARD-1", title: "Before epics" },
+    human,
+  );
   store.close();
   const db = new DatabaseSync(path);
   const { epic, events, commentCount, ...legacy } = task;
@@ -832,4 +941,207 @@ test("epic colours rotate through the palette and accept custom hex", (t) => {
       () => s.execute("create_epic", { title: "Bad", color }, human),
       { code: "VALIDATION" },
     );
+});
+const other = { id: "teammate", kind: "human" };
+test("views save filters, resolve @me per reader and filter task lists", (t) => {
+  const s = fixture(t);
+  const epic = s.execute("create_epic", { title: "Launch" }, human);
+  const mine = s.execute(
+    "create_task",
+    { boardId: "BOARD-1", title: "Mine", assignee: "you", labels: ["Bug"], priority: "high", epic: epic.id },
+    human,
+  );
+  const theirs = s.execute(
+    "create_task",
+    { boardId: "BOARD-1", title: "Theirs", assignee: "teammate", labels: ["Bug", "UI"] },
+    human,
+  );
+  const loose = s.execute("create_task", { boardId: "BOARD-1", title: "Loose end", labels: [] }, human);
+  const view = s.execute(
+    "create_view",
+    {
+      name: "  My bugs  ",
+      shared: true,
+      filters: {
+        conditions: [
+          { field: "assignee", op: "is", values: ["@me"] },
+          { field: "label", op: "is", values: [" Bug "] },
+        ],
+      },
+      display: { layout: "list", orderBy: "priority" },
+    },
+    human,
+  );
+  assert.equal(view.id, "VIEW-1");
+  assert.equal(view.name, "My bugs");
+  assert.equal(view.owner, "you");
+  assert.equal(view.favorite, false);
+  assert.deepEqual(view.display, { layout: "list", groupBy: "status", orderBy: "priority" });
+  assert.deepEqual(view.filters.conditions[1].values, ["Bug"]);
+  const ids = (actor, args) =>
+    s.execute("list_tasks", { view: view.id, ...args }, actor).tasks.map((x) => x.id);
+  // "@me" is whoever reads the view.
+  assert.deepEqual(ids(human), [mine.id]);
+  assert.deepEqual(ids(other), [theirs.id]);
+  // A view combines with the ordinary list filters.
+  assert.deepEqual(ids(human, { status: "done" }), []);
+  // "is not" and "none" values.
+  const unlabeled = s.execute(
+    "create_view",
+    {
+      name: "No labels, outside Launch",
+      filters: {
+        conditions: [
+          { field: "label", op: "is", values: [""] },
+          { field: "epic", op: "is_not", values: [epic.id] },
+        ],
+      },
+    },
+    human,
+  );
+  assert.deepEqual(
+    s.execute("list_tasks", { view: unlabeled.id }, human).tasks.map((x) => x.id),
+    [loose.id],
+  );
+  const query = s.execute(
+    "create_view",
+    { name: "Search", filters: { query: "  end " } },
+    human,
+  );
+  assert.equal(query.filters.query, "end");
+  assert.equal(s.execute("list_tasks", { view: query.id }, human).total, 1);
+});
+test("personal views stay private; shared views are editable by people", (t) => {
+  const s = fixture(t);
+  const personal = s.execute("create_view", { name: "Scratch" }, human);
+  assert.equal(personal.shared, false);
+  const shared = s.execute("create_view", { name: "Team", shared: true }, human);
+  const names = (actor) => s.execute("list_views", {}, actor).views.map((v) => v.name);
+  assert.deepEqual(names(human), ["Scratch", "Team"]);
+  assert.deepEqual(names(other), ["Team"]);
+  // Agents read shared views only, and never write them.
+  assert.deepEqual(names(a), ["Team"]);
+  for (const [command, args] of [
+    ["create_view", { name: "Agent view" }],
+    ["update_view", { id: shared.id, expectedVersion: 1, patch: { name: "x" } }],
+    ["delete_view", { id: shared.id, expectedVersion: 1 }],
+    ["favorite_view", { id: shared.id, favorite: true }],
+  ])
+    assert.throws(() => s.execute(command, args, a), { code: "FORBIDDEN" });
+  // Someone else's personal view does not exist for them.
+  for (const [command, args] of [
+    ["list_tasks", { view: personal.id }],
+    ["update_view", { id: personal.id, expectedVersion: 1, patch: { name: "x" } }],
+    ["delete_view", { id: personal.id, expectedVersion: 1 }],
+    ["favorite_view", { id: personal.id, favorite: true }],
+  ])
+    assert.throws(() => s.execute(command, args, other), { code: "NOT_FOUND" });
+  // Any person edits a shared view; only its owner changes who sees it.
+  const renamed = s.execute(
+    "update_view",
+    { id: shared.id, expectedVersion: 1, patch: { name: "Team board", display: { layout: "list" } } },
+    other,
+  );
+  assert.equal(renamed.version, 2);
+  assert.equal(renamed.owner, "you");
+  assert.deepEqual(renamed.display, { layout: "list", groupBy: "status", orderBy: "created" });
+  assert.throws(
+    () => s.execute("update_view", { id: shared.id, expectedVersion: 2, patch: { shared: false } }, other),
+    { code: "FORBIDDEN" },
+  );
+  assert.throws(
+    () => s.execute("update_view", { id: shared.id, expectedVersion: 1, patch: { name: "Stale" } }, human),
+    { code: "VERSION_CONFLICT" },
+  );
+  const madePrivate = s.execute(
+    "update_view",
+    { id: shared.id, expectedVersion: 2, patch: { shared: false } },
+    human,
+  );
+  assert.equal(madePrivate.shared, false);
+  assert.deepEqual(names(other), []);
+});
+test("favourites are per person and deleting a view removes them", (t) => {
+  const s = fixture(t);
+  const view = s.execute("create_view", { name: "Hot", shared: true }, human);
+  const starred = s.execute("favorite_view", { id: view.id, favorite: true }, human);
+  assert.equal(starred.favorite, true);
+  assert.equal(starred.version, 1);
+  // Starring twice is harmless.
+  s.execute("favorite_view", { id: view.id, favorite: true }, human);
+  assert.equal(s.execute("list_views", {}, human).views[0].favorite, true);
+  assert.equal(s.execute("list_views", {}, other).views[0].favorite, false);
+  let backup = s.execute("export_workspace", {}, human);
+  assert.deepEqual(backup.viewFavorites, [{ actor: "you", viewId: view.id }]);
+  assert.equal(backup.views.length, 1);
+  assert.throws(
+    () => s.execute("delete_view", { id: view.id, expectedVersion: 2 }, other),
+    { code: "VERSION_CONFLICT" },
+  );
+  assert.deepEqual(
+    s.execute("delete_view", { id: view.id, expectedVersion: 1 }, other),
+    { id: view.id, deleted: true },
+  );
+  assert.deepEqual(s.execute("list_views", {}, human).views, []);
+  assert.throws(() => s.execute("list_tasks", { view: view.id }, human), {
+    code: "NOT_FOUND",
+  });
+  backup = s.execute("export_workspace", {}, human);
+  assert.deepEqual(backup.viewFavorites, []);
+  // The deletion is audited with the view as it was.
+  const deleted = backup.events.find((e) => e.kind === "delete_view");
+  assert.equal(JSON.parse(deleted.body).name, "Hot");
+  // IDs are never reused.
+  assert.equal(s.execute("create_view", { name: "Next" }, human).id, "VIEW-2");
+});
+test("view filters and display settings are strictly validated", (t) => {
+  const s = fixture(t);
+  const bad = [
+    { name: "" },
+    { name: "x".repeat(81) },
+    { name: "x", filters: { conditions: [{ field: "status", op: "is", values: ["nope"] }] } },
+    { name: "x", filters: { conditions: [{ field: "status", op: "is", values: [] }] } },
+    { name: "x", filters: { conditions: [{ field: "title", op: "is", values: ["a"] }] } },
+    { name: "x", filters: { conditions: [{ field: "status", op: "has", values: ["done"] }] } },
+    { name: "x", filters: { conditions: [{ field: "epic", op: "is", values: ["Launch"] }] } },
+    { name: "x", filters: { extra: true } },
+    { name: "x", display: { layout: "table" } },
+    { name: "x", display: { groupBy: "label" } },
+    { name: "x", color: "red" },
+  ];
+  for (const input of bad)
+    assert.throws(() => s.execute("create_view", input, human), { code: "VALIDATION" }, JSON.stringify(input));
+  assert.throws(
+    () =>
+      s.execute(
+        "create_view",
+        { name: "x", filters: { conditions: [{ field: "epic", op: "is", values: ["EPIC-9"] }] } },
+        human,
+      ),
+    { code: "NOT_FOUND" },
+  );
+  assert.throws(
+    () => s.execute("update_view", { id: "VIEW-1", expectedVersion: 1, patch: {} }, human),
+    { code: "VALIDATION" },
+  );
+});
+test("views arrive by migration without touching existing tasks", async (t) => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const dir = mkdtempSync(join(tmpdir(), "tasknboard-views-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "workspace.sqlite");
+  let store = createStore(path);
+  const task = store.execute(
+    "create_task",
+    { boardId: "BOARD-1", title: "Before views" },
+    human,
+  );
+  store.close();
+  const db = new DatabaseSync(path);
+  db.exec("DROP TABLE views; DROP TABLE view_favorites; DELETE FROM migrations WHERE version=7");
+  db.close();
+  store = createStore(path);
+  assert.equal(store.execute("get_task", { id: task.id }, human).version, task.version);
+  assert.equal(store.execute("create_view", { name: "First" }, human).id, "VIEW-1");
+  store.close();
 });

@@ -15,6 +15,7 @@ import { Icon } from "./Icons";
 import { formatUtcTimestamp } from "./formatting";
 import { Avatar, usePersonName } from "./People";
 import { StatusPicker } from "./Dialogs";
+import type { TaskGroup } from "./Views";
 
 export { Avatar };
 
@@ -212,6 +213,8 @@ type BoardProps = {
   onNew?: () => void;
   pending?: Map<string, Status>;
   list?: boolean;
+  /** List sections, from a view's grouping. Without them the list is by status. */
+  groups?: TaskGroup[];
   presentation?: boolean;
 };
 
@@ -223,7 +226,7 @@ export function TaskCard({
   onMove,
   pending,
   presentation,
-}: Omit<BoardProps, "tasks" | "pending" | "list" | "onNew"> & {
+}: Omit<BoardProps, "tasks" | "pending" | "list" | "onNew" | "groups"> & {
   task: Task;
   pending?: Status;
 }) {
@@ -319,15 +322,88 @@ export function Board({
   onNew,
   pending = new Map(),
   list = false,
+  groups,
   presentation = false,
 }: BoardProps) {
   const [dropTarget, setDropTarget] = useState<Status | null>(null);
   const canDrag = Boolean(onMove) && !presentation;
   if (list) {
-    const rows = [...tasks].sort(
-      (a, b) =>
-        columns.findIndex((c) => c.id === a.status) -
-        columns.findIndex((c) => c.id === b.status),
+    const sections = groups ?? [
+      {
+        key: "all",
+        label: null,
+        tasks: [...tasks].sort(
+          (a, b) =>
+            columns.findIndex((c) => c.id === a.status) -
+            columns.findIndex((c) => c.id === b.status),
+        ),
+      },
+    ];
+    const width = epics ? 6 : 5;
+    const row = (t: Task) => (
+      <tr key={t.id} className={pending.has(t.id) ? "is-pending" : ""}>
+        <td className="list-task">
+          <span className="task-id">{t.id}</span>
+          <button
+            type="button"
+            className="list-open"
+            onClick={() => onOpen(t)}
+            aria-label={`${t.id}: ${t.title}, ${t.commentCount} ${t.commentCount === 1 ? "comment" : "comments"}`}
+          >
+            {t.title}
+          </button>
+          {t.commentCount > 0 && (
+            <span
+              className="comment-count"
+              title={`${t.commentCount} ${t.commentCount === 1 ? "comment" : "comments"}`}
+            >
+              <Icon name="comment" size={13} />
+              <span aria-hidden="true">{t.commentCount}</span>
+              <span className="sr-only">
+                {t.commentCount === 1 ? " comment" : " comments"}
+              </span>
+            </span>
+          )}
+          <ClaimChip task={t} />
+        </td>
+        {epics && (
+          <td data-label="Epic">
+            {t.epic ? (
+              <EpicTag epic={epics.get(t.epic)} />
+            ) : (
+              <span className="small">None</span>
+            )}
+          </td>
+        )}
+        <td data-label="Status">
+          {onMove ? (
+            <StatusPicker
+              task={t}
+              pending={pending.get(t.id)}
+              onMove={onMove}
+            />
+          ) : (
+            <span className="status-cell">
+              <StatusIcon status={t.status} />
+              {statusTitle(t.status)}
+            </span>
+          )}
+        </td>
+        <td data-label="Priority">
+          <span className="priority-cell">
+            <PriorityMark task={t} />
+            {priorities.find((p) => p.id === t.priority)?.title}
+          </span>
+        </td>
+        <td data-label="Assignee">
+          <Assignee name={t.assignee} agent={agents.has(t.assignee)} />
+        </td>
+        <td data-label="Labels">
+          <div className="task-labels">
+            {t.labels.map((label) => <Label key={label} label={label} />)}
+          </div>
+        </td>
+      </tr>
     );
     return (
       <div className="task-list" role="region" aria-label="Task list">
@@ -342,73 +418,19 @@ export function Board({
               <th scope="col">Label</th>
             </tr>
           </thead>
-          <tbody>
-            {rows.map((t) => (
-              <tr key={t.id} className={pending.has(t.id) ? "is-pending" : ""}>
-                <td className="list-task">
-                  <span className="task-id">{t.id}</span>
-                  <button
-                    type="button"
-                    className="list-open"
-                    onClick={() => onOpen(t)}
-                    aria-label={`${t.id}: ${t.title}, ${t.commentCount} ${t.commentCount === 1 ? "comment" : "comments"}`}
-                  >
-                    {t.title}
-                  </button>
-                  {t.commentCount > 0 && (
-                    <span
-                      className="comment-count"
-                      title={`${t.commentCount} ${t.commentCount === 1 ? "comment" : "comments"}`}
-                    >
-                      <Icon name="comment" size={13} />
-                      <span aria-hidden="true">{t.commentCount}</span>
-                      <span className="sr-only">
-                        {t.commentCount === 1 ? " comment" : " comments"}
-                      </span>
-                    </span>
-                  )}
-                  <ClaimChip task={t} />
-                </td>
-                {epics && (
-                  <td data-label="Epic">
-                    {t.epic ? (
-                      <EpicTag epic={epics.get(t.epic)} />
-                    ) : (
-                      <span className="small">None</span>
-                    )}
-                  </td>
-                )}
-                <td data-label="Status">
-                  {onMove ? (
-                    <StatusPicker
-                      task={t}
-                      pending={pending.get(t.id)}
-                      onMove={onMove}
-                    />
-                  ) : (
-                    <span className="status-cell">
-                      <StatusIcon status={t.status} />
-                      {statusTitle(t.status)}
-                    </span>
-                  )}
-                </td>
-                <td data-label="Priority">
-                  <span className="priority-cell">
-                    <PriorityMark task={t} />
-                    {priorities.find((p) => p.id === t.priority)?.title}
-                  </span>
-                </td>
-                <td data-label="Assignee">
-                  <Assignee name={t.assignee} agent={agents.has(t.assignee)} />
-                </td>
-                <td data-label="Labels">
-                  <div className="task-labels">
-                    {t.labels.map((label) => <Label key={label} label={label} />)}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
+          {sections.map((section) => (
+            <tbody key={section.key}>
+              {section.label !== null && (
+                <tr className="group-row">
+                  <th scope="rowgroup" colSpan={width}>
+                    <span className="group-title">{section.label}</span>
+                    <span className="count">{section.tasks.length}</span>
+                  </th>
+                </tr>
+              )}
+              {section.tasks.map(row)}
+            </tbody>
+          ))}
         </table>
       </div>
     );

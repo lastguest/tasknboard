@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useState } from "react";
 import type { Actor } from "./types";
 import { Icon } from "./Icons";
 
@@ -47,24 +47,33 @@ export function Avatar({
   const people = usePeople();
   const person = people.get(name);
   const label = displayName(people, name);
-  const picture = person?.avatar?.startsWith("data:image/")
-    ? person.avatar
-    : "";
+  const picture = person?.useGravatar
+    ? person.gravatarUrl ?? ""
+    : person?.avatar?.startsWith("data:image/")
+      ? person.avatar
+      : "";
+  const [failedPicture, setFailedPicture] = useState("");
+  const visiblePicture = picture === failedPicture ? "" : picture;
   const classes = [
     "avatar",
     size === "large" && "large",
     !name && "none",
-    name && !picture && (agent ? "bot" : `tone-${avatarTone(name)}`),
-    picture && "picture",
+    name && !visiblePicture && (agent ? "bot" : `tone-${avatarTone(name)}`),
+    visiblePicture && "picture",
   ]
     .filter(Boolean)
     .join(" ");
   return (
     <span className={classes} aria-hidden="true">
-      {picture ? (
-        <img src={picture} alt="" draggable={false} />
+      {visiblePicture ? (
+        <img
+          src={visiblePicture}
+          alt=""
+          draggable={false}
+          onError={() => setFailedPicture(visiblePicture)}
+        />
       ) : agent && name ? (
-        <Icon name="bot" size={size === "large" ? 28 : 15} />
+        <Icon name="cursor" size={size === "large" ? 28 : 15} />
       ) : (
         initialsOf(label) || "—"
       )}
