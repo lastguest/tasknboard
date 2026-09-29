@@ -340,7 +340,6 @@ test("the board migration preserves legacy keys and epic references", (t) => {
   db.close();
 
   store = createStore(path);
-  t.after(() => store.close());
   const [defaultBoard] = store.execute("list_boards", {}, human).boards;
   assert.equal(defaultBoard.id, "BOARD-1");
   assert.equal(defaultBoard.prefix, "APP");
@@ -398,4 +397,6 @@ test("the board migration preserves legacy keys and epic references", (t) => {
     { prefix: "APP", boardId: defaultBoard.id },
     { prefix: "TNB", boardId: defaultBoard.id },
   ]);
+  // Close before the directory is removed: Windows cannot delete an open file.
+  store.close();
 });

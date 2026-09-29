@@ -173,6 +173,10 @@ test("Windows helper runs with non-ASCII paths", { skip: process.platform !== "w
   const helper = createCliHelper({ desktop: true, platform: "win32", home, resources, database, searchPath: join(home, ".local", "bin") });
   const installed = await helper.install();
   assert.equal(installed.installed, true);
-  const { stdout } = await exec(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `""${installed.path}""`], { env: { ...process.env, TASKNBOARD_DB: "", TASKNBOARD_SERVER_URL: "" } });
+  const { stdout } = await exec(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `""${installed.path}""`], {
+    env: { ...process.env, TASKNBOARD_DB: "", TASKNBOARD_SERVER_URL: "" },
+    // cmd /s /c needs the outer quotes as written; Node would escape them.
+    windowsVerbatimArguments: true,
+  });
   assert.equal(JSON.parse(stdout.trim()).db, database);
 });

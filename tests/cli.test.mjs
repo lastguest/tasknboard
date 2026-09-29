@@ -268,7 +268,11 @@ test("one-shot commands print JSON and fail with a JSON error", async (t) => {
   const env = { ...process.env, TASKNBOARD_DB: join(directory, "cli.sqlite") };
   delete env.TASKNBOARD_SERVER_URL;
   // Run the executable itself, as the installed `tasknboard` command does.
-  const cli = (...args) => run("dist-cli/tasknboard.mjs", args, { env });
+  // Windows has no shebang: the installed command there calls node.
+  const cli = (...args) =>
+    process.platform === "win32"
+      ? run(process.execPath, ["dist-cli/tasknboard.mjs", ...args], { env })
+      : run("dist-cli/tasknboard.mjs", args, { env });
   const createdBoard = JSON.parse((await cli("create_board", '{"name":"Engineering","prefix":"ENG"}')).stdout);
   assert.match(createdBoard.id, /^BOARD-\d+$/);
   const boards = JSON.parse((await cli("list_boards")).stdout);

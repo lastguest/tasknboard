@@ -18,8 +18,9 @@ const runtime = {
 test("client commands preserve literal paths and separate agent identities", () => {
   for (const client of ["codex", "claude"]) {
     const helper = connectionHelper(client, runtime, client);
+    // "sh" from PATH: Windows runners have it from Git for Windows.
     const output = execFileSync(
-      "/bin/sh",
+      "sh",
       ["-c", `${client}() { printf '%s\\0' "$@"; }; ${helper.text}`],
       { encoding: "utf8" },
     );
