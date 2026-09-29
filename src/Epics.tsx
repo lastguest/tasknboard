@@ -60,12 +60,14 @@ export function EpicsPage({
   canManage,
   onOpen,
   onNew,
+  onMenu,
 }: {
   epics: Epic[];
   unfiled: number;
   canManage: boolean;
   onOpen: (epic: Epic) => void;
   onNew: () => void;
+  onMenu: (e: React.MouseEvent<HTMLElement>, epic: Epic) => void;
 }) {
   return (
     <div className="epics-page">
@@ -87,7 +89,11 @@ export function EpicsPage({
             const { open } = epicProgress(epic);
             const summary = plainText(epic.description);
             return (
-              <li key={epic.id} className="epic-card">
+              <li
+                key={epic.id}
+                className="epic-card"
+                onContextMenu={(e) => onMenu(e, epic)}
+              >
                 <div className="epic-card-top">
                   <span
                     className="epic-glyph large"

@@ -2048,6 +2048,7 @@ export const shortcuts: [string, string][] = [
   ["F", "Focus the assignee filter"],
   ["?", "Open keyboard help"],
   ["[", "Collapse / expand the sidebar"],
+  ["Shift F10", "Open the context menu of the focused item"],
   ["Esc", "Close a dialog, or exit stand-up"],
   ["← / →", "Stand-up: previous / next participant"],
   ["Home", "Stand-up: back to Team overview"],

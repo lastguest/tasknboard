@@ -210,6 +210,8 @@ type BoardProps = {
   onOpen: (t: Task) => void;
   onMove?: (t: Task, s: Status) => void;
   onNew?: () => void;
+  /** Opens the task's context menu. */
+  onMenu?: (e: React.MouseEvent<HTMLElement>, t: Task) => void;
   pending?: Map<string, Status>;
   list?: boolean;
   presentation?: boolean;
@@ -221,6 +223,7 @@ export function TaskCard({
   epics,
   onOpen,
   onMove,
+  onMenu,
   pending,
   presentation,
 }: Omit<BoardProps, "tasks" | "pending" | "list" | "onNew"> & {
@@ -241,6 +244,7 @@ export function TaskCard({
       className={`task-card ${signal} ${pending ? "is-pending" : ""}`}
       aria-label={`${task.id}: ${task.title}, ${commentLabel}`}
       draggable={Boolean(onMove) && !pending}
+      onContextMenu={onMenu && ((e) => onMenu(e, task))}
       onDragStart={(e) => {
         e.dataTransfer.setData("text/plain", task.id);
         e.dataTransfer.effectAllowed = "move";
@@ -317,6 +321,7 @@ export function Board({
   onOpen,
   onMove,
   onNew,
+  onMenu,
   pending = new Map(),
   list = false,
   presentation = false,
@@ -344,7 +349,11 @@ export function Board({
           </thead>
           <tbody>
             {rows.map((t) => (
-              <tr key={t.id} className={pending.has(t.id) ? "is-pending" : ""}>
+              <tr
+                key={t.id}
+                className={pending.has(t.id) ? "is-pending" : ""}
+                onContextMenu={onMenu && ((e) => onMenu(e, t))}
+              >
                 <td className="list-task">
                   <span className="task-id">{t.id}</span>
                   <button
@@ -469,6 +478,7 @@ export function Board({
                   epics={epics}
                   onOpen={onOpen}
                   onMove={canDrag ? onMove : undefined}
+                  onMenu={onMenu}
                   pending={pending.get(t.id)}
                   presentation={presentation}
                 />
