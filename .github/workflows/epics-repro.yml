@@ -1,0 +1,36 @@
+name: Epics test repro (temporary)
+
+on:
+  push:
+    branches: [claude/pensive-hamilton-j0sae0]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install chromium
+      - name: Epics test alone
+        continue-on-error: true
+        run: npm run test:ui -- tests/browser/followups.spec.ts -g "Epics group tasks" --repeat-each=20 --output=test-results/alone
+      - name: Full suite
+        continue-on-error: true
+        run: npm run test:ui -- --repeat-each=4 --output=test-results/suite
+      - name: Upload traces
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: epics-repro
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 3
