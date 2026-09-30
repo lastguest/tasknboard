@@ -44,6 +44,7 @@ export function Dialog({
   footer,
   wide = false,
   dismissOnBackdrop = false,
+  closeDisabled = false,
   className = "",
 }: {
   title: React.ReactNode;
@@ -52,6 +53,8 @@ export function Dialog({
   footer?: React.ReactNode;
   wide?: boolean;
   dismissOnBackdrop?: boolean;
+  /** Disables the Close button while the dialog cannot close, such as during a save. */
+  closeDisabled?: boolean;
   className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -126,6 +129,7 @@ export function Dialog({
           type="button"
           className="icon-button"
           aria-label="Close dialog"
+          disabled={closeDisabled}
           onClick={() => close.current()}
         >
           <Icon name="close" />
@@ -1440,6 +1444,7 @@ export function TaskEditor({
       <Dialog
         title="New task"
         onClose={requestClose}
+        closeDisabled={Boolean(pending)}
         footer={
           discard ? (
             discardBar

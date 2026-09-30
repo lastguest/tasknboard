@@ -237,6 +237,24 @@ test("The task Close button is disabled while a save runs", async ({ page }) => 
   await expect(details).toBeHidden();
 });
 
+test("The New task Close button is disabled while the task is created", async ({ page }) => {
+  let release!: () => void;
+  const held = new Promise<void>((done) => (release = done));
+  await page.route("**/api/create_task", async (route) => {
+    const response = await route.fetch();
+    await held;
+    await route.fulfill({ response });
+  });
+  await connect(page);
+  await page.getByRole("button", { name: "New task", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "New task" });
+  await dialog.getByLabel("Title").fill(`Creating ${key()}`);
+  await dialog.getByRole("button", { name: "Create task" }).click();
+  await expect(dialog.getByRole("button", { name: "Close dialog" })).toBeDisabled();
+  release();
+  await expect(dialog).toBeHidden();
+});
+
 test("A stale save keeps the draft and merges untouched fields", async ({ page }) => {
   const task = await create(`Stale ${key()}`);
   await connect(page);
