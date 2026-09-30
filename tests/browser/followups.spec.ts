@@ -24,6 +24,9 @@ async function connect(page: Page) {
   await page.goto(baseURL);
   await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
 }
+/** The Save button, also while it reads "Saving…". Hidden means no save is running. */
+const saveButton = (scope: Locator) =>
+  scope.getByRole("button", { name: /^(Save changes|Saving…)$/ });
 const card = (page: Page, id: string) => page.getByRole("button", { name: new RegExp(`^${id}:`) });
 const search = (page: Page) => page.getByRole("searchbox");
 const assigneeFilter = (page: Page) => page.getByRole("group", { name: "Filter by assignee" });
@@ -160,7 +163,7 @@ test("Task sidebar pickers search, stage changes, and save label arrays", async 
   expect(saved.labels).toEqual(["Existing", "Second label"]);
 
   // The tab stays open on the saved version.
-  await expect(details.getByRole("button", { name: "Save changes" })).toBeHidden();
+  await expect(saveButton(details)).toBeHidden();
   await details.getByRole("button", { name: "Labels: Existing, Second label. Edit labels" }).click();
   picker = page.getByRole("dialog", { name: "Choose labels" });
   await picker.getByLabel("Existing").uncheck();
@@ -181,7 +184,7 @@ test("Tasks open in tabs that keep drafts and ask before a draft is discarded", 
   await card(page, first.id).click();
   await expect(details).toContainText(first.id);
   // Save and Cancel show only for a draft; the header stays put while the task scrolls.
-  await expect(details.getByRole("button", { name: "Save changes" })).toBeHidden();
+  await expect(saveButton(details)).toBeHidden();
   const header = details.locator(".dialog-head");
   const top = (await header.boundingBox())!.y;
   await page.locator(".task-tab-panel:visible").evaluate((panel) => panel.scrollTo(0, panel.scrollHeight));
@@ -225,7 +228,7 @@ test("A stale save keeps the draft and merges untouched fields", async ({ page }
   await expect(dialog.getByLabel("Context", { exact: true })).toHaveValue("Remote context");
   await expect(dialog.getByLabel("Title", { exact: true })).toHaveValue("My unsaved title");
   await dialog.getByRole("button", { name: "Save changes" }).click();
-  await expect(dialog.getByRole("button", { name: "Save changes" })).toBeHidden();
+  await expect(saveButton(dialog)).toBeHidden();
   const saved = await command("get_task", { id: task.id });
   expect(saved.title).toBe("My unsaved title");
   expect(saved.description).toBe("Remote context");
@@ -636,7 +639,7 @@ test("Markdown descriptions format, upload pasted images, and render safely", as
   const image = preview.getByRole("img", { name: "shot" });
   await expect(image).toHaveJSProperty("naturalWidth", 1);
   await dialog.getByRole("button", { name: "Save changes" }).click();
-  await expect(dialog.getByRole("button", { name: "Save changes" })).toBeHidden();
+  await expect(saveButton(dialog)).toBeHidden();
   const saved = await command("get_task", { id: task.id });
   expect(saved.description).toMatch(/^\*\*Ship it\*\*\n1\. One\n2\. \n!\[shot\]\(\/files\/[0-9a-f]{32}\)$/);
 });
@@ -676,7 +679,7 @@ test("Epics group tasks: create, file, filter, progress and guarded archive", as
   await details.getByRole("button", { name: "Epic: None. Choose epic" }).click();
   await page.getByRole("dialog", { name: "Choose epic" }).getByText(name, { exact: true }).click();
   await details.getByRole("button", { name: "Save changes" }).click();
-  await expect(details.getByRole("button", { name: "Save changes" })).toBeHidden();
+  await expect(saveButton(details)).toBeHidden();
   await details.getByRole("button", { name: `Close ${loose.id}` }).click();
   await expect(details).toBeHidden();
   await expect(page.locator(".task-card .epic-tag")).toContainText(name);

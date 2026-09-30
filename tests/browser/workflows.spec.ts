@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const baseURL = process.env.TASKNBOARD_BASE_URL!;
 const humanToken = process.env.TASKNBOARD_HUMAN_TOKEN!;
 const agentToken = process.env.TASKNBOARD_AGENT_TOKEN!;
 
+/** The Save button, also while it reads "Saving…". Hidden means no save is running. */
+const saveButton = (scope: Locator) =>
+  scope.getByRole("button", { name: /^(Save changes|Saving…)$/ });
 async function command<T = any>(
   name: string,
   args: Record<string, unknown> = {},
@@ -118,7 +121,7 @@ test("Settings, task workflow, agent review, archive, and export", async ({ page
   await details.getByLabel("Title").fill(`Edited ${title}`);
   await details.getByRole("button", { name: "Save changes" }).click();
   // The task stays open in its tab; closing the tab shows the board again.
-  await expect(details.getByRole("button", { name: "Save changes" })).toBeHidden();
+  await expect(saveButton(details)).toBeHidden();
   await expect(page.getByRole("navigation", { name: "Open tasks" })).toContainText(`Edited ${title}`);
   await details.getByRole("button", { name: `Close ${taskId}` }).click();
   await expect(details).toBeHidden();
