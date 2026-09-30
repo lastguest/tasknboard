@@ -15,6 +15,8 @@ type Board = {
   formerPrefixes: string[];
   /** Whether the caller lists this board in the sidebar. */
   inSidebar: boolean;
+  /** Tasks In progress on this board, without archived tasks. */
+  inProgress: number;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -34,7 +36,7 @@ Names are trimmed and contain 1–80 characters. Prefixes are trimmed, converted
 
 ## Sidebar
 
-The sidebar lists each board with its Board, Epics, and Views pages. Every person chooses which boards their sidebar lists. A board shows by default. `set_board_sidebar` stores only the caller's choice, so it requires a human actor. It does not change the board version and does not append an event. Every board result carries `inSidebar` for the caller. Agents always read `true`. A hidden board stays available in the board selector. The browser keeps which board rows are expanded.
+The sidebar lists each board with its Board, Epics, and Views pages. Every person chooses which boards their sidebar lists. A board shows by default. `set_board_sidebar` stores only the caller's choice, so it requires a human actor. It does not change the board version and does not append an event. Every board result carries `inSidebar` for the caller. Agents always read `true`. A hidden board stays available in the board selector. The browser keeps which board rows are expanded. Each row shows the board's `inProgress` count. The server derives it on every read, so it is not stored and not exported.
 
 ## Tasks and keys
 

@@ -347,6 +347,7 @@ test("the board migration preserves legacy keys and epic references", (t) => {
     "createdAt",
     "formerPrefixes",
     "id",
+    "inProgress",
     "inSidebar",
     "name",
     "prefix",
@@ -391,8 +392,8 @@ test("the board migration preserves legacy keys and epic references", (t) => {
   assert.equal(backup.schemaVersion, 12);
   assert.equal(Object.hasOwn(backup, "workspace"), false);
   assert.equal(backup.tasks[0].boardId, defaultBoard.id);
-  // Exports hold stored records; formerPrefixes and inSidebar are derived.
-  const { formerPrefixes, inSidebar, ...storedBoard } = defaultBoard;
+  // Exports hold stored records; formerPrefixes, inSidebar, and inProgress are derived.
+  const { formerPrefixes, inSidebar, inProgress, ...storedBoard } = defaultBoard;
   assert.deepEqual(backup.boards, [storedBoard]);
   assert.deepEqual(backup.boardPrefixReservations, [
     { prefix: "APP", boardId: defaultBoard.id },
@@ -464,4 +465,40 @@ test("each person hides boards from their own sidebar without changing the board
     () => store.execute("set_board_sidebar", { id: "BOARD-99", inSidebar: false }, human),
     { code: "NOT_FOUND" },
   );
+});
+
+test("each board counts its active tasks In progress", (t) => {
+  const store = fixture(t);
+  const [defaultBoard] = store.execute("list_boards", {}, human).boards;
+  const operations = store.execute(
+    "create_board",
+    { name: "Operations", prefix: "OPS" },
+    human,
+  );
+  assert.equal(operations.inProgress, 0);
+  const start = (boardId, title) => {
+    const task = store.execute("create_task", { boardId, title }, human);
+    return store.execute(
+      "update_task",
+      { id: task.id, expectedVersion: task.version, patch: { status: "in_progress" } },
+      human,
+    );
+  };
+  start(defaultBoard.id, "Product one");
+  const archived = start(defaultBoard.id, "Product two");
+  start(operations.id, "Operations one");
+  store.execute("create_task", { boardId: operations.id, title: "Still backlog" }, human);
+  store.execute(
+    "archive_task",
+    { id: archived.id, expectedVersion: archived.version },
+    human,
+  );
+  const counts = (result) => result.boards.map((board) => [board.id, board.inProgress]);
+  const expected = [
+    [defaultBoard.id, 1],
+    [operations.id, 1],
+  ];
+  assert.deepEqual(counts(store.execute("list_boards", {}, human)), expected);
+  // Agents read the same counts; workspace_info feeds the sidebar.
+  assert.deepEqual(counts(store.execute("workspace_info", {}, agent)), expected);
 });

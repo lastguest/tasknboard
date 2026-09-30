@@ -188,6 +188,12 @@ export function SidebarBoards({
                   {board.prefix.slice(0, 2)}
                 </span>
                 <span className="nav-epic-title">{board.name}</span>
+                <small
+                  aria-label={`${board.inProgress} ${board.inProgress === 1 ? "task" : "tasks"} in progress`}
+                  title="In progress"
+                >
+                  {board.inProgress}
+                </small>
                 <Icon name={expanded ? "chevronDown" : "chevronRight"} size={12} />
               </button>
               {expanded &&

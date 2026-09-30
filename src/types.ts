@@ -93,6 +93,8 @@ export type BoardRecord = {
   formerPrefixes: string[];
   /** Whether the caller lists this board in the sidebar. Each person sets it. */
   inSidebar: boolean;
+  /** Active tasks In progress on this board. */
+  inProgress: number;
   version: number;
   createdAt: string;
   updatedAt: string;

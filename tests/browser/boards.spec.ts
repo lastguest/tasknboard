@@ -129,7 +129,11 @@ test("the sidebar lists boards with their pages, and each person hides boards", 
   await connect(page);
 
   const sidebar = page.getByRole("navigation", { name: "Boards" });
-  const row = sidebar.getByRole("button", { name, exact: true });
+  // The row's name ends with its In progress count.
+  const row = sidebar.getByRole("button", {
+    name: new RegExp(`^${name} \\d+ tasks? in progress$`),
+  });
+  await expect(row).toHaveAccessibleName(`${name} 0 tasks in progress`);
   await expect(row).toHaveAttribute("aria-expanded", "false");
   await row.click();
   const pages = sidebar.getByRole("group", { name });
@@ -142,6 +146,10 @@ test("the sidebar lists boards with their pages, and each person hides boards", 
   );
   await expect(page.getByRole("combobox", { name: "Board" })).toHaveValue(board.id);
   await expect(page.getByText(`Sidebar task ${suffix}`)).toBeVisible();
+  // Starting the task updates the count without a reload.
+  await page.locator(".task-card").filter({ hasText: `Sidebar task ${suffix}` }).click({ button: "right" });
+  await page.getByRole("menuitemradio", { name: "In progress" }).click();
+  await expect(row).toHaveAccessibleName(`${name} 1 task in progress`);
 
   // Rows stay expanded after a reload; the section collapses as a whole.
   await page.reload();

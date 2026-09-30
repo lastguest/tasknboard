@@ -191,7 +191,8 @@ export function createStore(path, { clock = Date.now } = {}) {
   };
   /**
    * Adds `formerPrefixes`, the retired prefixes whose task keys still resolve
-   * on each board, and `inSidebar`, the caller's own sidebar preference.
+   * on each board, `inSidebar`, the caller's own sidebar preference, and
+   * `inProgress`, the number of active tasks In progress. Derived on every read.
    */
   const boardsFor = (identity, boards) => {
     const reservations = db
@@ -203,12 +204,23 @@ export function createStore(path, { clock = Date.now } = {}) {
         .all(identity.id)
         .map((r) => r.board_id),
     );
+    const inProgress = new Map(
+      db
+        .prepare(
+          `SELECT json_extract(data, '$.boardId') AS board_id, COUNT(*) AS count FROM tasks
+ WHERE json_extract(data, '$.status') = 'in_progress' AND NOT coalesce(json_extract(data, '$.archived'), 0)
+ GROUP BY board_id`,
+        )
+        .all()
+        .map((r) => [r.board_id, r.count]),
+    );
     return boards.map((board) => ({
       ...board,
       formerPrefixes: reservations
         .filter((r) => r.board_id === board.id && r.prefix !== board.prefix)
         .map((r) => r.prefix),
       inSidebar: !hidden.has(board.id),
+      inProgress: inProgress.get(board.id) ?? 0,
     }));
   };
   const taskKey = (board, n) => `${board.prefix}-${String(n).padStart(3, "0")}`;
