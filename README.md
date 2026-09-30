@@ -46,6 +46,8 @@ Create and rename epics by custom name on their pages.
 
 Views save filters (status, priority, assignee, label, epic, and search) and display settings (board or list, grouping, order) under a name, like Linear's custom views. Filter any board with **Filter**, then choose **Save as view**. A view is personal or shared with the workspace. Star it to keep it under Favorites in the sidebar. The assignee value **Me** means whoever opens the view. Agents read shared views through MCP (`list_views`, and `list_tasks` with `view`). See [docs/contracts/views.md](docs/contracts/views.md).
 
+Link related tasks under **Links** in the task details: blocks, blocked by, related to, duplicates, or duplicated by. The other task shows the inverse link. Links inform; they do not stop status changes. Agents use `link_task` and `unlink_task` on tasks they have claimed. See [docs/contracts/task-links.md](docs/contracts/task-links.md).
+
 Keyboard: **N** new task, **Cmd/Ctrl K** search, **F** assignee filter, **⌥/Alt V** save as view, **?** shortcuts, **Esc** close dialog. Drag between columns, or use the Status menu on each card or list row (the keyboard and touch alternative). Right-click a card, list row, epic, agent, or empty page area for a context menu, or press **Shift F10** on the focused item. The task menu changes status, priority, and assignee, filters by assignee, copies the ID, and archives after a second confirmation. Every move is validated by the server; a rejected move stays in place with an explanation. Human review is required before Done: an In review task shows **Mark Done** and **Needs changes** in its details. The interface is English in this version.
 
 A task opens in its own tab in a horizontal strip above the page. The first tab returns to the page. Each tab keeps its draft while you switch tabs, stays open after **Save changes**, and asks before it discards a draft on close. **Cancel** reverts the draft to the saved task. A new task still opens in a dialog.
@@ -194,6 +196,7 @@ Type `/` to open the command menu. Tab completes a command, and Enter runs it.
 | `/assign [name]`, `/priority <level>` | Change the assignee or priority |
 | `/comment <text>` | Add a comment |
 | `/claim`, `/release` | Claim or release the task for 15 minutes |
+| `/link <type> <task id>`, `/unlink <task id>` | Link the task to another task, or remove that link |
 | `/review <summary> [URL]` | Submit the task for review with an optional artifact link |
 | `/archive <task id>` | Archive the task; type its id to confirm |
 | `/mine`, `/refresh`, `/help`, `/quit` | Filter to your tasks, reload, show help, exit |

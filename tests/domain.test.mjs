@@ -192,7 +192,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
     { id: "TasknBoard Agent", kind: "human", token: "must-not-be-kept" },
   ]);
   const info = s.execute("workspace_info", {}, human);
-  assert.equal(info.schemaVersion, 12);
+  assert.equal(info.schemaVersion, 13);
   assert.equal(info.boards[0].id, "BOARD-1");
   assert.equal(Object.hasOwn(info, "settings"), false);
   assert.deepEqual(info.actor, {
@@ -223,7 +223,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
   );
   assert.equal(s.execute("list_tasks", {}, human).total, 0);
   const backup = s.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 12);
+  assert.equal(backup.schemaVersion, 13);
   assert.equal(backup.boards[0].id, "BOARD-1");
   assert.deepEqual(backup.actors, info.actors);
 });
@@ -1144,4 +1144,92 @@ test("views arrive by migration without touching existing tasks", async (t) => {
   assert.equal(store.execute("get_task", { id: task.id }, human).version, task.version);
   assert.equal(store.execute("create_view", { name: "First" }, human).id, "VIEW-1");
   store.close();
+});
+
+test("task links read from both sides and follow version and lease rules", (t) => {
+  const s = fixture(t);
+  const first = s.make();
+  const second = s.make();
+  const linked = s.execute(
+    "link_task",
+    { id: first.id, expectedVersion: 1, type: "blocked_by", target: second.id },
+    human,
+  );
+  assert.equal(linked.version, 2);
+  assert.deepEqual(linked.links, [
+    { type: "blocked_by", id: second.id, title: second.title, status: "backlog", archived: false },
+  ]);
+  // The other task shows the inverse link and records it, but keeps its version.
+  const other = s.execute("get_task", { id: second.id }, human);
+  assert.equal(other.version, 1);
+  assert.deepEqual(other.links.map((l) => [l.type, l.id]), [["blocks", first.id]]);
+  assert.deepEqual(JSON.parse(other.events.at(-1).body), { type: "blocks", target: first.id });
+  assert.throws(
+    () => s.execute("link_task", { id: second.id, expectedVersion: 1, type: "relates", target: first.id }, human),
+    { code: "LINK_EXISTS" },
+  );
+  assert.throws(
+    () => s.execute("link_task", { id: first.id, expectedVersion: 2, type: "relates", target: first.id }, human),
+    { code: "VALIDATION" },
+  );
+  assert.throws(
+    () => s.execute("link_task", { id: first.id, expectedVersion: 1, type: "relates", target: second.id }, human),
+    { code: "VERSION_CONFLICT" },
+  );
+  assert.throws(
+    () => s.execute("link_task", { id: first.id, expectedVersion: 2, type: "follows", target: second.id }, human),
+    { code: "VALIDATION" },
+  );
+  // Links inform; they do not block status changes.
+  const started = s.execute("update_task", { id: first.id, expectedVersion: 2, patch: { status: "in_progress" } }, human);
+  assert.equal(started.status, "in_progress");
+  // Agents link only tasks they have claimed.
+  const third = s.make();
+  assert.throws(
+    () => s.execute("link_task", { id: third.id, expectedVersion: 1, type: "relates", target: first.id }, a),
+    { code: "LEASE_REQUIRED" },
+  );
+  const claimed = s.execute("claim_task", { id: third.id, expectedVersion: 1 }, a);
+  const related = s.execute(
+    "link_task",
+    { id: third.id, expectedVersion: claimed.version, type: "duplicates", target: first.id },
+    a,
+  );
+  assert.deepEqual(related.links.map((l) => [l.type, l.id]), [["duplicates", first.id]]);
+  // Either side removes the link.
+  const unlinked = s.execute(
+    "unlink_task",
+    { id: second.id, expectedVersion: 1, target: first.id },
+    human,
+  );
+  assert.equal(unlinked.version, 2);
+  assert.deepEqual(unlinked.links, []);
+  assert.deepEqual(JSON.parse(unlinked.events.at(-1).body), { type: "blocks", target: first.id });
+  assert.throws(
+    () => s.execute("unlink_task", { id: second.id, expectedVersion: 2, target: first.id }, human),
+    { code: "NOT_FOUND" },
+  );
+  assert.deepEqual(s.execute("export_workspace", {}, human).taskLinks, [
+    { source: third.id, type: "duplicates", target: first.id },
+  ]);
+});
+
+test("links survive prefix changes and refuse archived targets", (t) => {
+  const s = fixture(t);
+  const first = s.make();
+  const second = s.make();
+  s.execute("link_task", { id: first.id, expectedVersion: 1, type: "relates", target: second.id }, human);
+  s.execute("update_board", { id: "BOARD-1", expectedVersion: 1, patch: { prefix: "APP" } }, human);
+  const renamed = s.execute("get_task", { id: second.id }, human);
+  assert.deepEqual(renamed.links.map((l) => [l.type, l.id]), [["relates", "APP-001"]]);
+  const third = s.make();
+  s.execute("archive_task", { id: renamed.id, expectedVersion: renamed.version }, human);
+  assert.deepEqual(
+    s.execute("get_task", { id: "APP-001" }, human).links.map((l) => [l.id, l.archived]),
+    [["APP-002", true]],
+  );
+  assert.throws(
+    () => s.execute("link_task", { id: third.id, expectedVersion: 1, type: "blocks", target: "TNB-002" }, human),
+    { code: "ARCHIVED" },
+  );
 });

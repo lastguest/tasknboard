@@ -1686,6 +1686,29 @@ footer {
   border-radius: 6px;
   padding: 9px 11px;
 }
+.task-links {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.task-links li {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+.task-links a {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text);
+}
+.task-link-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .artifact-link {
   display: inline-flex;
   align-items: center;

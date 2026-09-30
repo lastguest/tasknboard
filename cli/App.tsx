@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput, usePaste, useWindowSize } from "ink";
 import type { Client } from "../server/client.mjs";
 import type { BoardRecord, Status, Task, WorkspaceInfo } from "../src/types.ts";
-import { activeLease, columns, safeUrl, statusTitle } from "../src/types.ts";
+import {
+  activeLease,
+  columns,
+  linkTitle,
+  safeUrl,
+  statusTitle,
+} from "../src/types.ts";
 import {
   matchCommands,
   planInput,
@@ -67,6 +73,8 @@ const eventVerb: Record<string, string> = {
   submit_review: "submitted for review",
   set_standup_notes: "set stand-up notes",
   archive_task: "archived",
+  link_task: "linked",
+  unlink_task: "unlinked",
 };
 
 /** One message format for every failed request. */
@@ -130,6 +138,16 @@ function taskLines(task: Task, width: number): Styled[] {
     const url = safeUrl(task.review.artifactUrl);
     block("Review", `${task.review.summary}${url ? `\n${url}` : ""}`);
   }
+  if (task.links?.length)
+    block(
+      "Links",
+      task.links
+        .map(
+          (link) =>
+            `${linkTitle(link.type)} ${link.id} ${link.title} · ${link.archived ? "Archived" : statusTitle(link.status)}`,
+        )
+        .join("\n"),
+    );
   if (task.standup) {
     block("Highlight", task.standup.highlight);
     block("Blocker", task.standup.blocker);

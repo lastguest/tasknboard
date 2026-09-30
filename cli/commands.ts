@@ -1,5 +1,11 @@
 import type { Status, Task } from "../src/types.ts";
-import { columns, priorities, statusTitle } from "../src/types.ts";
+import {
+  columns,
+  linkTitle,
+  linkTypes,
+  priorities,
+  statusTitle,
+} from "../src/types.ts";
 
 export type Request = { name: string; args: Record<string, unknown> };
 
@@ -172,6 +178,39 @@ export const commands: Command[] = [
       const body = required(arg, "/comment <text>");
       const t = selected(task);
       return versioned("add_comment", t, { body }, `Comment added to ${t.id}.`);
+    },
+  },
+  {
+    name: "link",
+    usage: "/link <type> <task id>",
+    summary: "Link the selected task: blocks, blocked_by, relates, duplicates, duplicated_by",
+    plan: (arg, task) => {
+      const usage = "/link <type> <task id>";
+      const [, typed = "", target = ""] = /^(\S+)\s+(\S+)$/.exec(arg) ?? [];
+      required(target, usage);
+      const type = linkTypes.find((t) => t.id === typed.toLowerCase())?.id;
+      if (!type)
+        throw new UsageError(
+          `Choose a link type: ${linkTypes.map((t) => t.id).join(", ")}.`,
+        );
+      const t = selected(task);
+      const id = target.toUpperCase();
+      return versioned(
+        "link_task",
+        t,
+        { type, target: id },
+        `${t.id} ${linkTitle(type).toLowerCase()} ${id}.`,
+      );
+    },
+  },
+  {
+    name: "unlink",
+    usage: "/unlink <task id>",
+    summary: "Remove the link between the selected task and another",
+    plan: (arg, task) => {
+      const id = required(arg, "/unlink <task id>").toUpperCase();
+      const t = selected(task);
+      return versioned("unlink_task", t, { target: id }, `${t.id} unlinked from ${id}.`);
     },
   },
   {

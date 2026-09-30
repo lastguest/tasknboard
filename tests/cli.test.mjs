@@ -46,6 +46,16 @@ test("slash commands map to versioned workspace requests", () => {
     { boardId: "BOARD-2", title: "Write docs" },
   );
   assert.throws(() => planInput("/new Write docs", undefined), /Select a board first/);
+  assert.deepEqual(planInput("/link blocked_by tnb-002", task()).request, {
+    name: "link_task",
+    args: { id: "TNB-001", expectedVersion: 4, type: "blocked_by", target: "TNB-002" },
+  });
+  assert.deepEqual(planInput("/unlink tnb-002", task()).request, {
+    name: "unlink_task",
+    args: { id: "TNB-001", expectedVersion: 4, target: "TNB-002" },
+  });
+  assert.throws(() => planInput("/link follows TNB-002", task()), /Choose a link type/);
+  assert.throws(() => planInput("/link blocks", task()), /Usage: \/link/);
   assert.deepEqual(planInput("/board", undefined), { kind: "boards" });
   assert.deepEqual(
     planInput("/board board-2", undefined),

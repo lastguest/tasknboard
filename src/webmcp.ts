@@ -80,6 +80,16 @@ const tools = [
     false,
   ],
   [
+    "link_task",
+    "Link a task to another task (relates, blocks, blocked_by, duplicates, duplicated_by) using its current expectedVersion. Two tasks have at most one link.",
+    false,
+  ],
+  [
+    "unlink_task",
+    "Remove the link between a task and target using the task's current expectedVersion.",
+    false,
+  ],
+  [
     "set_standup_notes",
     "Set highlight and blocker notes using the current expectedVersion. Empty strings clear notes. Each note has a 500 character limit.",
     false,

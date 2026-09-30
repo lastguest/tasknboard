@@ -315,7 +315,7 @@ test("WebMCP writes refresh after a read already in flight", async ({ page }) =>
     await route.fulfill({ response: oldResponse });
   });
   await page.goto(baseURL);
-  await expect.poll(() => page.evaluate(() => (window as any).testTools.size)).toBe(12);
+  await expect.poll(() => page.evaluate(() => (window as any).testTools.size)).toBe(14);
   const title = `WebMCP ${key()}`;
   const write = page.waitForResponse((response) => response.url().endsWith("/api/create_task"));
   await page.evaluate((title) => {
@@ -721,4 +721,32 @@ test("Epics group tasks: create, file, filter, progress and guarded archive", as
   await expect(edit.getByRole("alert")).toContainText("still has 2 open tasks");
   await edit.getByRole("button", { name: "Cancel" }).click();
   await expect(edit).toBeHidden();
+});
+
+test("Task links are added, followed, and removed from the details panel", async ({ page }) => {
+  const first = await create(`Link one ${key()}`);
+  const second = await create(`Link two ${key()}`);
+  await connect(page);
+  const details = page.getByRole("region", { name: /Task details/ });
+  await card(page, first.id).click();
+  const links = details.getByRole("region", { name: "Links" });
+  await expect(links).toContainText("No linked tasks.");
+  // A link is its own write: the unsaved draft stays.
+  await details.getByLabel("Title", { exact: true }).fill("Draft kept across a link");
+  await links.getByLabel("Link type").selectOption("blocked_by");
+  await links.getByRole("button", { name: "Link task…" }).click();
+  const picker = page.getByRole("dialog", { name: `${first.id} blocked by…` });
+  await picker.getByLabel("Search tasks").fill(second.id);
+  await picker.getByText(`${second.id} ${second.title}`).click();
+  await expect(links.getByRole("listitem")).toContainText(`Blocked by${second.id}${second.title}`);
+  await expect(details.getByLabel("Title", { exact: true })).toHaveValue("Draft kept across a link");
+  await expect(details.locator(".activity")).toContainText(`Blocked by ${second.id}`);
+
+  await links.getByRole("link", { name: new RegExp(second.id) }).click();
+  await expect(details).toContainText(second.id);
+  const otherLinks = details.getByRole("region", { name: "Links" });
+  await expect(otherLinks.getByRole("listitem")).toContainText(`Blocks${first.id}`);
+  await otherLinks.getByRole("button", { name: `Remove link to ${first.id}` }).click();
+  await expect(otherLinks).toContainText("No linked tasks.");
+  expect((await command("get_task", { id: first.id })).links).toEqual([]);
 });
