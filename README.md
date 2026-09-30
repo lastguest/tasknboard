@@ -54,6 +54,33 @@ Editing uses the task's latest version. If the task changed elsewhere, the save 
 
 ## Desktop app
 
+### Install with Homebrew
+
+On an Apple Silicon Mac with macOS 13.5 or later:
+
+```bash
+brew tap lastguest/tasknboard https://github.com/lastguest/tasknboard.git
+brew install --cask lastguest/tasknboard/tasknboard
+```
+
+This repository provides the Homebrew cask. It installs `TasknBoard.app` from the
+latest desktop release. The app includes its Node runtime and installs updates
+through its built-in updater. The release archive changes in place, so the cask
+uses `version :latest` and does not pin an archive checksum.
+
+The app is ad-hoc signed and is not notarized. If macOS blocks the first launch,
+review the release before running:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/TasknBoard.app
+```
+
+Use **Settings → Command line** to install the `tasknboard` terminal helper.
+To remove the app, run `brew uninstall --cask lastguest/tasknboard/tasknboard`.
+Your workspace database stays in the application support directory.
+
+### Build and run
+
 The Tauri app builds for macOS on Apple Silicon and Windows x64.
 It includes the interface, the service, and a Node runtime.
 The installed app does not require Node or a separate server process.
