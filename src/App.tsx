@@ -707,6 +707,25 @@ export default function App() {
     );
   }
 
+  function boardSwitchMenu(e: React.MouseEvent<HTMLButtonElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMenu({
+      label: "Boards",
+      x: rect.left,
+      y: rect.bottom + 4,
+      trigger: e.currentTarget,
+      groups: [
+        {
+          items: boards.map((board) => ({
+            label: `${board.name} (${board.prefix}-)`,
+            checked: board.id === selectedBoardId,
+            onSelect: () => selectBoard(board.id),
+          })),
+        },
+      ],
+    });
+  }
+
   function hiddenBoardsMenu(e: React.MouseEvent<HTMLElement>) {
     setMenu(
       menuAt(e, "Hidden boards", [
@@ -1718,30 +1737,42 @@ export default function App() {
                 )}
                 {currentSaved && <ViewGlyph view={currentSaved} size={22} />}
                 {title}
+                {view === "board" && (
+                  <button
+                    type="button"
+                    className="board-switch"
+                    aria-label={`Switch board, current ${currentBoard?.name ?? "none"}`}
+                    aria-haspopup="menu"
+                    disabled={!boards.length}
+                    onClick={boardSwitchMenu}
+                  >
+                    <Icon name="chevronDown" size={20} />
+                  </button>
+                )}
               </h1>
-              <p>
-                {view === "epic"
-                  ? currentEpic
-                    ? `${currentEpic.archived ? "Archived epic" : "Epic"} · Tasks on ${currentBoard?.name ?? "the selected board"}`
-                    : "This epic isn't in the workspace."
-                  : view === "saved"
-                  ? currentSaved
-                    ? `Saved filters and display · Counts for ${currentBoard?.name ?? "the selected board"}`
-                    : "This view was deleted or is no longer shared with you."
-                  : view === "views"
-                  ? `Saved filters and display settings. Counts reflect ${currentBoard?.name ?? "the selected board"}. Star a view to keep it in the sidebar.`
-                  : view === "pulls"
-                  ? "GitHub pull requests that involve you. Paste any pull request link to open it."
-                  : view === "epics"
-                  ? "Projects that group related tasks. Open one to see its board."
-                  : view === "agents"
-                  ? "Coding agents that work on tasks in this workspace."
-                  : view === "mine"
-                    ? workspaceInfoLoaded
+              {view !== "board" && (
+                <p>
+                  {view === "epic"
+                    ? currentEpic
+                      ? `${currentEpic.archived ? "Archived epic" : "Epic"} · Tasks on ${currentBoard?.name ?? "the selected board"}`
+                      : "This epic isn't in the workspace."
+                    : view === "saved"
+                    ? currentSaved
+                      ? `Saved filters and display · Counts for ${currentBoard?.name ?? "the selected board"}`
+                      : "This view was deleted or is no longer shared with you."
+                    : view === "views"
+                    ? `Saved filters and display settings. Counts reflect ${currentBoard?.name ?? "the selected board"}. Star a view to keep it in the sidebar.`
+                    : view === "pulls"
+                    ? "GitHub pull requests that involve you. Paste any pull request link to open it."
+                    : view === "epics"
+                    ? "Projects that group related tasks. Open one to see its board."
+                    : view === "agents"
+                    ? "Coding agents that work on tasks in this workspace."
+                    : workspaceInfoLoaded
                       ? `Tasks assigned to ${displayName(people, actor.id)} on ${currentBoard?.name ?? "the selected board"}.`
-                      : ""
-                    : `All active tasks on ${currentBoard?.name ?? workspace}.`}
-              </p>
+                      : ""}
+                </p>
+              )}
             </header>
             {sync.error && (
               <div className="banner error-banner" role="alert">
@@ -1838,12 +1869,9 @@ export default function App() {
               />
             ) : (
               <>
-                {view === "board" && (
+                {view === "board" && isHuman && (
                   <BoardControls
-                    boards={boards}
-                    selectedBoardId={selectedBoardId}
-                    canManage={isHuman}
-                    onSelect={selectBoard}
+                    canEdit={!!currentBoard}
                     onCreate={() => setBoardDialog({ board: null })}
                     onEdit={() =>
                       currentBoard && setBoardDialog({ board: currentBoard })

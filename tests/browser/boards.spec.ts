@@ -35,10 +35,12 @@ test("boards scope task keys, persist selection, and own task deep links", async
   });
   await connect(page);
 
-  const boardSelect = page.getByRole("combobox", { name: "Board" });
-  await expect(boardSelect).toHaveValue("BOARD-1");
+  const boardSwitch = page.getByRole("button", { name: /^Switch board/ });
+  await expect(boardSwitch).toHaveAccessibleName("Switch board, current Default");
+  // The board page shows no subtitle: boards have no description.
+  await expect(page.locator(".page-title p")).toHaveCount(0);
   await page
-    .getByRole("group", { name: "Board selection and actions" })
+    .getByRole("group", { name: "Board actions" })
     .getByRole("button", { name: "New board" })
     .click();
   const newBoard = page.getByRole("dialog", { name: "New board" });
@@ -53,7 +55,7 @@ test("boards scope task keys, persist selection, and own task deep links", async
     (item) => item.name === boardName,
   );
   expect(board).toBeTruthy();
-  await expect(boardSelect).toHaveValue(board.id);
+  await expect(boardSwitch).toHaveAccessibleName(`Switch board, current ${boardName}`);
 
   const taskTitle = `Operations task ${suffix}`;
   await page.getByRole("button", { name: "New task", exact: true }).click();
@@ -97,9 +99,13 @@ test("boards scope task keys, persist selection, and own task deep links", async
   expect((await oldKey.json()).id).toBe(task.id);
 
   await page.reload();
-  await expect(boardSelect).toHaveValue(board.id);
+  await expect(boardSwitch).toHaveAccessibleName(`Switch board, current ${boardName}`);
   await expect(page.locator(".task-card").filter({ hasText: taskTitle })).toBeVisible();
-  await boardSelect.selectOption("BOARD-1");
+  await boardSwitch.click();
+  await expect(
+    page.getByRole("menuitemradio", { name: `${boardName} (${nextPrefix}-)` }),
+  ).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("menuitemradio", { name: "Default (TNB-)" }).click();
   await expect(page.locator(".task-card").filter({ hasText: original.title })).toBeVisible();
   await expect(page.locator(".task-card").filter({ hasText: taskTitle })).toHaveCount(0);
   expect((await command<any>("get_task", { id: original.id })).boardId).toBe("BOARD-1");
@@ -109,7 +115,7 @@ test("boards scope task keys, persist selection, and own task deep links", async
   await expect(page.getByRole("region", { name: /Task details/ })).toContainText(task.id);
   await expect(page.getByRole("navigation", { name: "Open tasks" })).toContainText(task.id);
   await page.getByRole("navigation", { name: "Open tasks" }).getByRole("button", { name: "Board" }).click();
-  await expect(boardSelect).toHaveValue("BOARD-1");
+  await expect(boardSwitch).toHaveAccessibleName("Switch board, current Default");
 });
 
 /** Menus close on scroll, so scroll a sidebar control into view before it opens one. */
@@ -144,7 +150,9 @@ test("the sidebar lists boards with their pages, and each person hides boards", 
     "aria-current",
     "page",
   );
-  await expect(page.getByRole("combobox", { name: "Board" })).toHaveValue(board.id);
+  await expect(page.getByRole("button", { name: /^Switch board/ })).toHaveAccessibleName(
+    `Switch board, current ${name}`,
+  );
   await expect(page.getByText(`Sidebar task ${suffix}`)).toBeVisible();
   // Starting the task updates the count without a reload.
   await page.locator(".task-card").filter({ hasText: `Sidebar task ${suffix}` }).click({ button: "right" });
@@ -166,7 +174,9 @@ test("the sidebar lists boards with their pages, and each person hides boards", 
       .inSidebar,
   ).toBe(false);
   // The board stays available from the board selector.
-  await expect(page.getByRole("combobox", { name: "Board" }).locator(`option[value="${board.id}"]`)).toHaveCount(1);
+  await page.getByRole("button", { name: /^Switch board/ }).click();
+  await expect(page.getByRole("menuitemradio", { name: new RegExp(`^${name} \\(`) })).toHaveCount(1);
+  await page.keyboard.press("Escape");
 
   await (await reveal(page, sidebar.getByRole("button", { name: /hidden board/ }))).click();
   await page.getByRole("menuitem", { name }).click();

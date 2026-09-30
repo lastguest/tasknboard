@@ -542,25 +542,26 @@ main {
 }
 .board-controls {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-end;
+  gap: 8px;
   margin: 0 0 12px;
 }
-.board-selector {
-  display: flex;
+.board-switch {
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  min-width: 0;
+  margin-left: -6px;
+  padding: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  opacity: 0.6;
+  cursor: pointer;
 }
-.board-selector select {
-  min-width: 190px;
-  max-width: min(360px, 52vw);
-}
-.board-control-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.board-switch:hover:not(:disabled),
+.board-switch:focus-visible {
+  opacity: 1;
+  background: var(--surface-2);
 }
 .tabs {
   display: flex;

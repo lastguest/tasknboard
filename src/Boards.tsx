@@ -5,58 +5,24 @@ import { Icon } from "./Icons";
 import type { BoardRecord } from "./types";
 
 export function BoardControls({
-  boards,
-  selectedBoardId,
-  canManage,
-  onSelect,
+  canEdit,
   onCreate,
   onEdit,
 }: {
-  boards: BoardRecord[];
-  selectedBoardId: string;
-  canManage: boolean;
-  onSelect: (id: string) => void;
+  canEdit: boolean;
   onCreate: () => void;
   onEdit: () => void;
 }) {
-  const selected = boards.find((board) => board.id === selectedBoardId);
   return (
-    <div
-      className="board-controls"
-      role="group"
-      aria-label="Board selection and actions"
-    >
-      <label className="board-selector">
-        <span className="field-label">Board</span>
-        <select
-          aria-label="Board"
-          value={selectedBoardId}
-          disabled={!boards.length}
-          onChange={(event) => onSelect(event.target.value)}
-        >
-          {boards.map((board) => (
-            <option key={board.id} value={board.id}>
-              {board.name} ({board.prefix}-)
-            </option>
-          ))}
-        </select>
-      </label>
-      {canManage && (
-        <div className="board-control-actions">
-          {selected && (
-            <button
-              type="button"
-              className="secondary"
-              onClick={onEdit}
-            >
-              Edit board
-            </button>
-          )}
-          <button type="button" className="secondary" onClick={onCreate}>
-            <Icon name="plus" size={15} /> New board
-          </button>
-        </div>
+    <div className="board-controls" role="group" aria-label="Board actions">
+      {canEdit && (
+        <button type="button" className="secondary" onClick={onEdit}>
+          Edit board
+        </button>
       )}
+      <button type="button" className="secondary" onClick={onCreate}>
+        <Icon name="plus" size={15} /> New board
+      </button>
     </div>
   );
 }
