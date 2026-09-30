@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icons";
 
 export type Toast = {
@@ -32,11 +32,14 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
   // Toasts with actions wait for the user; plain ones fade out unless hovered or focused.
   const [held, setHeld] = useState(false);
   const sticky = Boolean(toast.actions?.length);
+  // The parent passes a new onDismiss on every render, so a ref keeps the timer running.
+  const dismiss = useRef(onDismiss);
+  dismiss.current = onDismiss;
   useEffect(() => {
     if (sticky || held) return;
-    const timer = setTimeout(onDismiss, AUTO_DISMISS_MS);
+    const timer = setTimeout(() => dismiss.current(), AUTO_DISMISS_MS);
     return () => clearTimeout(timer);
-  }, [sticky, held, onDismiss]);
+  }, [sticky, held]);
 
   return (
     <div

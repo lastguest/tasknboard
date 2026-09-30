@@ -255,6 +255,26 @@ test("The New task Close button is disabled while the task is created", async ({
   await expect(dialog).toBeHidden();
 });
 
+test("A plain toast closes on its own while the app keeps polling", async ({ page }) => {
+  const task = await create(`Toast ${key()}`);
+  await page.clock.install();
+  await connect(page);
+  await card(page, task.id).click();
+  const details = page.getByRole("region", { name: /Task details/ });
+  await details.getByLabel("Title", { exact: true }).fill(`${task.title} edited`);
+  await details.getByRole("button", { name: "Save changes" }).click();
+  const toast = page.locator(".toast").filter({ hasText: `Saved ${task.id}` });
+  await expect(toast).toBeVisible();
+  // A hovered toast stays, so keep the pointer away from it.
+  await page.mouse.move(0, 0);
+  // Step past the 6 s timeout; the real waits let each poll finish and re-render the app.
+  for (let second = 0; second < 8; second++) {
+    await page.clock.runFor(1000);
+    await page.waitForTimeout(100);
+  }
+  await expect(toast).toBeHidden({ timeout: 1000 });
+});
+
 test("A stale save keeps the draft and merges untouched fields", async ({ page }) => {
   const task = await create(`Stale ${key()}`);
   await connect(page);
