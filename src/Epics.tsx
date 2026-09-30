@@ -438,6 +438,7 @@ export function EpicEditor({
         )
       }
       onClose={requestClose}
+      closeDisabled={Boolean(pending)}
       footer={footer}
       className="epic-dialog"
     >

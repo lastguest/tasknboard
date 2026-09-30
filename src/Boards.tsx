@@ -275,6 +275,7 @@ export function BoardEditor({
     <Dialog
       title={board ? "Edit board" : "New board"}
       onClose={() => !pending && onClose()}
+      closeDisabled={pending}
       className="board-editor"
       footer={
         <>

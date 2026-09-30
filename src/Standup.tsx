@@ -97,6 +97,7 @@ function StandupNotes({
         </>
       }
       onClose={() => !busy && onClose()}
+      closeDisabled={busy}
       wide
       footer={
         <>

@@ -880,6 +880,7 @@ export function ViewEditor({
         )
       }
       onClose={requestClose}
+      closeDisabled={Boolean(pending)}
       footer={footer}
       className="epic-dialog view-dialog"
     >
