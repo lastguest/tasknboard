@@ -48,7 +48,6 @@ import {
   activeLease,
   columns,
   doneLocked,
-  epicProgress,
   epicPalette,
   epicStyle,
   priorities,
@@ -1481,7 +1480,7 @@ export default function App() {
                 )}
               </div>
               {activeEpics.map((epic) => {
-                const { open } = epicProgress(epic);
+                const inProgress = epic.counts.in_progress;
                 const selected = view === "epic" && epicId === epic.id;
                 return (
                   <button
@@ -1499,7 +1498,12 @@ export default function App() {
                       aria-hidden="true"
                     />
                     <span className="nav-epic-title">{epic.title}</span>
-                    <small aria-label={`${open} open tasks`}>{open}</small>
+                    <small
+                      aria-label={`${inProgress} ${inProgress === 1 ? "task" : "tasks"} in progress`}
+                      title="In progress"
+                    >
+                      {inProgress}
+                    </small>
                   </button>
                 );
               })}

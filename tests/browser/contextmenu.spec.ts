@@ -96,6 +96,8 @@ test("Epic context menu starts a task inside the epic", async ({ page }) => {
   await page.evaluate(
     () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
   );
+  // Like board rows, epic rows end with their In progress count.
+  await expect(item).toHaveAccessibleName(`${epic.title} 0 tasks in progress`);
   await item.click({ button: "right" });
   await expect(menu(page)).toHaveAccessibleName(`Actions for ${epic.id}`);
   await menu(page).getByRole("menuitem", { name: "New task in this epic" }).click();
