@@ -411,6 +411,24 @@ test("Hidden tabs pause polling and visible tabs refresh immediately", async ({ 
   expect(reads).toBe(1);
 });
 
+test("A plain toast fades out although polling refreshes the page", async ({ page }) => {
+  const task = await create(`Toast ${key()}`);
+  await page.clock.install();
+  await connect(page);
+  await card(page, task.id).click();
+  const details = page.getByRole("region", { name: /Task details/ });
+  await details.getByRole("textbox", { name: "Title" }).fill(`${task.title} saved`);
+  await details.getByRole("button", { name: "Save changes" }).click();
+  const toast = page.locator(".toast").filter({ hasText: `Saved ${task.id}` });
+  await expect(toast).toBeVisible();
+  // A poll inside the six seconds must not restart the toast timer.
+  const poll = page.waitForResponse((response) => response.url().endsWith("/api/list_tasks"));
+  await page.clock.runFor(5_001);
+  await poll;
+  await page.clock.runFor(1_000);
+  await expect(toast).toBeHidden();
+});
+
 test("Initial My tasks hides placeholder identity and ordinary browsers skip WebMCP", async ({ page }) => {
   await page.addInitScript((value) => {
     sessionStorage.setItem("tasknboard-token", value);

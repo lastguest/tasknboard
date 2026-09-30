@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "./Icons";
 
 export type Toast = {
@@ -22,24 +22,30 @@ export function Toasts({
   return (
     <div className="toasts" aria-live="polite">
       {toasts.map((t) => (
-        <ToastCard key={t.id} toast={t} onDismiss={() => onDismiss(t.id)} />
+        <ToastCard key={t.id} toast={t} onDismiss={onDismiss} />
       ))}
     </div>
   );
 }
 
-function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
+function ToastCard({
+  toast,
+  onDismiss,
+}: {
+  toast: Toast;
+  onDismiss: (id: number) => void;
+}) {
   // Toasts with actions wait for the user; plain ones fade out unless hovered or focused.
+  // The timer depends only on stable values, so a parent render does not restart it.
   const [held, setHeld] = useState(false);
   const sticky = Boolean(toast.actions?.length);
-  // The parent passes a new onDismiss on every render, so a ref keeps the timer running.
-  const dismiss = useRef(onDismiss);
-  dismiss.current = onDismiss;
+  const { id } = toast;
   useEffect(() => {
     if (sticky || held) return;
-    const timer = setTimeout(() => dismiss.current(), AUTO_DISMISS_MS);
+    const timer = setTimeout(() => onDismiss(id), AUTO_DISMISS_MS);
     return () => clearTimeout(timer);
-  }, [sticky, held]);
+  }, [sticky, held, onDismiss, id]);
+  const dismiss = () => onDismiss(id);
 
   return (
     <div
@@ -64,7 +70,7 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
                 type="button"
                 className="toast-action"
                 onClick={() => {
-                  onDismiss();
+                  dismiss();
                   a.run();
                 }}
               >
@@ -78,7 +84,7 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
         type="button"
         className="icon-button toast-close"
         aria-label="Dismiss notification"
-        onClick={onDismiss}
+        onClick={dismiss}
       >
         <Icon name="close" size={14} />
       </button>
