@@ -289,6 +289,8 @@ and set `TASKNBOARD_GITHUB_CLIENT_ID` to its client ID before starting the servi
 No client secret is required. Users do not create or paste personal access tokens.
 For desktop distribution, set the same variable when running `npm run desktop:build`;
 the public client ID is embedded in the app.
+For GitHub Actions releases, set the repository variable `TASKNBOARD_GITHUB_CLIENT_ID`
+to the same client ID. Desktop release builds require this variable.
 The app requests the `repo` scope to read private pull requests. This GitHub scope
 also permits writes, but TasknBoard only uses read operations.
 The service stores the resulting access token in the workspace database.

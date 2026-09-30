@@ -148,8 +148,8 @@ test("the sidebar lists boards with their pages, and each person hides boards", 
   const pages = sidebar.getByRole("group", { name });
   await pages.getByRole("button", { name: "Epics", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Epics");
-  await pages.getByRole("button", { name: "Board", exact: true }).click();
-  await expect(pages.getByRole("button", { name: "Board", exact: true })).toHaveAttribute(
+  await pages.getByRole("button", { name: "Tasks", exact: true }).click();
+  await expect(pages.getByRole("button", { name: "Tasks", exact: true })).toHaveAttribute(
     "aria-current",
     "page",
   );

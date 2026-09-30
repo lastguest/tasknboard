@@ -30,7 +30,7 @@ export function BoardControls({
 /** The board pages that each sidebar board row expands to. */
 export type BoardPage = "board" | "epics" | "views";
 const boardPages: [BoardPage, string, string][] = [
-  ["board", "board", "Board"],
+  ["board", "board", "Tasks"],
   ["epics", "folder", "Epics"],
   ["views", "layers", "Views"],
 ];
@@ -50,7 +50,7 @@ const readSidebarLayout = (): SidebarLayout | null => {
 
 /**
  * The sidebar Boards section: one expandable row per board the person keeps
- * in the sidebar, each with its Board, Epics, and Views pages.
+ * in the sidebar, each with its Tasks, Epics, and Views pages.
  */
 export function SidebarBoards({
   boards,

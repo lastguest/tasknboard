@@ -1,3 +1,4 @@
+import { AppVersion } from "./AppUpdates";
 import { ConnectionHelpers } from "./ConnectionHelpers";
 import { isMcpStatus, type McpStatus } from "./connection-helpers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1574,6 +1575,7 @@ export default function App() {
                 </button>
               )}
             </div>
+            <AppVersion />
           </div>
         </aside>
         <main>

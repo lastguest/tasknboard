@@ -19,6 +19,7 @@ permissions:
 # The run number makes each build newer than the last, so the updater can compare them.
 env:
   TASKNBOARD_VERSION: 0.1.${{ github.run_number }}
+  TASKNBOARD_GITHUB_CLIENT_ID: ${{ vars.TASKNBOARD_GITHUB_CLIENT_ID }}
 
 jobs:
   windows:
@@ -27,6 +28,12 @@ jobs:
     env:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     steps:
+      - name: Check the GitHub OAuth client ID
+        if: env.TASKNBOARD_GITHUB_CLIENT_ID == ''
+        shell: bash
+        run: |
+          echo "::error::Missing repository variable TASKNBOARD_GITHUB_CLIENT_ID. Register a GitHub OAuth app with Device Flow enabled."
+          exit 1
       - name: Check the updater signing key
         if: env.TAURI_SIGNING_PRIVATE_KEY == ''
         shell: bash
@@ -104,6 +111,12 @@ jobs:
     env:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     steps:
+      - name: Check the GitHub OAuth client ID
+        if: env.TASKNBOARD_GITHUB_CLIENT_ID == ''
+        shell: bash
+        run: |
+          echo "::error::Missing repository variable TASKNBOARD_GITHUB_CLIENT_ID. Register a GitHub OAuth app with Device Flow enabled."
+          exit 1
       - name: Check the updater signing key
         if: env.TAURI_SIGNING_PRIVATE_KEY == ''
         shell: bash

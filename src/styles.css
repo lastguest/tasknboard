@@ -4468,3 +4468,12 @@ footer {
     margin-left: 0;
   }
 }
+
+.app-version {
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.settings-nav > .app-version { margin-top: auto; }
+.sidebar.collapsed .app-version { padding-inline: 0; text-align: center; font-size: 9px; }

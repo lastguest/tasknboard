@@ -1,3 +1,4 @@
+import { AppVersion, AppUpdates, desktopApp } from "./AppUpdates";
 import { cloneElement, useEffect, useId, useRef, useState } from "react";
 import {
   activeLease,
@@ -1726,6 +1727,15 @@ export function Settings({
       keywords: "cli terminal helper command install tasknboard desktop",
     },
   ];
+  if (desktopApp()) {
+    pages.push({
+      id: "updates",
+      label: "Updates",
+      icon: "screen",
+      group: "App",
+      keywords: "version release check download install update",
+    });
+  }
   const q = search.trim().toLowerCase();
   const visible = pages.filter(
     (p) => !q || `${p.label} ${p.keywords}`.toLowerCase().includes(q),
@@ -1776,6 +1786,7 @@ export function Settings({
               <p className="small settings-nav-empty">No matching settings</p>
             )}
           </nav>
+          <AppVersion />
         </aside>
         <div className="settings-main">
           <div className="settings-page">
@@ -1930,6 +1941,11 @@ export function Settings({
                 ))}
               </SettingsGroup>
             )}
+            {page === "updates" && (
+              <SettingsGroup title="App updates">
+                <AppUpdates />
+              </SettingsGroup>
+            )}
             {page === "cli" && (
               <SettingsGroup
                 title="CLI helper"
@@ -1950,7 +1966,8 @@ export type SettingsPage =
   | "connection-data"
   | "github"
   | "shortcuts"
-  | "cli";
+  | "cli"
+  | "updates";
 
 const AVATAR_PIXELS = 128;
 

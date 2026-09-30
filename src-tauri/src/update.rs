@@ -1,8 +1,9 @@
-use std::{thread, time::Duration};
+use std::{sync::Mutex, thread, time::Duration};
 use tauri::AppHandle;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+static CHECK_LOCK: Mutex<()> = Mutex::new(());
 const INSTALL: &str = "Install and Restart";
 
 /// Checks the release feed at launch and once a day. Development builds do not check.
@@ -11,11 +12,13 @@ pub fn watch(app: AppHandle) {
         return;
     }
     thread::spawn(move || loop {
-        match tauri::async_runtime::block_on(check(&app)) {
-            Ok(Some(update)) if confirm(&update) => install(&app, &update),
-            Ok(_) => {}
-            // Offline use is supported, so a failed check is not shown to the user.
-            Err(error) => eprintln!("TasknBoard: update check failed: {error}"),
+        if let Ok(_guard) = CHECK_LOCK.try_lock() {
+            match tauri::async_runtime::block_on(check(&app)) {
+                Ok(Some(update)) if confirm(&update) => install(&app, &update),
+                Ok(_) => {}
+                // Offline use is supported, so a failed check is not shown to the user.
+                Err(error) => eprintln!("TasknBoard: update check failed: {error}"),
+            }
         }
         thread::sleep(CHECK_INTERVAL);
     });
@@ -56,4 +59,31 @@ fn install(app: &AppHandle, update: &Update) {
     }
     // The restart also starts the service again if the install failed.
     app.restart();
+}
+
+#[tauri::command]
+pub fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+#[tauri::command]
+pub async fn check_for_updates(app: AppHandle) -> Result<String, String> {
+    // Run native dialogs and installation off the webview thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = CHECK_LOCK
+            .try_lock()
+            .map_err(|_| "An update check is already in progress. Try again later.".to_string())?;
+        match tauri::async_runtime::block_on(check(&app)).map_err(|error| error.to_string())? {
+            Some(update) => {
+                let version = update.version.clone();
+                if confirm(&update) {
+                    install(&app, &update);
+                }
+                Ok(format!("TasknBoard {version} is available."))
+            }
+            None => Ok("You have the latest version.".into()),
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }

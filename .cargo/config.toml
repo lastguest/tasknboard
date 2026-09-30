@@ -1,0 +1,3 @@
+[env]
+# Public ID of the TasknBoard OAuth app; no client secret is used.
+TASKNBOARD_GITHUB_CLIENT_ID = "Ov23lizKDsYca708SRul"
