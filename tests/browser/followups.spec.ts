@@ -214,6 +214,29 @@ test("Tasks open in tabs that keep drafts and ask before a draft is discarded", 
   expect((await command("get_task", { id: first.id })).title).toBe(first.title);
 });
 
+test("The task Close button is disabled while a save runs", async ({ page }) => {
+  const task = await create(`Closing ${key()}`);
+  let release!: () => void;
+  const held = new Promise<void>((done) => (release = done));
+  await page.route("**/api/update_task", async (route) => {
+    const response = await route.fetch();
+    await held;
+    await route.fulfill({ response });
+  });
+  await connect(page);
+  await card(page, task.id).click();
+  const details = page.getByRole("region", { name: /Task details/ });
+  const close = details.getByRole("button", { name: `Close ${task.id}` });
+  await details.getByLabel("Title", { exact: true }).fill(`${task.title} edited`);
+  await details.getByRole("button", { name: "Save changes" }).click();
+  await expect(details.getByRole("button", { name: "Saving…" })).toBeVisible();
+  await expect(close).toBeDisabled();
+  release();
+  await expect(saveButton(details)).toBeHidden();
+  await close.click();
+  await expect(details).toBeHidden();
+});
+
 test("A stale save keeps the draft and merges untouched fields", async ({ page }) => {
   const task = await create(`Stale ${key()}`);
   await connect(page);

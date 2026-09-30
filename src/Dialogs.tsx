@@ -1425,6 +1425,8 @@ export function TaskEditor({
             type="button"
             className="icon-button"
             aria-label={`Close ${current.id}`}
+            // requestClose ignores Close while a save or other action runs.
+            disabled={Boolean(pending)}
             onClick={requestClose}
           >
             <Icon name="close" />
