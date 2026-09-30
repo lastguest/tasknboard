@@ -112,9 +112,13 @@ test("renaming a board prefix changes only its tasks and event references", (t) 
 
 test("boards store a trimmed description that defaults to empty", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "tasknboard-boards-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "description.sqlite");
   let store = createStore(path);
+  // Windows cannot remove a database file that is still open.
+  t.after(() => {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
   const plain = store.execute("create_board", { name: "Plain", prefix: "PLN" }, human);
   assert.equal(plain.description, "");
   const described = store.execute(
@@ -149,7 +153,6 @@ test("boards store a trimmed description that defaults to empty", (t) => {
   db.exec("DELETE FROM migrations WHERE version=13");
   db.close();
   store = createStore(path);
-  t.after(() => store.close());
   const [defaultBoard] = store.execute("list_boards", {}, human).boards;
   assert.equal(defaultBoard.description, "");
 });

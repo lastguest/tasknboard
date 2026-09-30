@@ -18,6 +18,6 @@ export default defineConfig({
       ...(executablePath ? { executablePath } : {}),
     },
     screenshot: "off",
-    trace: "off",
+    trace: "retain-on-failure",
   },
 });
