@@ -68,7 +68,7 @@ Migration 7 adds a `views` table and a `view_favorites(actor, view_id)` table.
 Existing tasks are not touched. View writes append events (`created`,
 `update_view`, `delete_view`) whose subject ID is the view ID. The deletion
 event's body is the view as it was. `workspace_info` and `export_workspace`
-report `schemaVersion: 13` since [board descriptions](boards.md#board-records). The export includes every view (personal ones too,
+report `schemaVersion: 14` since [task links](task-links.md). The export includes every view (personal ones too,
 since exports are human-only backups) and `viewFavorites`.
 
 MCP exposes `list_views` to agents. WebMCP exposes `list_views` and

@@ -1712,6 +1712,7 @@ export default function App() {
                 assignees={assignees}
                 labels={labels}
                 epics={epics}
+                linkCandidates={tasks}
                 latestVersion={tasks.find((t) => t.id === task.id)?.version}
                 closeRequest={closeRequest}
                 onReveal={() => setActiveTab(task.id)}
@@ -1720,6 +1721,7 @@ export default function App() {
                 onSaved={saved}
                 onChanged={() => void refresh()}
                 onArchived={archived}
+                onOpenTask={(id) => void openTaskById(id)}
               />
             </div>
           ))}

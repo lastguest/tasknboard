@@ -25,7 +25,7 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
   });
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 16);
+  assert.equal(tools.tools.length, 18);
   const profileTool = tools.tools.find((tool) => tool.name === "update_profile");
   assert.ok(profileTool);
   assert.match(profileTool.description, /useGravatar.*gravatarEmail/);
@@ -37,7 +37,7 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
     return JSON.parse(r.content[0].text);
   };
   const info = await call("workspace_info", {});
-  assert.equal(info.schemaVersion, 13);
+  assert.equal(info.schemaVersion, 14);
   assert.ok(
     info.actors.some((entry) => entry.id === "test-agent" && entry.kind === "agent"),
   );

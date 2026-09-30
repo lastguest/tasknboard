@@ -20,7 +20,7 @@ const descriptions = {
   list_epics:
     "List epics (projects that group tasks) with per-status task counts. Humans manage epics; agents read them.",
   get_task:
-    "Read full task context, acceptance criteria, version, claim and activity.",
+    "Read full task context, acceptance criteria, version, claim, links to other tasks and activity.",
   create_task:
     "Create a backlog task on the explicit boardId from list_boards, with instructions and acceptance criteria, optionally inside an existing epic.",
   update_task:
@@ -34,6 +34,10 @@ const descriptions = {
     "Append progress or a question to your claimed task. Requires current expectedVersion.",
   set_standup_notes:
     "Set highlight and blocker notes for stand-up (500 chars each). Empty strings clear notes. Agents require their own active claim; humans may annotate without changing a claim. Returns a new task version.",
+  link_task:
+    "Link your claimed task to another task: relates, blocks, blocked_by, duplicates, or duplicated_by. Two tasks have at most one link. Links inform; they do not block status changes. Returns a new task version.",
+  unlink_task:
+    "Remove the link between your claimed task and target, in either direction. Returns a new task version.",
   update_profile:
     "Set your own display name and uploaded avatar. Set useGravatar to enable Gravatar. Omit gravatarEmail to keep the saved address; an empty email clears it when useGravatar is false. Enabling Gravatar requires an email. The email appears only in your own profile response. Your actor ID does not change.",
   upload_image:

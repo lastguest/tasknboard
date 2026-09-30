@@ -104,6 +104,7 @@ const paths: Record<string, React.ReactNode> = {
       <path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M9 13h6M8 16h8" />
     </>
   ),
+  link: <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5" />,
   comment: <path d="M20 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z" />,
   external: <path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6" />,
   lock: (

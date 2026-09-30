@@ -55,7 +55,8 @@ keyboard shortcuts, persisted comments/events, MCP tools, lease coordination,
 version conflicts, minimal actor tokens, server polling, backup export.
 Not implemented: organization membership UI, OAuth/SSO, remote Streamable HTTP
 MCP endpoint, granular per-project roles, offline replica sync, notification
-service, general attachments (only description images are stored), dependencies, custom workflows.
+service, general attachments (only description images are stored), enforced
+dependencies (task links do not block status changes), custom workflows.
 Remote MCP currently means a local stdio bridge to the shared authenticated API.
 For public deployment, terminate HTTPS and configure tokens. Token rotation is
 by process configuration. Database must be on local disk, not NFS.
@@ -91,6 +92,12 @@ and authorization checks still apply.
 The [epics contract](contracts/epics.md) groups tasks into projects. A task has
 at most one epic. Epic counts are derived from tasks when read. Only humans
 manage epics, and an epic with open work cannot be archived.
+
+## Task links
+
+The [task links contract](contracts/task-links.md) relates two tasks:
+relates, blocks, or duplicates. A link is a versioned write on one task.
+Links inform; the server does not block status changes because of them.
 
 ## Views
 

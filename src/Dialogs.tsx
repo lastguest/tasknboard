@@ -4,12 +4,15 @@ import {
   activeLease,
   columns,
   doneLocked,
+  linkTitle,
+  linkTypes,
   priorities,
   safeUrl,
   statusTitle,
   type Actor,
   type Epic,
   epicStyle,
+  type LinkType,
   type Priority,
   type Status,
   type Task,
@@ -406,6 +409,8 @@ const kindText: Record<string, string> = {
   submit_review: "submitted for review",
   archive_task: "archived the task",
   set_standup_notes: "updated stand-up notes",
+  link_task: "linked a task",
+  unlink_task: "removed a link",
 };
 const fieldLabels: Record<string, string> = {
   title: "title",
@@ -444,6 +449,8 @@ function eventDetail(e: TaskEvent, epicTitle: (id: string) => string) {
           .join("\n") || "Notes cleared."
       );
     if (e.kind === "submit_review") return body.summary;
+    if (e.kind === "link_task" || e.kind === "unlink_task")
+      return `${linkTitle(body.type)} ${body.target}`;
   } catch {
     // Older or free-text bodies are shown as plain text below.
   }
@@ -531,7 +538,14 @@ function sameValue(left: unknown, right: unknown) {
   return Object.is(left, right);
 }
 
-type Pending = null | "save" | "comment" | "review" | "archive" | "reload";
+type Pending =
+  | null
+  | "save"
+  | "comment"
+  | "review"
+  | "archive"
+  | "reload"
+  | "link";
 
 export function TaskEditor({
   task,
@@ -544,6 +558,7 @@ export function TaskEditor({
   labels,
   epics,
   initialEpic = "",
+  linkCandidates = [],
   latestVersion,
   closeRequest = 0,
   onReveal,
@@ -552,6 +567,7 @@ export function TaskEditor({
   onSaved,
   onChanged,
   onArchived,
+  onOpenTask,
 }: {
   task: Task | null;
   boardName: string;
@@ -563,6 +579,8 @@ export function TaskEditor({
   labels: string[];
   epics: Epic[];
   initialEpic?: string;
+  /** Tasks offered in the link picker: the loaded board's tasks. */
+  linkCandidates?: Task[];
   latestVersion?: number;
   /** Tab only: a new value asks the tab to close, after a discard check. */
   closeRequest?: number;
@@ -573,6 +591,7 @@ export function TaskEditor({
   onSaved: (t: Task) => void;
   onChanged: (t: Task) => void;
   onArchived: (t: Task) => void;
+  onOpenTask?: (id: string) => void;
 }) {
   const [current, setCurrent] = useState(task);
   const [draft, setDraft] = useState(() => draftOf(task, initialEpic));
@@ -588,6 +607,9 @@ export function TaskEditor({
   const [reviewError, setReviewError] = useState<ApiError | null>(null);
   const [archiveStep, setArchiveStep] = useState(false);
   const [archiveError, setArchiveError] = useState<ApiError | null>(null);
+  const [linkType, setLinkType] = useState<LinkType>("blocks");
+  const [linkPicker, setLinkPicker] = useState(false);
+  const [linkError, setLinkError] = useState<ApiError | null>(null);
   /** What the discard confirmation leads to: closing, or a revert to the saved task. */
   const [discard, setDiscard] = useState<false | "close" | "revert">(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -762,6 +784,7 @@ export function TaskEditor({
       setCommentError(null);
       setReviewError(null);
       setArchiveError(null);
+      setLinkError(null);
       onChanged(latest);
     } catch (e) {
       setError(errorOf(e));
@@ -831,6 +854,27 @@ export function TaskEditor({
       onChanged(next);
     } catch (e) {
       setCommentError(errorOf(e));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  /** Links are separate writes, like comments: the draft stays as it is. */
+  async function writeLink(name: "link_task" | "unlink_task", target: string) {
+    if (!current || pending) return;
+    setPending("link");
+    setLinkError(null);
+    try {
+      const next = await command<Task>(name, {
+        id: current.id,
+        expectedVersion: current.version,
+        target,
+        ...(name === "link_task" ? { type: linkType } : {}),
+      });
+      setCurrent(next);
+      onChanged(next);
+    } catch (e) {
+      setLinkError(errorOf(e));
     } finally {
       setPending(null);
     }
@@ -1198,6 +1242,73 @@ export function TaskEditor({
           </dl>
           {current && (
             <>
+            <section className="side-block" aria-label="Links">
+              <h3>
+                <Icon name="link" size={14} /> Links
+              </h3>
+              {current.links?.length ? (
+                <ul className="task-links">
+                  {current.links.map((link) => (
+                    <li key={link.id}>
+                      <span className="small">{linkTitle(link.type)}</span>
+                      <a
+                        href={`#task/${link.id}`}
+                        onClick={(e) => {
+                          if (!onOpenTask) return;
+                          e.preventDefault();
+                          onOpenTask(link.id);
+                        }}
+                      >
+                        <StatusIcon status={link.status} />
+                        <span className="task-id">{link.id}</span>
+                        <span className="task-link-title">{link.title}</span>
+                        {link.archived && <span className="small"> Archived</span>}
+                      </a>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`Remove link to ${link.id}`}
+                        title="Remove link"
+                        disabled={Boolean(pending)}
+                        onClick={() => writeLink("unlink_task", link.id)}
+                      >
+                        <Icon name="close" size={13} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="small">No linked tasks.</p>
+              )}
+              <div className="review-actions">
+                <select
+                  aria-label="Link type"
+                  value={linkType}
+                  onChange={(e) => setLinkType(e.target.value as LinkType)}
+                >
+                  {linkTypes.map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {type.title}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={Boolean(pending)}
+                  onClick={() => setLinkPicker(true)}
+                >
+                  {pending === "link" ? "Saving…" : "Link task…"}
+                </button>
+              </div>
+              {linkError && (
+                <ErrorNote
+                  error={linkError}
+                  onReload={reload}
+                  busy={Boolean(pending)}
+                />
+              )}
+            </section>
             <section className="side-block" aria-label="Claim">
               <h3>
                 <Icon name="lock" size={14} /> Claim
@@ -1531,6 +1642,31 @@ export function TaskEditor({
             set("labels")([...draft.labels, label]);
         }}
         onClose={() => setPicker(null)}
+      />
+    )}
+    {linkPicker && current && (
+      <SearchableChoiceDialog
+        title={`${current.id} ${linkTitle(linkType).toLowerCase()}…`}
+        searchLabel="Search tasks"
+        options={linkCandidates
+          .filter(
+            (task) =>
+              task.id !== current.id &&
+              !current.links?.some((link) => link.id === task.id),
+          )
+          .map((task) => ({
+            value: task.id,
+            label: `${task.id} ${task.title}`,
+            detail: statusTitle(task.status),
+            icon: <StatusIcon status={task.status} />,
+          }))}
+        selected={[]}
+        onSelect={(value) => {
+          setLinkPicker(false);
+          void writeLink("link_task", value);
+        }}
+        onToggle={() => {}}
+        onClose={() => setLinkPicker(false)}
       />
     )}
     </>

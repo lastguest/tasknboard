@@ -8,6 +8,30 @@ export type TaskEvent = {
   body: string;
   createdAt: string;
 };
+/** How a task relates to another, read from the first task's side. */
+export type LinkType =
+  | "relates"
+  | "blocks"
+  | "blocked_by"
+  | "duplicates"
+  | "duplicated_by";
+export const linkTypes: { id: LinkType; title: string }[] = [
+  { id: "blocks", title: "Blocks" },
+  { id: "blocked_by", title: "Blocked by" },
+  { id: "relates", title: "Related to" },
+  { id: "duplicates", title: "Duplicates" },
+  { id: "duplicated_by", title: "Duplicated by" },
+];
+export const linkTitle = (type: LinkType) =>
+  linkTypes.find((t) => t.id === type)?.title ?? type;
+/** The other task of a link, as `get_task` returns it. */
+export type TaskLink = {
+  type: LinkType;
+  id: string;
+  title: string;
+  status: Status;
+  archived: boolean;
+};
 export type Task = {
   id: string;
   boardId: string;
@@ -26,6 +50,8 @@ export type Task = {
   updatedAt: string;
   standup?: { highlight: string; blocker: string };
   review?: { summary: string; artifactUrl: string; actor: string };
+  /** Present on `get_task` and write results, not on `list_tasks`. */
+  links?: TaskLink[];
   events?: TaskEvent[];
 };
 export type Epic = {

@@ -103,6 +103,14 @@ const viewDisplay = z
   })
   .strict();
 const viewName = z.string().trim().min(1).max(80);
+/** How a task relates to another, read from the first task's side. */
+export const linkTypes = [
+  "blocks",
+  "blocked_by",
+  "relates",
+  "duplicates",
+  "duplicated_by",
+];
 const labels = z.array(z.string().trim().min(1).max(40))
   .transform((values) => [...new Set(values)]);
 const patch = z
@@ -177,6 +185,17 @@ export const schemas = {
     })
     .strict(),
   archive_task: z.object({ id, expectedVersion: version }).strict(),
+  link_task: z
+    .object({
+      id,
+      expectedVersion: version,
+      type: z.enum(linkTypes),
+      target: id,
+    })
+    .strict(),
+  unlink_task: z
+    .object({ id, expectedVersion: version, target: id })
+    .strict(),
   update_profile: z
     .object({
       name: z.string().trim().max(80).optional(),

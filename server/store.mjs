@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { schemas, fail, epicColors } from "./domain.mjs";
+import { schemas, fail, epicColors, linkTypes } from "./domain.mjs";
 import { taskMatchesView } from "./views.mjs";
 
 // Decoded bytes must match the declared type; the data URL prefix alone is not trusted.
@@ -154,6 +154,12 @@ export function createStore(path, { clock = Date.now } = {}) {
       db.exec(`UPDATE boards SET data=json_set(data, '$.description', '')
  WHERE json_type(data, '$.description') IS NULL;
  INSERT INTO migrations VALUES(13);`);
+    }
+    if (!db.prepare("SELECT version FROM migrations WHERE version=14").get()) {
+      // Links use stable task row numbers across prefix changes.
+      db.exec(`CREATE TABLE task_links(from_number INTEGER NOT NULL REFERENCES tasks(number), to_number INTEGER NOT NULL REFERENCES tasks(number), kind TEXT NOT NULL CHECK(kind IN ('relates','blocks','duplicates')), PRIMARY KEY(from_number, to_number));
+ CREATE INDEX task_links_to ON task_links(to_number);
+ INSERT INTO migrations VALUES(14);`);
     }
   });
   const readTransaction = (fn) => {
@@ -474,6 +480,47 @@ export function createStore(path, { clock = Date.now } = {}) {
         "INSERT INTO events(task_id,actor,kind,body,created_at) VALUES(?,?,?,?,?)",
       )
       .run(id, actor.id, kind, body, new Date(clock()).toISOString());
+  const taskNumber = (id) =>
+    db.prepare("SELECT number FROM tasks WHERE json_extract(data, '$.id')=?").get(id)
+      .number;
+  /** The same link read from the other task's side. Rows store only the first three. */
+  const inverseLink = {
+    relates: "relates",
+    blocks: "blocked_by",
+    duplicates: "duplicated_by",
+    blocked_by: "blocks",
+    duplicated_by: "duplicates",
+  };
+  /** The one link between two tasks, in either direction. */
+  const linkBetween = (a, b) =>
+    db
+      .prepare(
+        "SELECT from_number, to_number, kind FROM task_links WHERE (from_number=? AND to_number=?) OR (from_number=? AND to_number=?)",
+      )
+      .get(a, b, b, a);
+  const linksOf = (t) => {
+    const number = taskNumber(t.id);
+    return db
+      .prepare(
+        "SELECT l.from_number, l.kind, t.data FROM task_links l JOIN tasks t ON t.number = CASE WHEN l.from_number=? THEN l.to_number ELSE l.from_number END WHERE l.from_number=? OR l.to_number=?",
+      )
+      .all(number, number, number)
+      .map((row) => {
+        const other = JSON.parse(row.data);
+        return {
+          type: row.from_number === number ? row.kind : inverseLink[row.kind],
+          id: other.id,
+          title: other.title,
+          status: other.status,
+          archived: other.archived,
+        };
+      })
+      .sort(
+        (a, b) =>
+          linkTypes.indexOf(a.type) - linkTypes.indexOf(b.type) ||
+          a.id.localeCompare(b.id, undefined, { numeric: true }),
+      );
+  };
   const detail = (t) => {
     const events = db
       .prepare(
@@ -485,6 +532,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         t,
         events.filter((event) => event.kind === "add_comment").length,
       ),
+      links: linksOf(t),
       events,
     };
   };
@@ -571,7 +619,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         actors: actorRoster(),
         leaseSeconds: 900,
         boards: boardsFor(identity, allBoards()),
-        schemaVersion: 13,
+        schemaVersion: 14,
       };
     if (command === "update_profile")
       return transaction(() => {
@@ -805,7 +853,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       if (identity.kind !== "human")
         fail("FORBIDDEN", "Human access required", 403);
       return transaction(() => ({
-        schemaVersion: 13,
+        schemaVersion: 14,
         exportedAt: new Date(clock()).toISOString(),
         boards: allBoards(),
         actors: actorRoster(),
@@ -828,6 +876,12 @@ export function createStore(path, { clock = Date.now } = {}) {
           .all()
           .map(({ prefix, boardId }) => ({ prefix, boardId })),
         tasks: all(),
+        taskLinks: db
+          .prepare(
+            "SELECT json_extract(f.data, '$.id') AS source, l.kind AS type, json_extract(t.data, '$.id') AS target FROM task_links l JOIN tasks f ON f.number=l.from_number JOIN tasks t ON t.number=l.to_number ORDER BY l.from_number, l.to_number",
+          )
+          .all()
+          .map(({ source, type, target }) => ({ source, type, target })),
         events: db.prepare("SELECT * FROM events ORDER BY sequence").all(),
         images: db
           .prepare(
@@ -866,6 +920,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         return detail(t);
       }
       const t = get(p.id);
+      let link;
       if (t.archived) fail("ARCHIVED", "Task is archived");
       if (t.version !== p.expectedVersion)
         fail(
@@ -943,6 +998,52 @@ export function createStore(path, { clock = Date.now } = {}) {
             actor: identity.id,
           };
         }
+        if (command === "link_task" || command === "unlink_task") {
+          const other = get(p.target);
+          if (other.id === t.id)
+            fail("VALIDATION", "target: A task cannot link to itself", 400);
+          const self = taskNumber(t.id);
+          const otherNumber = taskNumber(other.id);
+          const existing = linkBetween(self, otherNumber);
+          if (command === "link_task") {
+            if (other.archived) fail("ARCHIVED", `${other.id} is archived`);
+            if (existing)
+              fail(
+                "LINK_EXISTS",
+                `${t.id} and ${other.id} are already linked. Remove that link first.`,
+              );
+            // "A blocked_by B" is stored as "B blocks A".
+            const reversed = p.type.endsWith("_by");
+            db.prepare(
+              "INSERT INTO task_links(from_number, to_number, kind) VALUES(?,?,?)",
+            ).run(
+              reversed ? otherNumber : self,
+              reversed ? self : otherNumber,
+              reversed ? inverseLink[p.type] : p.type,
+            );
+            link = { type: p.type, target: other.id };
+          } else {
+            if (!existing)
+              fail("NOT_FOUND", `${t.id} is not linked to ${other.id}`, 404);
+            db.prepare(
+              "DELETE FROM task_links WHERE from_number=? AND to_number=?",
+            ).run(existing.from_number, existing.to_number);
+            link = {
+              type:
+                existing.from_number === self
+                  ? existing.kind
+                  : inverseLink[existing.kind],
+              target: other.id,
+            };
+          }
+          // The other task records the change but keeps its version.
+          event(
+            other.id,
+            identity,
+            command,
+            JSON.stringify({ type: inverseLink[link.type], target: t.id }),
+          );
+        }
         if (command === "archive_task") {
           if (identity.kind !== "human")
             fail("FORBIDDEN", "Only humans may archive", 403);
@@ -963,7 +1064,9 @@ export function createStore(path, { clock = Date.now } = {}) {
               ? JSON.stringify(t.standup)
               : command === "update_task"
                 ? JSON.stringify(p.patch)
-                : ""),
+                : link
+                  ? JSON.stringify(link)
+                  : ""),
       );
       return detail(t);
     });

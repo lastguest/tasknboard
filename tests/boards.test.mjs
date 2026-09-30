@@ -437,7 +437,7 @@ test("the board migration preserves legacy keys and epic references", (t) => {
     "APP-002",
   );
   const backup = store.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 13);
+  assert.equal(backup.schemaVersion, 14);
   assert.equal(Object.hasOwn(backup, "workspace"), false);
   assert.equal(backup.tasks[0].boardId, defaultBoard.id);
   // Exports hold stored records; formerPrefixes, inSidebar, and inProgress are derived.
@@ -549,4 +549,33 @@ test("each board counts its active tasks In progress", (t) => {
   assert.deepEqual(counts(store.execute("list_boards", {}, human)), expected);
   // Agents read the same counts; workspace_info feeds the sidebar.
   assert.deepEqual(counts(store.execute("workspace_info", {}, agent)), expected);
+});
+
+
+test("task links upgrade an existing version 13 database without changing boards or tasks", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "tasknboard-links-upgrade-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "workspace.sqlite");
+  let store = createStore(path);
+  const board = store.execute("update_board", {
+    id: "BOARD-1", expectedVersion: 1, patch: { description: "Keep this description" },
+  }, human);
+  const first = store.execute("create_task", { boardId: board.id, title: "First" }, human);
+  const second = store.execute("create_task", { boardId: board.id, title: "Second" }, human);
+  store.close();
+  const db = new DatabaseSync(path);
+  db.exec("DROP TABLE task_links; DELETE FROM migrations WHERE version=14");
+  db.close();
+  store = createStore(path);
+  try {
+    assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 14);
+    assert.equal(store.execute("list_boards", {}, human).boards[0].description, board.description);
+    assert.equal(store.execute("get_task", { id: first.id }, human).version, first.version);
+    const linked = store.execute("link_task", {
+      id: first.id, expectedVersion: first.version, type: "blocks", target: second.id,
+    }, human);
+    assert.deepEqual(linked.links.map(link => [link.type, link.id]), [["blocks", second.id]]);
+  } finally {
+    store.close();
+  }
 });
