@@ -11,6 +11,8 @@ type Board = {
   id: `BOARD-${number}`;
   name: string;
   prefix: string;
+  /** Plain text shown under the board title; "" means none. */
+  description: string;
   /** Retired prefixes of this board, derived from the prefix reservations. */
   formerPrefixes: string[];
   /** Whether the caller lists this board in the sidebar. */
@@ -26,13 +28,13 @@ type Board = {
 The server exposes these commands:
 
 - `list_boards({})` returns `{ boards }`.
-- `create_board({ name, prefix })` creates a board.
-- `update_board({ id, expectedVersion, patch })` changes its name or prefix.
+- `create_board({ name, prefix, description? })` creates a board. The description defaults to `""`.
+- `update_board({ id, expectedVersion, patch })` changes its name, prefix, or description.
 - `set_board_sidebar({ id, inSidebar })` shows or hides a board in the caller's sidebar.
 
 Board writes require a human actor. Create and update actions append events under the board ID. Updates require the current version. A stale version returns `VERSION_CONFLICT`.
 
-Names are trimmed and contain 1–80 characters. Prefixes are trimmed, converted to uppercase, and contain 2–10 letters or digits. Prefixes must start with a letter. `EPIC`, `VIEW`, and `BOARD` are reserved. Every board prefix must be unique and must not match a prefix on a stored epic key.
+Names are trimmed and contain 1–80 characters. Descriptions are trimmed and contain 0–500 characters. The board page shows the description under its title and shows no subtitle when it is empty. Prefixes are trimmed, converted to uppercase, and contain 2–10 letters or digits. Prefixes must start with a letter. `EPIC`, `VIEW`, and `BOARD` are reserved. Every board prefix must be unique and must not match a prefix on a stored epic key.
 
 ## Sidebar
 

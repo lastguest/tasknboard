@@ -717,7 +717,7 @@ export default function App() {
       groups: [
         {
           items: boards.map((board) => ({
-            label: `${board.name} (${board.prefix}-)`,
+            label: `${board.name} (${board.prefix})`,
             checked: board.id === selectedBoardId,
             onSelect: () => selectBoard(board.id),
           })),
@@ -1750,7 +1750,9 @@ export default function App() {
                   </button>
                 )}
               </h1>
-              {view !== "board" && (
+              {view === "board" ? (
+                currentBoard?.description && <p>{currentBoard.description}</p>
+              ) : (
                 <p>
                   {view === "epic"
                     ? currentEpic

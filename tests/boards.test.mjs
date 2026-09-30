@@ -110,6 +110,50 @@ test("renaming a board prefix changes only its tasks and event references", (t) 
   assert.ok(events.some((event) => event.task_id === operations.id && event.kind === "created"));
 });
 
+test("boards store a trimmed description that defaults to empty", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "tasknboard-boards-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "description.sqlite");
+  let store = createStore(path);
+  const plain = store.execute("create_board", { name: "Plain", prefix: "PLN" }, human);
+  assert.equal(plain.description, "");
+  const described = store.execute(
+    "create_board",
+    { name: "Ops", prefix: "OPS", description: "  Runbooks and incidents.  " },
+    human,
+  );
+  assert.equal(described.description, "Runbooks and incidents.");
+  const cleared = store.execute(
+    "update_board",
+    { id: described.id, expectedVersion: described.version, patch: { description: "" } },
+    human,
+  );
+  assert.equal(cleared.description, "");
+  assert.equal(cleared.version, 2);
+  assert.throws(
+    () =>
+      store.execute(
+        "create_board",
+        { name: "Long", prefix: "LNG", description: "x".repeat(501) },
+        human,
+      ),
+    { code: "VALIDATION" },
+  );
+  store.close();
+
+  // Boards stored before descriptions existed read back with "".
+  const db = new DatabaseSync(path);
+  const stored = JSON.parse(db.prepare("SELECT data FROM boards WHERE number=1").get().data);
+  delete stored.description;
+  db.prepare("UPDATE boards SET data=? WHERE number=1").run(JSON.stringify(stored));
+  db.exec("DELETE FROM migrations WHERE version=13");
+  db.close();
+  store = createStore(path);
+  t.after(() => store.close());
+  const [defaultBoard] = store.execute("list_boards", {}, human).boards;
+  assert.equal(defaultBoard.description, "");
+});
+
 test("former task keys redirect to their own board and never to another", (t) => {
   const store = fixture(t);
   const [originalBoard] = store.execute("list_boards", {}, human).boards;
@@ -345,6 +389,7 @@ test("the board migration preserves legacy keys and epic references", (t) => {
   assert.equal(defaultBoard.prefix, "APP");
   assert.deepEqual(Object.keys(defaultBoard).sort(), [
     "createdAt",
+    "description",
     "formerPrefixes",
     "id",
     "inProgress",
@@ -389,7 +434,7 @@ test("the board migration preserves legacy keys and epic references", (t) => {
     "APP-002",
   );
   const backup = store.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 12);
+  assert.equal(backup.schemaVersion, 13);
   assert.equal(Object.hasOwn(backup, "workspace"), false);
   assert.equal(backup.tasks[0].boardId, defaultBoard.id);
   // Exports hold stored records; formerPrefixes, inSidebar, and inProgress are derived.

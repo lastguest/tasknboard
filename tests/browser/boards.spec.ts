@@ -37,7 +37,7 @@ test("boards scope task keys, persist selection, and own task deep links", async
 
   const boardSwitch = page.getByRole("button", { name: /^Switch board/ });
   await expect(boardSwitch).toHaveAccessibleName("Switch board, current Default");
-  // The board page shows no subtitle: boards have no description.
+  // A board without a description shows no subtitle.
   await expect(page.locator(".page-title p")).toHaveCount(0);
   await page
     .getByRole("group", { name: "Board actions" })
@@ -85,7 +85,10 @@ test("boards scope task keys, persist selection, and own task deep links", async
   expect(task?.boardId).toBe(board.id);
   await page.getByRole("button", { name: "Edit board" }).click();
   await expect(editBoard).toContainText(`Former prefixes: ${prefix}-.`);
-  await editBoard.getByRole("button", { name: "Cancel" }).click();
+  await editBoard.getByRole("textbox", { name: "Description" }).fill("Runbooks and incidents.");
+  await editBoard.getByRole("button", { name: "Save changes" }).click();
+  await expect(editBoard).toBeHidden();
+  await expect(page.locator(".page-title p")).toHaveText("Runbooks and incidents.");
 
   const oldKey = await fetch(`${baseURL}/api/get_task`, {
     method: "POST",
@@ -103,9 +106,9 @@ test("boards scope task keys, persist selection, and own task deep links", async
   await expect(page.locator(".task-card").filter({ hasText: taskTitle })).toBeVisible();
   await boardSwitch.click();
   await expect(
-    page.getByRole("menuitemradio", { name: `${boardName} (${nextPrefix}-)` }),
+    page.getByRole("menuitemradio", { name: `${boardName} (${nextPrefix})` }),
   ).toHaveAttribute("aria-checked", "true");
-  await page.getByRole("menuitemradio", { name: "Default (TNB-)" }).click();
+  await page.getByRole("menuitemradio", { name: "Default (TNB)" }).click();
   await expect(page.locator(".task-card").filter({ hasText: original.title })).toBeVisible();
   await expect(page.locator(".task-card").filter({ hasText: taskTitle })).toHaveCount(0);
   expect((await command<any>("get_task", { id: original.id })).boardId).toBe("BOARD-1");

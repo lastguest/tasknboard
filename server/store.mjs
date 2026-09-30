@@ -118,6 +118,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         id: "BOARD-1",
         name: "Default",
         prefix: taskPrefix,
+        description: "",
         version: 1,
         createdAt: now,
         updatedAt: now,
@@ -147,6 +148,12 @@ export function createStore(path, { clock = Date.now } = {}) {
       // Each person's boards hidden from their sidebar. Boards show by default.
       db.exec(`CREATE TABLE board_sidebar_hidden(actor TEXT NOT NULL, board_id TEXT NOT NULL, PRIMARY KEY(actor, board_id));
  INSERT INTO migrations VALUES(12);`);
+    }
+    if (!db.prepare("SELECT version FROM migrations WHERE version=13").get()) {
+      // Boards gained a description.
+      db.exec(`UPDATE boards SET data=json_set(data, '$.description', '')
+ WHERE json_type(data, '$.description') IS NULL;
+ INSERT INTO migrations VALUES(13);`);
     }
   });
   const readTransaction = (fn) => {
@@ -509,6 +516,7 @@ export function createStore(path, { clock = Date.now } = {}) {
           id: `BOARD-${result.lastInsertRowid}`,
           name: p.name,
           prefix: p.prefix,
+          description: p.description,
           version: 1,
           createdAt: now,
           updatedAt: now,
@@ -563,7 +571,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         actors: actorRoster(),
         leaseSeconds: 900,
         boards: boardsFor(identity, allBoards()),
-        schemaVersion: 12,
+        schemaVersion: 13,
       };
     if (command === "update_profile")
       return transaction(() => {
@@ -797,7 +805,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       if (identity.kind !== "human")
         fail("FORBIDDEN", "Human access required", 403);
       return transaction(() => ({
-        schemaVersion: 12,
+        schemaVersion: 13,
         exportedAt: new Date(clock()).toISOString(),
         boards: allBoards(),
         actors: actorRoster(),

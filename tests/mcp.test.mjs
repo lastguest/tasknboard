@@ -37,7 +37,7 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
     return JSON.parse(r.content[0].text);
   };
   const info = await call("workspace_info", {});
-  assert.equal(info.schemaVersion, 12);
+  assert.equal(info.schemaVersion, 13);
   assert.ok(
     info.actors.some((entry) => entry.id === "test-agent" && entry.kind === "agent"),
   );

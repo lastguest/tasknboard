@@ -27,6 +27,8 @@ export const keyPrefix = z
   .regex(/^[A-Z][A-Z0-9]{1,9}$/, "2–10 letters or digits, starting with a letter")
   .refine((v) => !["EPIC", "VIEW", "BOARD"].includes(v), "EPIC, VIEW, and BOARD are reserved");
 const boardName = z.string().trim().min(1).max(80);
+/** Plain text shown under the board title; "" means none. */
+const boardDescription = z.string().trim().max(500);
 /** A task's epic: an epic ID, or "" for none. */
 const taskEpic = z.union([z.literal(""), epicId]);
 const epicTitle = z.string().trim().min(1).max(120);
@@ -278,14 +280,22 @@ export const schemas = {
   favorite_view: z.object({ id: viewId, favorite: z.boolean() }).strict(),
   list_boards: z.object({}).strict(),
   create_board: z
-    .object({ name: boardName, prefix: keyPrefix })
+    .object({
+      name: boardName,
+      prefix: keyPrefix,
+      description: boardDescription.default(""),
+    })
     .strict(),
   update_board: z
     .object({
       id: boardId,
       expectedVersion: version,
       patch: z
-        .object({ name: boardName.optional(), prefix: keyPrefix.optional() })
+        .object({
+          name: boardName.optional(),
+          prefix: keyPrefix.optional(),
+          description: boardDescription.optional(),
+        })
         .strict()
         .refine((v) => Object.keys(v).length > 0, "Empty patch"),
     })

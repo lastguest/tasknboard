@@ -18,7 +18,7 @@ assignee ID matches an agent in the roster. Unknown assignees remain neutral.
 Names and lease ownership must not determine actor kind.
 
 `export_workspace` includes the actor roster. `workspace_info` and exports use
-`schemaVersion: 12`. Version 12 added board sidebar choices, and 11 added [boards](boards.md) (7 added views, 6 added epics, 5 added description images). No import or restore command is added.
+`schemaVersion: 13`. Version 13 added board descriptions, 12 added board sidebar choices, and 11 added [boards](boards.md) (7 added views, 6 added epics, 5 added description images). No import or restore command is added.
 
 ## Comment counts
 

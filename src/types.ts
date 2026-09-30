@@ -89,6 +89,8 @@ export type BoardRecord = {
   id: string;
   name: string;
   prefix: string;
+  /** Plain text shown under the board title; "" means none. */
+  description: string;
   /** Retired prefixes whose task keys still resolve on this board. */
   formerPrefixes: string[];
   /** Whether the caller lists this board in the sidebar. Each person sets it. */

@@ -217,19 +217,23 @@ export function BoardEditor({
 }) {
   const nameId = useId();
   const prefixId = useId();
+  const descriptionId = useId();
   const [name, setName] = useState(board?.name ?? "");
+  const [description, setDescription] = useState(board?.description ?? "");
   const [prefix, setPrefix] = useState(board?.prefix ?? "");
   const [pending, setPending] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const normalizedName = name.trim();
   const normalizedPrefix = prefix.trim().toUpperCase();
+  const normalizedDescription = description.trim();
   const nameError = normalizedName ? "" : "Enter a board name.";
   const prefixError = prefixProblem(normalizedPrefix);
   const changed =
     !board ||
     normalizedName !== board.name ||
-    normalizedPrefix !== board.prefix;
+    normalizedPrefix !== board.prefix ||
+    normalizedDescription !== board.description;
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
@@ -249,11 +253,15 @@ export function BoardEditor({
               ...(normalizedPrefix !== board.prefix && {
                 prefix: normalizedPrefix,
               }),
+              ...(normalizedDescription !== board.description && {
+                description: normalizedDescription,
+              }),
             },
           })
         : await command<BoardRecord>("create_board", {
             name: normalizedName,
             prefix: normalizedPrefix,
+            description: normalizedDescription,
           });
       onSaved(saved, board);
     } catch (cause) {
@@ -362,6 +370,23 @@ export function BoardEditor({
               {prefixError}
             </span>
           )}
+        </label>
+        <label className="field" htmlFor={descriptionId}>
+          <span className="field-label" id={`${descriptionId}-label`}>
+            Description
+          </span>
+          <textarea
+            id={descriptionId}
+            aria-labelledby={`${descriptionId}-label`}
+            aria-describedby={`${descriptionId}-hint`}
+            rows={2}
+            maxLength={500}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+          />
+          <span className="field-hint" id={`${descriptionId}-hint`}>
+            Optional. It shows under the board title.
+          </span>
         </label>
       </form>
     </Dialog>
