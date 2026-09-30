@@ -125,7 +125,8 @@ const server = createServer(async (req, res) => {
             },
             cli: {
               command: process.execPath,
-              args: [cliEntry],
+              // Agents parse stderr as JSON, so Node's SQLite warning must stay off it.
+              args: ["--disable-warning=ExperimentalWarning", cliEntry],
               env: {
                 TASKNBOARD_DB: dbPath,
                 TASKNBOARD_AGENT_ID: "pi",

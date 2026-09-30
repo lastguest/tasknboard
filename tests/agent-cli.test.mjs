@@ -70,7 +70,7 @@ test(
     assert.equal(config.platform, process.platform);
     assert.deepEqual(config.cli, {
       command: process.execPath,
-      args: [cliEntry],
+      args: ["--disable-warning=ExperimentalWarning", cliEntry],
       env: { TASKNBOARD_DB: database, TASKNBOARD_AGENT_ID: "pi" },
     });
     assert.deepEqual(config.config.mcpServers.tasknboard, {
@@ -82,7 +82,7 @@ test(
     const agentEnv = { ...env, TASKNBOARD_AGENT_ID: "pi" };
     const info = JSON.parse(
       (
-        await run(process.execPath, [cliEntry, "workspace_info"], {
+        await run(config.cli.command, [...config.cli.args, "workspace_info"], {
           env: agentEnv,
         })
       ).stdout,
@@ -92,9 +92,9 @@ test(
 
     await assert.rejects(
       run(
-        process.execPath,
+        config.cli.command,
         [
-          cliEntry,
+          ...config.cli.args,
           "create_board",
           '{"name":"Engineering","prefix":"ENG"}',
         ],
@@ -107,7 +107,7 @@ test(
     );
 
     await assert.rejects(
-      run(process.execPath, [cliEntry], { env: agentEnv }),
+      run(config.cli.command, config.cli.args, { env: agentEnv }),
       (error) => {
         assert.equal(error.code, 2);
         assert.match(error.stderr, /one-shot commands as an agent/);
