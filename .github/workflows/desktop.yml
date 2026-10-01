@@ -41,8 +41,8 @@ jobs:
         run: |
           echo "::error::Missing repository secret TAURI_SIGNING_PRIVATE_KEY. See the Automatic updates section in README.md."
           exit 1
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
           cache: npm
@@ -50,7 +50,7 @@ jobs:
       - run: npm test
       - name: Restore Rust build cache
         id: rust-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: src-tauri/target
           key: windows-rust-${{ hashFiles('src-tauri/Cargo.lock') }}-${{ hashFiles('src-tauri/src/**', 'src-tauri/tauri.conf.json', 'src-tauri/tauri.windows.conf.json') }}
@@ -71,7 +71,7 @@ jobs:
           npm run desktop:build:windows '--' --config $config
       - name: Save Rust build cache
         if: steps.rust-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: src-tauri/target
           key: ${{ steps.rust-cache.outputs.cache-primary-key }}
@@ -86,7 +86,7 @@ jobs:
         shell: bash
         run: echo "version=$(npx playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
       - name: Cache Playwright browsers
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/AppData/Local/ms-playwright
           key: windows-playwright-${{ steps.playwright.outputs.version }}
@@ -96,7 +96,7 @@ jobs:
           npm run test:ui
       - name: Upload browser test traces
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: browser-test-results
           path: test-results/
@@ -106,7 +106,7 @@ jobs:
         shell: pwsh
         run: ./tests/windows-smoke.ps1
       - name: Upload installer
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: TasknBoard-windows-x64
           path: |
@@ -133,8 +133,8 @@ jobs:
         run: |
           echo "::error::Missing repository secret TAURI_SIGNING_PRIVATE_KEY. See the Automatic updates section in README.md."
           exit 1
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
           cache: npm
@@ -142,7 +142,7 @@ jobs:
       - run: npm test
       - name: Restore Rust build cache
         id: rust-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: src-tauri/target
           key: macos-rust-${{ hashFiles('src-tauri/Cargo.lock') }}-${{ hashFiles('src-tauri/src/**', 'src-tauri/tauri.conf.json') }}
@@ -159,7 +159,7 @@ jobs:
           npm run desktop:build -- --config "$RUNNER_TEMP/release.conf.json"
       - name: Save Rust build cache
         if: steps.rust-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: src-tauri/target
           key: ${{ steps.rust-cache.outputs.cache-primary-key }}
@@ -179,7 +179,7 @@ jobs:
           cp "$bundle/TasknBoard.app.tar.gz" macos-release/TasknBoard-macos-arm64.app.tar.gz
           cp "$bundle/TasknBoard.app.tar.gz.sig" macos-release/TasknBoard-macos-arm64.app.tar.gz.sig
       - name: Upload app
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: TasknBoard-macos-arm64
           path: macos-release/
