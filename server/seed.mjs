@@ -30,16 +30,21 @@ const polish = epic(
   "First-run polish",
   "Make the first ten minutes pleasant for a new team.",
 );
+const lanes = Object.fromEntries(
+  store
+    .execute("list_boards", {}, actor)
+    .boards[0].lanes.map((lane) => [lane.role, lane.id]),
+);
 const samples = [
-  ["Define workspace architecture", "Infrastructure", "high", "you", "backlog", foundation],
+  ["Define workspace architecture", "Infrastructure", "high", "you", "todo", foundation],
   ["Add keyboard navigation", "UX", "medium", "Morgan", "in_progress", polish],
   ["Implement local persistence", "Data", "medium", "Priya", "in_review", foundation],
-  ["Agent claim protocol", "Agents", "high", "TasknBoard Agent", "backlog", foundation],
+  ["Agent claim protocol", "Agents", "high", "TasknBoard Agent", "todo", foundation],
   ["Review task permissions", "Security", "medium", "Alex", "in_progress", ""],
   ["Ship the first slice", "Product", "low", "Taylor", "done", ""],
   ["Polish empty states", "UX", "low", "TasknBoard Agent", "done", polish],
 ];
-for (const [title, label, priority, assignee, status, epic] of samples) {
+for (const [title, label, priority, assignee, role, epic] of samples) {
   let task = store.execute(
     "create_task",
     {
@@ -56,20 +61,11 @@ for (const [title, label, priority, assignee, status, epic] of samples) {
     },
     actor,
   );
-  if (["in_review", "done"].includes(status))
+  // Done tasks pass through review first, as the workflow requires.
+  for (const step of role === "done" ? ["in_review", "done"] : role === "todo" ? [] : [role])
     task = store.execute(
       "update_task",
-      {
-        id: task.id,
-        expectedVersion: task.version,
-        patch: { status: "in_review" },
-      },
-      actor,
-    );
-  if (status !== "backlog")
-    store.execute(
-      "update_task",
-      { id: task.id, expectedVersion: task.version, patch: { status } },
+      { id: task.id, expectedVersion: task.version, patch: { lane: lanes[step] } },
       actor,
     );
 }

@@ -4,7 +4,7 @@ import { Dialog, ErrorNote } from "./Dialogs";
 import { Icon } from "./Icons";
 import { Markdown } from "./Markdown";
 import { ApiError, command, errorOf, taskNumber } from "./api";
-import { standupNotes, statusTitle, type Actor, type Task } from "./types";
+import { standupNotes, type Actor, type Lane, type Task } from "./types";
 import { Avatar, displayName, usePeople } from "./People";
 
 type Stage = { key: string; name: string; assignee?: string };
@@ -33,12 +33,14 @@ export function stagesFor(
 
 function StandupNotes({
   task,
+  lanes,
   agents,
   connected,
   onClose,
   onSaved,
 }: {
   task: Task;
+  lanes: Lane[];
   agents: Set<string>;
   connected: boolean;
   onClose: () => void;
@@ -93,7 +95,8 @@ function StandupNotes({
       title={
         <>
           <span className="task-id">{current.id}</span>{" "}
-          {statusTitle(current.status)} <PullCount task={current} />
+          {lanes.find((lane) => lane.id === current.lane)?.name}{" "}
+          <PullCount task={current} />
         </>
       }
       onClose={() => !busy && onClose()}
@@ -187,6 +190,7 @@ function StandupNotes({
 
 export function Standup({
   tasks,
+  lanes,
   agents,
   connected,
   lastSync,
@@ -194,6 +198,8 @@ export function Standup({
   onSaved,
 }: {
   tasks: Task[];
+  /** The board's lanes: one column each. */
+  lanes: Lane[];
   agents: Set<string>;
   connected: boolean;
   lastSync: string;
@@ -462,7 +468,13 @@ export function Standup({
         tabIndex={-1}
         aria-label={`Stand-up board: ${stage.name}`}
       >
-        <Board tasks={visible} agents={agents} onOpen={openTask} presentation />
+        <Board
+          tasks={visible}
+          lanes={lanes}
+          agents={agents}
+          onOpen={openTask}
+          presentation
+        />
         {!visible.length && (
           <p className="standup-empty">
             {focus === "all"
@@ -474,6 +486,7 @@ export function Standup({
       {selected && (
         <StandupNotes
           task={selected}
+          lanes={lanes}
           agents={agents}
           connected={connected}
           onClose={() => setSelected(null)}

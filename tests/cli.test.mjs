@@ -12,13 +12,17 @@ import { editLine, insert } from "../cli/editor.ts";
 import { App, clean } from "../dist-cli/app.mjs";
 
 const run = promisify(execFile);
+// Board N owns lanes LANE-<10N+1>…, named after the four default lanes.
+const lanes = (n) =>
+  [["Backlog", "todo"], ["In progress", "in_progress"], ["In review", "in_review"], ["Done", "done"]]
+    .map(([name, role], i) => ({ id: `LANE-${n * 10 + i + 1}`, name, role }));
 const task = (patch = {}) => ({
-  id: "TNB-1", title: "Ship it", description: "", acceptance: "", status: "in_review",
+  id: "TNB-1", title: "Ship it", description: "", acceptance: "", lane: "LANE-13", role: "in_review",
   priority: "medium", assignee: "", labels: [], version: 4, commentCount: 0, lease: null,
   boardId: "BOARD-1", updatedAt: "2026-09-29T00:00:00.000Z", ...patch,
 });
 const board = (patch = {}) => ({
-  id: "BOARD-2", name: "Engineering", prefix: "ENG", version: 1,
+  id: "BOARD-2", name: "Engineering", prefix: "ENG", version: 1, lanes: lanes(2),
   createdAt: "2026-09-29T00:00:00.000Z", updatedAt: "2026-09-29T00:00:00.000Z", ...patch,
 });
 const deferred = () => {
@@ -33,9 +37,10 @@ const deferred = () => {
 const key = (patch = {}) => ({ ctrl: false, meta: false, shift: false, ...patch });
 
 test("slash commands map to versioned workspace requests", () => {
-  assert.deepEqual(planInput("/move review", task()).request, {
+  const boards = [board({ id: "BOARD-1", lanes: lanes(1) })];
+  assert.deepEqual(planInput("/move in progress", task(), { boards }).request, {
     name: "update_task",
-    args: { id: "TNB-1", expectedVersion: 4, patch: { status: "in_review" } },
+    args: { id: "TNB-1", expectedVersion: 4, patch: { lane: "LANE-12" } },
   });
   const review = planInput("/review Done and tested https://ci.example/run/7", task());
   assert.deepEqual(review.request.args, {
@@ -88,8 +93,38 @@ test("slash commands map to versioned workspace requests", () => {
   assert.equal(planInput("/exit", undefined).kind, "quit");
   assert.deepEqual(matchCommands("/re").map((c) => c.name), ["release", "review", "refresh"]);
   assert.deepEqual(matchCommands("/move x"), []);
-  for (const [input, t] of [["/archive", task()], ["/move", task()], ["/comment hi", undefined], ["/nope", task()]])
+  for (const [input, t] of [["/archive", task()], ["/move", task()], ["/move Done", task()], ["/comment hi", undefined], ["/nope", task()]])
     assert.throws(() => planInput(input, t), UsageError, input);
+});
+
+test("/move takes a lane name or a unique start of one on the task's board", () => {
+  const custom = [
+    { id: "LANE-1", name: "Inbox", role: "todo" },
+    { id: "LANE-2", name: "Ready", role: "todo" },
+    { id: "LANE-3", name: "Doing", role: "in_progress" },
+    { id: "LANE-4", name: "In review", role: "in_review" },
+    { id: "LANE-5", name: "Shipped", role: "done" },
+    { id: "LANE-6", name: "Archive", role: "done" },
+  ];
+  const boards = [board({ id: "BOARD-1", lanes: custom }), board()];
+  const move = (input) => planInput(input, task({ lane: "LANE-4" }), { boards });
+  assert.deepEqual(move("/move ready").request.args.patch, { lane: "LANE-2" });
+  assert.deepEqual(move("/move IN REVIEW").request.args.patch, { lane: "LANE-4" });
+  assert.deepEqual(move("/move do").request.args.patch, { lane: "LANE-3" });
+  assert.equal(move("/move sh").message(), "TNB-1 moved to Shipped.");
+  // "In" starts Inbox and In review; "Backlog" is a lane of another board.
+  for (const input of ["/move in", "/move backlog"])
+    assert.throws(
+      () => move(input),
+      (e) => e instanceof UsageError &&
+        e.message === "Choose a lane: Inbox, Ready, Doing, In review, Shipped, Archive.",
+      input,
+    );
+  // The leftmost done lane receives reviewed work.
+  const done = planInput("/done", task({ lane: "LANE-4" }), { boards });
+  assert.deepEqual(done.request.args, { id: "TNB-1", expectedVersion: 4, patch: { lane: "LANE-5" } });
+  assert.equal(done.message(), "TNB-1 is in Shipped.");
+  assert.throws(() => planInput("/done", task({ boardId: "BOARD-9" }), { boards }), /Board not loaded/);
 });
 
 test("the prompt edits text and never keeps line breaks", () => {
@@ -106,6 +141,7 @@ test("task text cannot send terminal control sequences", () => {
 
 test("the board runs commands, keeps the prompt on a conflict, and refreshes", async () => {
   const calls = [];
+  const boards = [board({ id: "BOARD-1", name: "Product", prefix: "TNB", lanes: lanes(1) }), board()];
   let conflict = true;
   const client = {
     mode: "local",
@@ -113,13 +149,14 @@ test("the board runs commands, keeps the prompt on a conflict, and refreshes", a
     close() {},
     async execute(name, args) {
       calls.push([name, args]);
-      if (name === "workspace_info") return { name: "Studio", actor: { id: "you", kind: "human" }, actors: [], boards: [board({ id: "BOARD-1", name: "Product", prefix: "TNB" }), board()], schemaVersion: 3 };
-      if (name === "list_tasks") return { tasks: [task()], total: 1 };
+      if (name === "workspace_info") return { name: "Studio", actor: { id: "you", kind: "human" }, actors: [], boards, schemaVersion: 17 };
+      if (name === "list_boards") return { boards };
+      if (name === "list_tasks") return { tasks: [task(), task({ id: "ENG-1", title: "Plan it", boardId: "BOARD-2", lane: "LANE-21", role: "todo" })], total: 2 };
       if (name === "update_task" && conflict) {
         conflict = false;
         throw Object.assign(new Error("Task changed. Read it again."), { code: "VERSION_CONFLICT" });
       }
-      return task({ status: "done", version: 5 });
+      return task({ lane: "LANE-14", role: "done", version: 5 });
     },
   };
   const ui = render(createElement(App, { client, pollMs: 60000 }));
@@ -132,7 +169,7 @@ test("the board runs commands, keeps the prompt on a conflict, and refreshes", a
   };
   await settle();
   assert.match(ui.lastFrame(), /Studio · you \(human\) · All boards/);
-  assert.match(ui.lastFrame(), /❯ TNB-1\s+\[BOARD-1\]\s+● Ship it/);
+  assert.match(ui.lastFrame(), /● Product · In review 1\n❯ TNB-1\s+\[BOARD-1\]\s+● Ship it[^]*● Engineering · Backlog 1\n\s+ENG-1/);
 
   await type("/do");
   assert.match(ui.lastFrame(), /❯ \/done\s+Mark the reviewed task Done/);
@@ -142,17 +179,42 @@ test("the board runs commands, keeps the prompt on a conflict, and refreshes", a
 
   const lists = calls.filter(([name]) => name === "list_tasks").length;
   await type("\r");
-  assert.match(ui.lastFrame(), /TNB-1 is Done\./);
+  assert.match(ui.lastFrame(), /TNB-1 is in Done\./);
   assert.deepEqual(calls.filter(([name]) => name === "update_task").at(-1)[1], {
-    id: "TNB-1", expectedVersion: 4, patch: { status: "done" },
+    id: "TNB-1", expectedVersion: 4, patch: { lane: "LANE-14" },
   });
   assert.ok(calls.filter(([name]) => name === "list_tasks").length > lists);
   ui.unmount();
 });
 
+test("task detail names the task's lane and each linked task's lane", async (t) => {
+  const boards = [board({ id: "BOARD-1", name: "Product", prefix: "TNB", lanes: lanes(1) }), board()];
+  const client = {
+    mode: "local",
+    target: "test.sqlite",
+    close() {},
+    async execute(name) {
+      if (name === "workspace_info") return { name: "Studio", actor: { id: "you", kind: "human" }, actors: [], boards };
+      if (name === "list_boards") return { boards };
+      if (name === "list_tasks") return { tasks: [task()], total: 1 };
+      return task({
+        links: [{ type: "blocks", id: "ENG-4", title: "Deploy", lane: "LANE-22", role: "in_progress", archived: false }],
+      });
+    },
+  };
+  const ui = render(createElement(App, { client, pollMs: 60000 }));
+  t.after(() => ui.unmount());
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+  await settle();
+  ui.stdin.write("\r");
+  await settle();
+  assert.match(ui.lastFrame(), /In review · medium priority · unassigned · v4/);
+  assert.match(ui.lastFrame(), /Blocks ENG-4 Deploy · In progress/);
+});
+
 test("interactive task creation requires and uses the selected board", async (t) => {
   const calls = [];
-  const boards = [board({ id: "BOARD-1", name: "Product", prefix: "TNB" })];
+  const boards = [board({ id: "BOARD-1", name: "Product", prefix: "TNB", lanes: lanes(1) })];
   const liveBoards = [...boards, board()];
   const client = {
     mode: "local",
@@ -213,7 +275,7 @@ test("late board refreshes cannot replace tasks or errors for the selected board
   const oldBoardError = deferred();
   const calls = [];
   const boards = [
-    board({ id: "BOARD-1", name: "Product", prefix: "TNB" }),
+    board({ id: "BOARD-1", name: "Product", prefix: "TNB", lanes: lanes(1) }),
     board(),
   ];
   let boardOneRequests = 0;
@@ -234,7 +296,7 @@ test("late board refreshes cannot replace tasks or errors for the selected board
       }
       if (name === "list_tasks" && args.boardId === "BOARD-2")
         return {
-          tasks: [task({ id: "ENG-1", title: "Engineering task", boardId: "BOARD-2" })],
+          tasks: [task({ id: "ENG-1", title: "Engineering task", boardId: "BOARD-2", lane: "LANE-23" })],
           total: 1,
         };
       if (name === "list_tasks") return { tasks: [], total: 0 };

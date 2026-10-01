@@ -1,7 +1,5 @@
 # Lanes contract
 
-Status: draft for review. The code does not implement it yet.
-
 A lane is a column of a board. Each board owns an ordered list of lanes. Each
 task is in exactly one lane of its own board. Lanes replace the four fixed
 statuses `backlog`, `in_progress`, `in_review`, and `done`.

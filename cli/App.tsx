@@ -1,14 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput, usePaste, useWindowSize } from "ink";
 import type { Client } from "../server/client.mjs";
-import type { BoardRecord, Status, Task, WorkspaceInfo } from "../src/types.ts";
-import {
-  activeLease,
-  columns,
-  linkTitle,
-  safeUrl,
-  statusTitle,
-} from "../src/types.ts";
+import type { Lane, LaneRole } from "../server/domain.mjs";
+import type { BoardRecord, Task, WorkspaceInfo } from "../src/types.ts";
+import { activeLease, linkTitle, safeUrl } from "../src/types.ts";
 import {
   matchCommands,
   planInput,
@@ -20,9 +15,12 @@ import { editLine, emptyLine, insert, type Line } from "./editor.ts";
 const accent = "#9de3c1";
 const danger = "#f2a7a7";
 const priorityColor = { high: danger, medium: "#e8bd5a", low: "#88909e" };
-const statusColor = Object.fromEntries(
-  columns.map((c) => [c.id, c.color]),
-) as Record<Status, string>;
+const roleColor: Record<LaneRole, string> = {
+  todo: "#88909e",
+  in_progress: "#e8bd5a",
+  in_review: "#bca0f4",
+  done: "#9de3c1",
+};
 const menuSize = 8;
 
 type Notice = { tone: "ok" | "error" | "info"; text: string };
@@ -103,7 +101,11 @@ function eventText(body: string) {
   return body;
 }
 
-function taskLines(task: Task, width: number): Styled[] {
+function taskLines(
+  task: Task,
+  lanes: Map<string, Lane>,
+  width: number,
+): Styled[] {
   const out: Styled[] = [];
   const block = (title: string, value: string) => {
     if (!value.trim()) return;
@@ -115,7 +117,7 @@ function taskLines(task: Task, width: number): Styled[] {
   out.push({ text: `Board ${clean(task.boardId)}`, dim: true });
   out.push({
     text: [
-      statusTitle(task.status),
+      clean(lanes.get(task.lane)?.name ?? task.lane),
       `${task.priority} priority`,
       task.assignee ? `@${clean(task.assignee)}` : "unassigned",
       task.labels.map(clean).join(", "),
@@ -123,7 +125,7 @@ function taskLines(task: Task, width: number): Styled[] {
     ]
       .filter(Boolean)
       .join(" · "),
-    color: statusColor[task.status],
+    color: roleColor[task.role],
   });
   if (lease) {
     const minutes = Math.max(
@@ -147,7 +149,7 @@ function taskLines(task: Task, width: number): Styled[] {
       task.links
         .map(
           (link) =>
-            `${linkTitle(link.type)} ${link.id} ${link.title} · ${link.archived ? "Archived" : statusTitle(link.status)}`,
+            `${linkTitle(link.type)} ${link.id} ${link.title} · ${link.archived ? "Archived" : clean(lanes.get(link.lane)?.name ?? link.lane)}`,
         )
         .join("\n"),
     );
@@ -226,7 +228,7 @@ function Lines({ lines, height }: { lines: Styled[]; height: number }) {
 }
 
 type Row =
-  | { kind: "status"; status: Status; count: number }
+  | { kind: "lane"; lane: Lane; title: string; count: number }
   | { kind: "task"; task: Task };
 
 function TaskList({
@@ -257,15 +259,15 @@ function TaskList({
   return (
     <Box flexDirection="column" height={height} overflow="hidden">
       {rows.slice(start, start + height).map((row) => {
-        if (row.kind === "status")
+        if (row.kind === "lane")
           return (
             <Text
-              key={row.status}
+              key={row.lane.id}
               bold
-              color={statusColor[row.status]}
+              color={roleColor[row.lane.role]}
               wrap="truncate-end"
             >
-              ● {statusTitle(row.status)} <Text dimColor>{row.count}</Text>
+              ● {clean(row.title)} <Text dimColor>{row.count}</Text>
             </Text>
           );
         const t = row.task;
@@ -313,6 +315,7 @@ export function App({
   const { exit } = useApp();
   const { columns: width, rows: height } = useWindowSize();
   const [info, setInfo] = useState<WorkspaceInfo | null>(null);
+  const [boards, setBoards] = useState<BoardRecord[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [detail, setDetail] = useState<Task | null>(null);
   const [selectedId, setSelectedId] = useState<string>();
@@ -340,6 +343,9 @@ export function App({
       generation === refreshGeneration.current &&
       requestedBoardId === boardIdRef.current;
     try {
+      // Boards first: their lanes group the tasks that follow.
+      const { boards } = await client.execute("list_boards", {});
+      if (!isCurrent()) return;
       const all: Task[] = [];
       for (let total = Infinity; all.length < total;) {
         const page = await client.execute("list_tasks", {
@@ -351,6 +357,7 @@ export function App({
         all.push(...page.tasks);
         total = page.tasks.length ? page.total : all.length;
       }
+      setBoards(boards);
       setTasks(all);
       const { view, selectedId } = state.current;
       if (view === "task" && selectedId) {
@@ -381,16 +388,17 @@ export function App({
 
   const refreshBoards = useCallback(async () => {
     const result = await client.execute("list_boards", {});
-    setInfo((current) =>
-      current ? { ...current, boards: result.boards } : current,
-    );
+    setBoards(result.boards);
     return result.boards as BoardRecord[];
   }, [client]);
 
   useEffect(() => {
     client
       .execute("workspace_info")
-      .then(setInfo)
+      .then((info: WorkspaceInfo) => {
+        setInfo(info);
+        setBoards(info.boards);
+      })
       .catch((e) => setNotice({ tone: "error", text: errorText(e) }));
   }, [client]);
 
@@ -417,18 +425,28 @@ export function App({
       ),
     [tasks, boardId, mine, filter, info],
   );
+  const lanes = useMemo(
+    () => new Map(boards.flatMap((b) => b.lanes).map((l) => [l.id, l])),
+    [boards],
+  );
+  // Sections follow board order, then each board's lane order.
   const rows = useMemo(
     () =>
-      columns.flatMap(({ id }): Row[] => {
-        const group = visible.filter((t) => t.status === id);
-        return group.length
-          ? [
-              { kind: "status", status: id, count: group.length },
-              ...group.map((task) => ({ kind: "task" as const, task })),
-            ]
-          : [];
-      }),
-    [visible],
+      boards
+        .filter((b) => !boardId || b.id === boardId)
+        .flatMap((board) =>
+          board.lanes.flatMap((lane): Row[] => {
+            const group = visible.filter((t) => t.lane === lane.id);
+            const title = boardId ? lane.name : `${board.name} · ${lane.name}`;
+            return group.length
+              ? [
+                  { kind: "lane", lane, title, count: group.length },
+                  ...group.map((task) => ({ kind: "task" as const, task })),
+                ]
+              : [];
+          }),
+        ),
+    [boards, boardId, visible],
   );
   const ordered = rows.flatMap((r) => (r.kind === "task" ? [r.task] : []));
   const selected = ordered.find((t) => t.id === selectedId) ?? ordered[0];
@@ -456,9 +474,9 @@ export function App({
     view === "help"
       ? helpLines()
       : view === "boards"
-        ? boardLines(info?.boards ?? [], boardId)
+        ? boardLines(boards, boardId)
         : view === "task" && current
-          ? taskLines(current, width)
+          ? taskLines(current, lanes, width)
           : [];
   const maxScroll = Math.max(0, pageLines.length - bodyHeight);
 
@@ -496,7 +514,7 @@ export function App({
   async function run(input: string) {
     let action;
     try {
-      action = planInput(input, current, { boardId });
+      action = planInput(input, current, { boardId, boards });
     } catch (e) {
       if (!(e instanceof UsageError)) throw e;
       setNotice({ tone: "error", text: e.message });
@@ -552,15 +570,7 @@ export function App({
       return;
     }
     if (action.kind === "refresh") {
-      const requestedBoardId = boardIdRef.current;
       setNotice({ tone: "info", text: "Refreshed." });
-      try {
-        await refreshBoards();
-      } catch (e) {
-        if (requestedBoardId === boardIdRef.current)
-          setNotice({ tone: "error", text: errorText(e) });
-      }
-      if (requestedBoardId !== boardIdRef.current) return;
       return void refresh();
     }
     if (action.kind === "mine") {
@@ -580,17 +590,10 @@ export function App({
       if (action.request.name === "create_task") setSelectedId(result.id);
       if (action.request.name === "create_board") {
         const board: BoardRecord = result;
-        setInfo((current) =>
-          current
-            ? {
-                ...current,
-                boards: [
-                  ...current.boards.filter((item) => item.id !== board.id),
-                  board,
-                ],
-              }
-            : current,
-        );
+        setBoards((current) => [
+          ...current.filter((item) => item.id !== board.id),
+          board,
+        ]);
         selectBoard(board.id);
         setView("list");
       }
@@ -698,7 +701,7 @@ export function App({
           <Text dimColor wrap="truncate-end">
             {info
               ? clean(
-                  `${info.name} · ${info.actor.id} (${info.actor.kind}) · ${boardId ? `${info.boards.find((board) => board.id === boardId)?.name ?? boardId} · ${boardId}` : "All boards"}`,
+                  `${info.name} · ${info.actor.id} (${info.actor.kind}) · ${boardId ? `${boards.find((board) => board.id === boardId)?.name ?? boardId} · ${boardId}` : "All boards"}`,
                 )
               : "Connecting…"}{" "}
             · {client.mode} {client.target}

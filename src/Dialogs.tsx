@@ -2,25 +2,27 @@ import { AppVersion, AppUpdates, desktopApp } from "./AppUpdates";
 import { cloneElement, useEffect, useId, useRef, useState } from "react";
 import {
   activeLease,
-  columns,
   doneLocked,
+  findLane,
+  firstLane,
   linkTitle,
   linkTypes,
   priorities,
   safeUrl,
-  statusTitle,
   type Actor,
+  type BoardRecord,
   type Epic,
   epicStyle,
+  type Lane,
+  type LaneRole,
   type LinkType,
   type Priority,
-  type Status,
   type Task,
   type TaskEvent,
 } from "./types";
 import { ApiError, command, errorOf, token } from "./api";
 import { formatUtcTimestamp } from "./formatting";
-import { Assignee, Label, PullCount, StatusIcon } from "./Board";
+import { Assignee, Label, PullCount, RoleIcon } from "./Board";
 import { Icon } from "./Icons";
 import { ContextMenu, type MenuState } from "./ContextMenu";
 import { CliHelper } from "./CliHelper";
@@ -162,52 +164,57 @@ export type ChoiceOption = {
   trailing?: React.ReactNode;
 };
 
-/** Status choices shared by the task sidebar and the list view. */
-export function statusChoices(current?: Status): ChoiceOption[] {
+/** Lane choices shared by the task sidebar and the list view. */
+export function statusChoices(lanes: Lane[], current?: LaneRole): ChoiceOption[] {
   const locked = current !== undefined && doneLocked(current);
-  return columns.map((column) => ({
-    value: column.id,
-    label: column.id === "done" && locked ? "Done (after review)" : column.title,
-    disabled: column.id === "done" && locked,
-    icon: <StatusIcon status={column.id} />,
+  return lanes.map((lane) => ({
+    value: lane.id,
+    label:
+      lane.role === "done" && locked ? `${lane.name} (after review)` : lane.name,
+    disabled: lane.role === "done" && locked,
+    icon: <RoleIcon role={lane.role} />,
   }));
 }
 
 /** The list view's status cell: the sidebar trigger and picker, per row. */
 export function StatusPicker({
   task,
+  lanes,
   pending,
   onMove,
 }: {
   task: Task;
-  pending?: Status;
-  onMove: (t: Task, s: Status) => void;
+  /** The lanes of the task's board. */
+  lanes: Lane[];
+  pending?: string;
+  onMove: (t: Task, lane: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const status = pending ?? task.status;
+  const laneId = pending ?? task.lane;
+  const lane = lanes.find((l) => l.id === laneId);
   return (
     <>
       <button
         type="button"
         className="sidebar-picker-trigger status-picker-trigger"
-        aria-label={`Status of ${task.id}: ${statusTitle(status)}. Choose status`}
+        aria-label={`Status of ${task.id}: ${lane?.name}. Choose status`}
         aria-haspopup="dialog"
         disabled={Boolean(pending)}
         onClick={() => setOpen(true)}
       >
-        <StatusIcon status={status} />
-        <span>{statusTitle(status)}</span>
+        <RoleIcon role={lane?.role ?? task.role} />
+        <span>{lane?.name}</span>
         {pending && <span className="moving">Moving…</span>}
       </button>
       {open && (
         <SearchableChoiceDialog
           title={`Status of ${task.id}`}
           searchLabel="Search status"
-          options={statusChoices(task.status)}
-          selected={[status]}
+          options={statusChoices(lanes, task.role)}
+          selected={[laneId]}
           onSelect={(value) => {
             setOpen(false);
-            if (value !== task.status) onMove(task, value as Status);
+            if (value !== task.lane) onMove(task, value);
           }}
           onToggle={() => {}}
           onClose={() => setOpen(false)}
@@ -509,6 +516,7 @@ const kindText: Record<string, string> = {
   link_pull_requests: "linked pull requests",
   unlink_pull_request: "removed a pull request",
   rename_label: "edited a label",
+  delete_lane: "deleted a lane",
   agent_started: "started work automatically",
   agent_not_started: "could not start automatically",
   agent_stopped: "stopped before finishing",
@@ -517,22 +525,26 @@ const fieldLabels: Record<string, string> = {
   title: "title",
   description: "context",
   acceptance: "acceptance criteria",
-  status: "status",
+  lane: "lane",
   priority: "priority",
   assignee: "assignee",
   labels: "labels",
   epic: "epic",
 };
 
-function eventDetail(e: TaskEvent, epicTitle: (id: string) => string) {
+function eventDetail(
+  e: TaskEvent,
+  epicTitle: (id: string) => string,
+  laneName: (id: string) => string,
+) {
   if (!e.body) return "";
   try {
     const body = JSON.parse(e.body);
     if (e.kind === "update_task")
       return Object.entries(body)
         .map(([k, v]) =>
-          k === "status"
-            ? `Status → ${statusTitle(v as Status)}`
+          k === "lane"
+            ? `Lane → ${laneName(String(v))}`
             : ["description", "acceptance"].includes(k)
               ? `Edited ${fieldLabels[k]}`
               : k === "epic"
@@ -540,6 +552,9 @@ function eventDetail(e: TaskEvent, epicTitle: (id: string) => string) {
                 : `${fieldLabels[k] ?? k} → ${String(v) || "none"}`,
         )
         .join(" · ");
+    // The source lane no longer exists when the event is read.
+    if (e.kind === "delete_lane")
+      return `Moved from a deleted lane to ${laneName(body.to)}`;
     if (e.kind === "rename_label")
       return body.to
         ? `Label ${body.from} → ${body.to}`
@@ -572,15 +587,17 @@ function eventDetail(e: TaskEvent, epicTitle: (id: string) => string) {
 function Activity({
   events,
   epicTitle,
+  laneName,
 }: {
   events: TaskEvent[];
   epicTitle: (id: string) => string;
+  laneName: (id: string) => string;
 }) {
   if (!events.length) return <p className="small">No activity yet.</p>;
   return (
     <ol className="activity-list">
       {events.map((e) => {
-        const detail = eventDetail(e, epicTitle);
+        const detail = eventDetail(e, epicTitle, laneName);
         return (
           <li key={e.sequence} className={`event kind-${e.kind}`}>
             <div className="event-head">
@@ -647,7 +664,7 @@ type Draft = {
   title: string;
   description: string;
   acceptance: string;
-  status: Status;
+  lane: string;
   priority: Priority;
   assignee: string;
   labels: string[];
@@ -657,19 +674,19 @@ const draftKeys = [
   "title",
   "description",
   "acceptance",
-  "status",
+  "lane",
   "priority",
   "assignee",
   "labels",
   "epic",
 ] as const;
-const draftOf = (t: Task | null, epic = ""): Draft =>
+const draftOf = (t: Task | null, epic = "", lane = ""): Draft =>
   t
     ? {
         title: t.title,
         description: t.description,
         acceptance: t.acceptance,
-        status: t.status,
+        lane: t.lane,
         priority: t.priority,
         assignee: t.assignee,
         labels: [...t.labels],
@@ -679,7 +696,7 @@ const draftOf = (t: Task | null, epic = ""): Draft =>
         title: "",
         description: "",
         acceptance: "",
-        status: "backlog",
+        lane,
         priority: "medium",
         assignee: "",
         labels: [],
@@ -709,6 +726,7 @@ export function TaskEditor({
   task,
   boardName,
   boardId,
+  boards,
   actor,
   agents,
   actors,
@@ -716,6 +734,7 @@ export function TaskEditor({
   labels,
   epics,
   initialEpic = "",
+  initialLane,
   linkCandidates = [],
   latestVersion,
   closeRequest = 0,
@@ -730,6 +749,8 @@ export function TaskEditor({
   task: Task | null;
   boardName: string;
   boardId: string;
+  /** Every board, for the task's lanes and lane names in the activity. */
+  boards: BoardRecord[];
   actor: Actor;
   agents: Set<string>;
   actors: Actor[];
@@ -737,6 +758,8 @@ export function TaskEditor({
   labels: string[];
   epics: Epic[];
   initialEpic?: string;
+  /** A new task's todo lane; the board's first todo lane without it. */
+  initialLane?: string;
   /** Tasks offered in the link picker: the loaded board's tasks. */
   linkCandidates?: Task[];
   latestVersion?: number;
@@ -751,8 +774,13 @@ export function TaskEditor({
   onArchived: (t: Task) => void;
   onOpenTask?: (id: string) => void;
 }) {
+  const lanes = boards.find((board) => board.id === boardId)?.lanes ?? [];
+  const laneName = (id: string) => findLane(boards, id)?.name ?? "a deleted lane";
   const [current, setCurrent] = useState(task);
-  const [draft, setDraft] = useState(() => draftOf(task, initialEpic));
+  const [draft, setDraft] = useState(() =>
+    draftOf(task, initialEpic, initialLane ?? firstLane(lanes, "todo")?.id),
+  );
+  const draftLane = lanes.find((lane) => lane.id === draft.lane);
   const [pending, setPending] = useState<Pending>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [merge, setMerge] = useState<null | {
@@ -775,7 +803,7 @@ export function TaskEditor({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [notice, setNotice] = useState("");
   const [picker, setPicker] = useState<
-    "status" | "priority" | "assignee" | "labels" | "epic" | null
+    "lane" | "priority" | "assignee" | "labels" | "epic" | null
   >(null);
   const listId = useId();
 
@@ -817,7 +845,7 @@ export function TaskEditor({
       );
     }),
   ];
-  const statusOptions = statusChoices(current?.status);
+  const laneOptions = statusChoices(lanes, current?.role);
   const priorityOptions: ChoiceOption[] = priorities.map((priority) => ({
     value: priority.id,
     label: priority.title,
@@ -840,7 +868,9 @@ export function TaskEditor({
     : {};
   const dirty = current
     ? Object.keys(patch).length > 0
-    : draftKeys.some((k) => !sameValue(draft[k], draftOf(null)[k]));
+    : draftKeys.some(
+        (k) => k !== "lane" && !sameValue(draft[k], draftOf(null)[k]),
+      );
   const conflicted = (k: keyof Draft) =>
     Boolean(
       merge?.conflicts.includes(k) &&
@@ -965,6 +995,7 @@ export function TaskEditor({
           "acceptance",
           "assignee",
           "epic",
+          "lane",
         ] as const)
           if (draft[k].trim()) args[k] = draft[k];
         onCreated(await command<Task>("create_task", args));
@@ -1044,21 +1075,21 @@ export function TaskEditor({
     }
   }
 
-  async function review(status: Status) {
-    if (!current || pending) return;
+  /** Mark Done and Needs changes move the task to the first lane of a role. */
+  async function review(role: LaneRole) {
+    const lane = firstLane(lanes, role);
+    if (!current || pending || !lane) return;
     setPending("review");
     setReviewError(null);
     try {
       const next = await command<Task>("update_task", {
         id: current.id,
         expectedVersion: current.version,
-        patch: { status },
+        patch: { lane: lane.id },
       });
       setCurrent(next);
-      setDraft((d) => ({ ...d, status: next.status }));
-      setNotice(
-        status === "done" ? "Marked Done." : `Moved to ${statusTitle(status)}.`,
-      );
+      setDraft((d) => ({ ...d, lane: next.lane }));
+      setNotice(role === "done" ? "Marked Done." : `Moved to ${lane.name}.`);
       onChanged(next);
     } catch (e) {
       setReviewError(errorOf(e));
@@ -1168,7 +1199,7 @@ export function TaskEditor({
           {!current && (
             <p className="small form-intro">
               This task will be created on <strong>{boardName}</strong> in{" "}
-              <strong>Backlog</strong>.
+              <strong>{draftLane?.name}</strong>.
             </p>
           )}
           {stale && !pending && (
@@ -1256,7 +1287,7 @@ export function TaskEditor({
               onChange={(e) => set("acceptance")(e.target.value)}
             />
           </Field>
-          {current && draft.status === "done" && current.status !== "done" && (
+          {current && draftLane?.role === "done" && current.role !== "done" && (
             <p className="small">Saving marks this task Done.</p>
           )}
         </form>
@@ -1272,18 +1303,18 @@ export function TaskEditor({
                   <button
                     type="button"
                     className="sidebar-picker-trigger"
-                    aria-label={"Status: " + statusTitle(draft.status) + ". Choose status"}
+                    aria-label={"Status: " + laneName(draft.lane) + ". Choose status"}
                     aria-haspopup="dialog"
                     disabled={Boolean(pending)}
-                    onClick={() => setPicker("status")}
+                    onClick={() => setPicker("lane")}
                   >
-                    <StatusIcon status={draft.status} />
-                    <span>{statusTitle(draft.status)}</span>
+                    <RoleIcon role={draftLane?.role ?? current.role} />
+                    <span>{laneName(draft.lane)}</span>
                   </button>
-                  {conflicted("status") && (
+                  {conflicted("lane") && (
                     <ConflictValue
-                      value={statusTitle(current.status)}
-                      onUseLatest={() => set("status")(current.status)}
+                      value={laneName(current.lane)}
+                      onUseLatest={() => set("lane")(current.lane)}
                     />
                   )}
                 </dd>
@@ -1291,7 +1322,7 @@ export function TaskEditor({
             ) : (
               <div>
                 <dt>Status</dt>
-                <dd>Backlog</dd>
+                <dd>{draftLane?.name}</dd>
               </div>
             )}
             <div>
@@ -1457,7 +1488,7 @@ export function TaskEditor({
                           onOpenTask(link.id);
                         }}
                       >
-                        <StatusIcon status={link.status} />
+                        <RoleIcon role={link.role} />
                         <span className="task-id">{link.id}</span>
                         <span className="task-link-title">{link.title}</span>
                         {link.archived && <span className="small"> Archived</span>}
@@ -1539,7 +1570,7 @@ export function TaskEditor({
               </h3>
               {current.review ? (
                 <>
-                  {current.status === "in_progress" && (
+                  {current.role === "in_progress" && (
                     <p className="small">
                       Needs changes keeps this review evidence on the task. It
                       records the earlier submission for context.
@@ -1577,7 +1608,7 @@ export function TaskEditor({
               ) : (
                 <p className="small">No review evidence yet.</p>
               )}
-              {current.status === "in_review" && actor.kind === "human" && (
+              {current.role === "in_review" && actor.kind === "human" && (
                 <div className="review-actions">
                   <button
                     type="button"
@@ -1672,7 +1703,11 @@ export function TaskEditor({
         {current && (
           <section className="activity" aria-label="Comments and activity">
             <h3>Activity</h3>
-            <Activity events={current.events ?? []} epicTitle={epicTitle} />
+            <Activity
+              events={current.events ?? []}
+              epicTitle={epicTitle}
+              laneName={laneName}
+            />
             <form className="comment-form" onSubmit={postComment}>
               <div
                 onKeyDown={(e) => {
@@ -1775,7 +1810,7 @@ export function TaskEditor({
         title={
           picker === "assignee"
             ? "Choose assignee"
-            : picker === "status"
+            : picker === "lane"
               ? "Choose status"
               : picker === "priority"
                 ? "Choose priority"
@@ -1786,7 +1821,7 @@ export function TaskEditor({
         searchLabel={
           picker === "assignee"
             ? "Search users"
-            : picker === "status"
+            : picker === "lane"
               ? "Search status"
               : picker === "priority"
                 ? "Search priority"
@@ -1797,8 +1832,8 @@ export function TaskEditor({
         options={
           picker === "assignee"
             ? assigneeOptions
-            : picker === "status"
-              ? statusOptions
+            : picker === "lane"
+              ? laneOptions
               : picker === "priority"
                 ? priorityOptions
                 : picker === "epic"
@@ -1806,8 +1841,8 @@ export function TaskEditor({
                   : labelOptions
         }
         selected={
-          picker === "status"
-            ? [draft.status]
+          picker === "lane"
+            ? [draft.lane]
             : picker === "priority"
               ? [draft.priority]
               : picker === "assignee"
@@ -1819,7 +1854,7 @@ export function TaskEditor({
         multiple={picker === "labels"}
         allowCreate={picker === "labels"}
         onSelect={(value) => {
-          if (picker === "status") set("status")(value as Status);
+          if (picker === "lane") set("lane")(value);
           else if (picker === "priority")
             set("priority")(value as Priority);
           else if (picker === "assignee") set("assignee")(value);
@@ -1854,8 +1889,8 @@ export function TaskEditor({
           .map((task) => ({
             value: task.id,
             label: `${task.id} ${task.title}`,
-            detail: statusTitle(task.status),
-            icon: <StatusIcon status={task.status} />,
+            detail: laneName(task.lane),
+            icon: <RoleIcon role={task.role} />,
             trailing: <PullCount task={task} />,
           }))}
         selected={[]}
@@ -2802,7 +2837,7 @@ export function ShortcutHelp({ onClose }: { onClose: () => void }) {
         </dl>
         <p className="small">
           Shortcuts are ignored while you type in a field. Each card's Status
-          menu moves it without dragging. Done is available after review.
+          menu moves it without dragging. Done lanes are available after review.
         </p>
       </div>
     </Dialog>

@@ -1,9 +1,9 @@
-export type ViewField = "status" | "priority" | "assignee" | "label" | "epic";
+export type ViewField = "role" | "lane" | "priority" | "assignee" | "label" | "epic";
 export type ViewOp = "is" | "is_not";
 export type ViewCondition = { field: ViewField; op: ViewOp; values: string[] };
 export type ViewFilters = { query: string; conditions: ViewCondition[] };
 export type ViewLayout = "board" | "list";
-export type ViewGroup = "status" | "assignee" | "priority" | "epic" | "none";
+export type ViewGroup = "lane" | "assignee" | "priority" | "epic" | "none";
 export type ViewOrder = "created" | "updated" | "priority" | "title";
 export type ViewDisplay = {
   layout: ViewLayout;
@@ -14,7 +14,8 @@ type Matchable = {
   id: string;
   title: string;
   description: string;
-  status: string;
+  lane: string;
+  role: string;
   priority: string;
   assignee: string;
   labels: string[];

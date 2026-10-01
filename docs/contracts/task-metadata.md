@@ -18,7 +18,7 @@ assignee ID matches an agent in the roster. Unknown assignees remain neutral.
 Names and lease ownership must not determine actor kind.
 
 `export_workspace` includes the actor roster. `workspace_info` and exports use
-`schemaVersion: 14`. Version 14 added [task links](task-links.md), 13 added board descriptions, 12 added board sidebar choices, and 11 added [boards](boards.md) (7 added views, 6 added epics, 5 added description images). No import or restore command is added.
+`schemaVersion: 17`. Version 17 added [lanes](lanes.md), 16 moved embedded images to storage, 15 renamed task keys to their board prefix, 14 added [task links](task-links.md), 13 added board descriptions, 12 added board sidebar choices, and 11 added [boards](boards.md) (7 added views, 6 added epics, 5 added description images). No import or restore command is added.
 
 ## Comment counts
 
@@ -43,7 +43,7 @@ Each label contains 1–40 characters after trimming. Duplicate labels are remov
 An empty array clears the labels. New tasks start with no labels.
 The old `label` command field is rejected. Stored single labels convert once to
 arrays when the database opens. Task versions and activity remain unchanged.
-Status remains a single workflow state.
+A task is in one lane of its board at a time.
 
 `list_labels({})` returns `{ labels: { name, tasks }[] }`: every label on a
 non-archived task, sorted by name, with how many such tasks carry it.

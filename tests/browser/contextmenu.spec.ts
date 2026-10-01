@@ -34,7 +34,7 @@ test("Task context menu changes status, priority and assignee, and filters", asy
   await expect(menu(page).getByRole("menuitemradio", { name: "Done (after review)" })).toBeDisabled();
   await menu(page).getByRole("menuitemradio", { name: "In progress" }).click();
   await expect(menu(page)).toBeHidden();
-  await expect(page.locator("#column-in_progress + .count")).toHaveText("1");
+  await expect(page.locator("#column-LANE-2 + .count")).toHaveText("1");
 
   await card.click({ button: "right" });
   await menu(page).getByRole("menuitemradio", { name: "High" }).click();
@@ -43,7 +43,7 @@ test("Task context menu changes status, priority and assignee, and filters", asy
   await menu(page).getByRole("menuitem", { name: "Assign to me" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Assigned to reviewer." })).toBeVisible();
   const saved = await command("get_task", { id: task.id });
-  expect([saved.status, saved.priority, saved.assignee]).toEqual(["in_progress", "high", "reviewer"]);
+  expect([saved.lane, saved.role, saved.priority, saved.assignee]).toEqual(["LANE-2", "in_progress", "high", "reviewer"]);
 
   await card.click({ button: "right" });
   await menu(page).getByRole("menuitemradio", { name: "Show only reviewer" }).click();

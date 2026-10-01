@@ -1,10 +1,12 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ApiError, command, errorOf } from "./api";
+import { laneLimit } from "../server/domain.mjs";
+import { ApiError, command, errorOf, loadTasks } from "./api";
 import { desktopApp } from "./AppUpdates";
+import { RoleIcon } from "./Board";
 import { Dialog } from "./Dialogs";
 import { Icon } from "./Icons";
-import type { BoardRecord } from "./types";
+import { roles, roleTitle, type BoardRecord, type Lane, type LaneRole } from "./types";
 
 export function BoardControls({
   canEdit,
@@ -221,17 +223,22 @@ const prefixProblem = (value: string) =>
       : "";
 
 export function BoardEditor({
-  board,
+  board: opened,
   boards,
   onClose,
   onSaved,
+  onLanes,
 }: {
   board: BoardRecord | null;
   /** Every board, to warn before taking another board's former prefix. */
   boards: BoardRecord[];
   onClose: () => void;
   onSaved: (saved: BoardRecord, previous: BoardRecord | null) => void;
+  /** A lane write saved; it returns the board with its new version. */
+  onLanes: (saved: BoardRecord) => void;
 }) {
+  // Lane writes save at once and advance the version the form saves against.
+  const [board, setBoard] = useState(opened);
   const nameId = useId();
   const prefixId = useId();
   const descriptionId = useId();
@@ -533,6 +540,288 @@ export function BoardEditor({
           )}
         </div>
       </form>
+      {board && (
+        <LaneSettings
+          board={board}
+          onSaved={(saved) => {
+            setBoard(saved);
+            onLanes(saved);
+          }}
+        />
+      )}
     </Dialog>
+  );
+}
+
+type LaneWrite =
+  | { name: "create_lane"; args: { name: string; role: LaneRole } }
+  | { name: "update_lane"; args: { id: string; patch: { name?: string; position?: number } } }
+  | { name: "delete_lane"; args: { id: string; moveTo: string } };
+
+/**
+ * The Lanes section of the board dialog. Each change is its own board write
+ * against the latest version, so it is not part of the form's Save.
+ */
+function LaneSettings({
+  board,
+  onSaved,
+}: {
+  board: BoardRecord;
+  onSaved: (saved: BoardRecord) => void;
+}) {
+  const headingId = useId();
+  const [counts, setCounts] = useState<Map<string, number> | null>(null);
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [deleting, setDeleting] = useState<null | { id: string; moveTo: string }>(null);
+  const [newName, setNewName] = useState("");
+  const [newRole, setNewRole] = useState<LaneRole>("todo");
+  const [pending, setPending] = useState(false);
+  // A blur can start a rename in the same tick as a click starts another write.
+  const writing = useRef(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const lanes = board.lanes;
+
+  async function count() {
+    try {
+      const tasks = await loadTasks(board.id);
+      const next = new Map<string, number>();
+      for (const t of tasks) next.set(t.lane, (next.get(t.lane) ?? 0) + 1);
+      setCounts(next);
+    } catch {
+      // Counts are a hint; the lanes stay editable without them.
+      setCounts(null);
+    }
+  }
+  useEffect(() => void count(), [board.id]);
+
+  async function write(change: LaneWrite) {
+    if (writing.current) return false;
+    writing.current = true;
+    setPending(true);
+    setError(null);
+    try {
+      const saved = await command<BoardRecord>(change.name, {
+        ...change.args,
+        ...(change.name === "create_lane" && { boardId: board.id }),
+        expectedVersion: board.version,
+      });
+      onSaved(saved);
+      if (change.name === "delete_lane") void count();
+      return true;
+    } catch (cause) {
+      const failure = errorOf(cause);
+      setError(failure);
+      // Take the latest board, so the next change uses its version.
+      if (failure.code === "VERSION_CONFLICT")
+        await command<{ boards: BoardRecord[] }>("list_boards")
+          .then(({ boards }) => {
+            const latest = boards.find((b) => b.id === board.id);
+            if (latest) onSaved(latest);
+          })
+          .catch(() => {});
+      return false;
+    } finally {
+      writing.current = false;
+      setPending(false);
+    }
+  }
+
+  async function rename(lane: Lane) {
+    const name = names[lane.id]?.trim();
+    if (name === undefined) return;
+    const done = () => setNames(({ [lane.id]: _, ...rest }) => rest);
+    // An emptied or unchanged name goes back to the saved one.
+    if (!name || name === lane.name) done();
+    else if (await write({ name: "update_lane", args: { id: lane.id, patch: { name } } }))
+      done();
+  }
+
+  async function add(event: React.FormEvent) {
+    event.preventDefault();
+    const name = newName.trim();
+    if (name && (await write({ name: "create_lane", args: { name, role: newRole } })))
+      setNewName("");
+  }
+
+  return (
+    <section className="lane-settings" aria-labelledby={headingId}>
+      <h3 className="field-label" id={headingId}>
+        Lanes
+      </h3>
+      <p className="field-hint">
+        Each lane is a column of the board. Its role decides what agents and
+        reviews may do with its tasks. Lane changes save at once.
+      </p>
+      <ol className="lane-list">
+        {lanes.map((lane, index) => {
+          const tasks = counts?.get(lane.id) ?? 0;
+          const targets = lanes.filter((l) => l.id !== lane.id && l.role === lane.role);
+          const name = names[lane.id] ?? lane.name;
+          return (
+            <li key={lane.id} className="lane-row">
+              <div className="lane-row-main">
+                <RoleIcon role={lane.role} />
+                <input
+                  aria-label={`Name of ${lane.name}`}
+                  maxLength={40}
+                  autoComplete="off"
+                  value={name}
+                  disabled={pending}
+                  onChange={(event) =>
+                    setNames((current) => ({ ...current, [lane.id]: event.target.value }))
+                  }
+                  onBlur={() => void rename(lane)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void rename(lane);
+                    }
+                  }}
+                />
+                <span className="kind-tag lane-role-tag">{roleTitle(lane.role)}</span>
+                <span
+                  className="count"
+                  aria-label={counts ? `${tasks} ${tasks === 1 ? "task" : "tasks"}` : undefined}
+                >
+                  {counts ? tasks : "–"}
+                </span>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={`Move ${lane.name} up`}
+                  title="Move up"
+                  disabled={pending || index === 0}
+                  onClick={() =>
+                    void write({
+                      name: "update_lane",
+                      args: { id: lane.id, patch: { position: index - 1 } },
+                    })
+                  }
+                >
+                  <Icon name="chevronUp" size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={`Move ${lane.name} down`}
+                  title="Move down"
+                  disabled={pending || index === lanes.length - 1}
+                  onClick={() =>
+                    void write({
+                      name: "update_lane",
+                      args: { id: lane.id, patch: { position: index + 1 } },
+                    })
+                  }
+                >
+                  <Icon name="chevronDown" size={14} />
+                </button>
+                {/* A disabled button shows no tooltip, so the span carries it. */}
+                <span
+                  title={
+                    targets.length
+                      ? "Delete lane"
+                      : `Each board needs a ${roleTitle(lane.role)} lane. Add another one to delete this lane.`
+                  }
+                >
+                  <button
+                    type="button"
+                    className="icon-button danger"
+                    aria-label={`Delete ${lane.name}`}
+                    disabled={pending || !targets.length}
+                    onClick={() => setDeleting({ id: lane.id, moveTo: targets[0].id })}
+                  >
+                    <Icon name="trash" size={14} />
+                  </button>
+                </span>
+              </div>
+              {deleting?.id === lane.id && targets.length > 0 && (
+                <div
+                  className="discard-bar lane-delete"
+                  role="alertdialog"
+                  aria-label={`Delete ${lane.name}`}
+                >
+                  <label>
+                    Delete {lane.name} and move its{" "}
+                    {counts ? `${tasks} ${tasks === 1 ? "task" : "tasks"}` : "tasks"}{" "}
+                    to{" "}
+                    <select
+                      aria-label="Move tasks to"
+                      value={deleting.moveTo}
+                      onChange={(event) =>
+                        setDeleting({ id: lane.id, moveTo: event.target.value })
+                      }
+                    >
+                      {targets.map((target) => (
+                        <option key={target.id} value={target.id}>
+                          {target.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <span className="spacer" />
+                  <button
+                    type="button"
+                    className="secondary"
+                    autoFocus
+                    disabled={pending}
+                    onClick={() => setDeleting(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="danger-button"
+                    disabled={pending}
+                    onClick={async () => {
+                      if (await write({ name: "delete_lane", args: deleting }))
+                        setDeleting(null);
+                    }}
+                  >
+                    Delete lane
+                  </button>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      <form className="lane-add" onSubmit={add} aria-label="Add lane">
+        <input
+          aria-label="New lane name"
+          placeholder="Lane name"
+          maxLength={40}
+          autoComplete="off"
+          value={newName}
+          disabled={pending}
+          onChange={(event) => setNewName(event.target.value)}
+        />
+        <select
+          aria-label="New lane role"
+          value={newRole}
+          disabled={pending}
+          onChange={(event) => setNewRole(event.target.value as LaneRole)}
+        >
+          {roles.map((role) => (
+            <option key={role.id} value={role.id}>
+              {role.title}
+            </option>
+          ))}
+        </select>
+        <button
+          type="submit"
+          className="secondary"
+          disabled={pending || !newName.trim() || lanes.length >= laneLimit}
+          title={lanes.length >= laneLimit ? `A board has at most ${laneLimit} lanes.` : undefined}
+        >
+          <Icon name="plus" size={14} /> Add lane
+        </button>
+      </form>
+      {error && (
+        <p className="inline-error" role="alert">
+          <Icon name="alert" size={16} />
+          <span>{error.message} Nothing was saved.</span>
+        </p>
+      )}
+    </section>
   );
 }

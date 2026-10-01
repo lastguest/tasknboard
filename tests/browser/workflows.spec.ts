@@ -181,7 +181,7 @@ test("Settings, task workflow, agent review, archive, and export", async ({ page
     summary: `Reviewed in browser suite ${key}`,
     artifactUrl: "https://example.test/review/browser-regression",
   }, agentToken);
-  expect(reviewed.status).toBe("in_review");
+  expect(reviewed.role).toBe("in_review");
   expect(reviewed.lease).toBeNull();
 
   await page.reload();

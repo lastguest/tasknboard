@@ -1,15 +1,11 @@
-import type { Status, Task } from "../src/types.ts";
-import {
-  columns,
-  linkTitle,
-  linkTypes,
-  priorities,
-  statusTitle,
-} from "../src/types.ts";
+import type { Lane } from "../server/domain.mjs";
+import type { BoardRecord, Task } from "../src/types.ts";
+import { linkTitle, linkTypes, priorities } from "../src/types.ts";
 
 export type Request = { name: string; args: Record<string, unknown> };
 
-export type CommandContext = { boardId?: string };
+/** The selected board, and the loaded boards whose lanes commands use. */
+export type CommandContext = { boardId?: string; boards?: BoardRecord[] };
 
 /** What a slash command asks the interface to do. */
 export type Action =
@@ -68,18 +64,25 @@ function versioned(
   };
 }
 
-/** Matches a status by id or title, for example "review" or "in progress". */
-export function findStatus(arg: string): Status {
-  const key = arg.trim().toLowerCase().replace(/\s+/g, "_");
-  const matches = columns.filter(
-    (c) =>
-      c.id === key || c.title.toLowerCase().replace(/\s+/g, "_").includes(key),
-  );
+/** The lanes of the task's board, in board order. */
+function boardLanes(task: Task, context: CommandContext): Lane[] {
+  const board = context.boards?.find((b) => b.id === task.boardId);
+  if (!board) throw new UsageError("Board not loaded yet. Type /refresh.");
+  return board.lanes;
+}
+
+/** Matches a lane by name, or by a unique start of one, ignoring case. */
+export function findLane(arg: string, lanes: Lane[]): Lane {
+  const key = arg.trim().toLowerCase();
+  const exact = lanes.filter((l) => l.name.toLowerCase() === key);
+  const matches = exact.length
+    ? exact
+    : lanes.filter((l) => l.name.toLowerCase().startsWith(key));
   if (!key || matches.length !== 1)
     throw new UsageError(
-      `Choose a status: ${columns.map((c) => c.id).join(", ")}.`,
+      `Choose a lane: ${lanes.map((l) => l.name).join(", ")}.`,
     );
-  return matches[0].id;
+  return matches[0];
 }
 
 export const commands: Command[] = [
@@ -107,7 +110,7 @@ export const commands: Command[] = [
   {
     name: "new",
     usage: "/new <title>",
-    summary: "Create a backlog task on the selected board",
+    summary: "Create a task in the first to-do lane of the selected board",
     plan: (arg, _task, context) => {
       const title = required(arg, "/new <title>");
       if (!context.boardId)
@@ -124,21 +127,24 @@ export const commands: Command[] = [
   },
   {
     name: "move",
-    usage: "/move <status>",
-    summary: "Change the status of the selected task",
-    plan: (arg, task) => {
-      const status = findStatus(required(arg, "/move <status>"));
+    usage: "/move <lane>",
+    summary: "Move the selected task to a lane of its board",
+    plan: (arg, task, context) => {
+      const name = required(arg, "/move <lane>");
       const t = selected(task);
-      return update(t, { status }, `${t.id} moved to ${statusTitle(status)}.`);
+      const lane = findLane(name, boardLanes(t, context));
+      return update(t, { lane: lane.id }, `${t.id} moved to ${lane.name}.`);
     },
   },
   {
     name: "done",
     usage: "/done",
     summary: "Mark the reviewed task Done",
-    plan: (_, task) => {
+    plan: (_, task, context) => {
       const t = selected(task);
-      return update(t, { status: "done" }, `${t.id} is Done.`);
+      const lane = boardLanes(t, context).find((l) => l.role === "done");
+      if (!lane) throw new UsageError("The board has no Done lane.");
+      return update(t, { lane: lane.id }, `${t.id} is in ${lane.name}.`);
     },
   },
   {

@@ -45,11 +45,11 @@ test("boards give tasks independent numbers and scope task lists and epic counts
     [operationsTask.id],
   );
   assert.equal(
-    store.execute("list_epics", { boardId: defaultBoard.id }, human).epics[0].counts.backlog,
+    store.execute("list_epics", { boardId: defaultBoard.id }, human).epics[0].counts.todo,
     1,
   );
   assert.equal(
-    store.execute("list_epics", { boardId: operations.id }, human).epics[0].counts.backlog,
+    store.execute("list_epics", { boardId: operations.id }, human).epics[0].counts.todo,
     1,
   );
 });
@@ -441,6 +441,7 @@ test("the board migration preserves legacy keys and epic references", (t) => {
     "id",
     "inProgress",
     "inSidebar",
+    "lanes",
     "name",
     "prefix",
     "repository",
@@ -482,7 +483,7 @@ test("the board migration preserves legacy keys and epic references", (t) => {
     "APP-2",
   );
   const backup = store.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 15);
+  assert.equal(backup.schemaVersion, 17);
   assert.equal(Object.hasOwn(backup, "workspace"), false);
   assert.equal(backup.tasks[0].boardId, defaultBoard.id);
   // Exports hold stored records; formerPrefixes, inSidebar, and inProgress are derived.
@@ -560,7 +561,7 @@ test("each person hides boards from their own sidebar without changing the board
   );
 });
 
-test("each board counts its active tasks In progress", (t) => {
+test("each board counts its active tasks in in_progress lanes", (t) => {
   const store = fixture(t);
   const [defaultBoard] = store.execute("list_boards", {}, human).boards;
   const operations = store.execute(
@@ -571,16 +572,20 @@ test("each board counts its active tasks In progress", (t) => {
   assert.equal(operations.inProgress, 0);
   const start = (boardId, title) => {
     const task = store.execute("create_task", { boardId, title }, human);
+    const lane = store
+      .execute("list_boards", {}, human)
+      .boards.find((board) => board.id === boardId)
+      .lanes.find((l) => l.role === "in_progress").id;
     return store.execute(
       "update_task",
-      { id: task.id, expectedVersion: task.version, patch: { status: "in_progress" } },
+      { id: task.id, expectedVersion: task.version, patch: { lane } },
       human,
     );
   };
   start(defaultBoard.id, "Product one");
   const archived = start(defaultBoard.id, "Product two");
   start(operations.id, "Operations one");
-  store.execute("create_task", { boardId: operations.id, title: "Still backlog" }, human);
+  store.execute("create_task", { boardId: operations.id, title: "Still to do" }, human);
   store.execute(
     "archive_task",
     { id: archived.id, expectedVersion: archived.version },
@@ -613,7 +618,7 @@ test("task links upgrade an existing version 13 database without changing boards
   db.close();
   store = createStore(path);
   try {
-    assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 15);
+    assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 17);
     assert.equal(store.execute("list_boards", {}, human).boards[0].description, board.description);
     assert.equal(store.execute("get_task", { id: first.id }, human).version, first.version);
     const linked = store.execute("link_task", {

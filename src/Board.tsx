@@ -1,14 +1,14 @@
 import { useState } from "react";
 import {
   activeLease,
-  columns,
   doneLocked,
   labelTone,
   priorities,
+  roles,
   standupNotes,
-  statusTitle,
   type Epic,
-  type Status,
+  type Lane,
+  type LaneRole,
   type Task,
 } from "./types";
 import { EpicTag } from "./Epics";
@@ -77,10 +77,10 @@ function PriorityBars({ task }: { task: Task }) {
   );
 }
 
-/** Progress-circle status glyph shared by column headers and cards. */
-export function StatusIcon({ status, size = 14 }: { status: Status; size?: number }) {
-  const color = columns.find((c) => c.id === status)?.color;
-  const fill = { backlog: 0, in_progress: 0.5, in_review: 0.75, done: 1 }[status];
+/** Progress-circle lane role glyph shared by column headers and cards. */
+export function RoleIcon({ role, size = 14 }: { role: LaneRole; size?: number }) {
+  const color = roles.find((r) => r.id === role)?.color;
+  const fill = { todo: 0, in_progress: 0.5, in_review: 0.75, done: 1 }[role];
   // A circle of radius 2.5 stroked 5 wide paints a pie slice via its dash.
   const pie = 2 * Math.PI * 2.5;
   return (
@@ -93,7 +93,7 @@ export function StatusIcon({ status, size = 14 }: { status: Status; size?: numbe
       aria-hidden="true"
       style={{ color }}
     >
-      {status === "done" ? (
+      {role === "done" ? (
         <>
           <circle cx="7" cy="7" r="6.5" fill="currentColor" />
           <path
@@ -112,7 +112,7 @@ export function StatusIcon({ status, size = 14 }: { status: Status; size?: numbe
             r="5.75"
             stroke="currentColor"
             strokeWidth="1.5"
-            strokeDasharray={status === "backlog" ? "1.4 1.6" : undefined}
+            strokeDasharray={role === "todo" ? "1.4 1.6" : undefined}
           />
           {fill > 0 && (
             <circle
@@ -172,33 +172,33 @@ export function ClaimChip({ task }: { task: Task }) {
 /** The keyboard and touch alternative to drag and drop. */
 export function StatusSelect({
   task,
+  lanes,
   pending,
   onMove,
 }: {
   task: Task;
-  pending?: Status;
-  onMove: (t: Task, s: Status) => void;
+  /** The lanes of the task's board. */
+  lanes: Lane[];
+  pending?: string;
+  onMove: (t: Task, lane: string) => void;
 }) {
   return (
     <label className="status-select">
       <span className="sr-only">Status of {task.id}</span>
       <select
         aria-label={`Status of ${task.id}`}
-        value={pending ?? task.status}
+        value={pending ?? task.lane}
         disabled={Boolean(pending)}
-        onChange={(e) => onMove(task, e.target.value as Status)}
+        onChange={(e) => onMove(task, e.target.value)}
       >
-        {columns.map((c) => (
-          <option
-            key={c.id}
-            value={c.id}
-            disabled={c.id === "done" && doneLocked(task.status)}
-          >
-            {c.id === "done" && doneLocked(task.status)
-              ? "Done (after review)"
-              : c.title}
-          </option>
-        ))}
+        {lanes.map((lane) => {
+          const locked = lane.role === "done" && doneLocked(task.role);
+          return (
+            <option key={lane.id} value={lane.id} disabled={locked}>
+              {locked ? `${lane.name} (after review)` : lane.name}
+            </option>
+          );
+        })}
       </select>
       {pending && <span className="moving">Moving…</span>}
     </label>
@@ -207,27 +207,32 @@ export function StatusSelect({
 
 type BoardProps = {
   tasks: Task[];
+  /** The board's lanes: one column each, in order. */
+  lanes: Lane[];
   agents: Set<string>;
   /** Show each task's epic. Omitted inside an epic, where it is implied. */
   epics?: ReadonlyMap<string, Epic>;
   onOpen: (t: Task) => void;
-  onMove?: (t: Task, s: Status) => void;
+  onMove?: (t: Task, lane: string) => void;
   /** Saves a list row's new epic; "" removes it. */
   onEpic?: (t: Task, epic: string) => Promise<void>;
-  onNew?: () => void;
+  /** Creates a task in a todo lane. */
+  onNew?: (lane: string) => void;
   /** Opens the task's context menu. */
   onMenu?: (e: React.MouseEvent<HTMLElement>, t: Task) => void;
   /** Opens the agent run logs of a task assigned to an agent. */
   onLogs?: (t: Task) => void;
-  pending?: Map<string, Status>;
+  /** The lane each moving task is headed for, by task ID. */
+  pending?: Map<string, string>;
   list?: boolean;
-  /** List sections, from a view's grouping. Without them the list is by status. */
+  /** List sections, from a view's grouping. Without them the list is by lane. */
   groups?: TaskGroup[];
   presentation?: boolean;
 };
 
 export function TaskCard({
   task,
+  lanes,
   agents,
   epics,
   onOpen,
@@ -238,12 +243,14 @@ export function TaskCard({
   presentation,
 }: Omit<BoardProps, "tasks" | "pending" | "list" | "onNew" | "groups"> & {
   task: Task;
-  pending?: Status;
+  pending?: string;
 }) {
   const commentLabel = `${task.commentCount} ${task.commentCount === 1 ? "comment" : "comments"}`;
   const assigneeName = usePersonName(task.assignee);
   const agent = agents.has(task.assignee);
-  const standup = standupNotes(task, pending ?? task.status);
+  const role =
+    (pending && lanes.find((lane) => lane.id === pending)?.role) || task.role;
+  const standup = standupNotes(task, role);
   const signal = standup?.blocker
     ? "has-blocker"
     : standup?.highlight
@@ -289,7 +296,7 @@ export function TaskCard({
         </span>
       </div>
       <h3 className="task-title">
-        <StatusIcon status={pending ?? task.status} />
+        <RoleIcon role={role} />
         <button
           type="button"
           className="card-open"
@@ -330,7 +337,12 @@ export function TaskCard({
         )}
         <PullCount task={task} />
         {onMove && !presentation && (
-          <StatusSelect task={task} pending={pending} onMove={onMove} />
+          <StatusSelect
+            task={task}
+            lanes={lanes}
+            pending={pending}
+            onMove={onMove}
+          />
         )}
       </div>
     </article>
@@ -372,6 +384,7 @@ export function PullCount({ task }: { task: Task }) {
 
 export function Board({
   tasks,
+  lanes,
   agents,
   epics,
   onOpen,
@@ -385,7 +398,7 @@ export function Board({
   groups,
   presentation = false,
 }: BoardProps) {
-  const [dropTarget, setDropTarget] = useState<Status | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   const canDrag = Boolean(onMove) && !presentation;
   if (list) {
     const sections = groups ?? [
@@ -394,8 +407,8 @@ export function Board({
         label: null,
         tasks: [...tasks].sort(
           (a, b) =>
-            columns.findIndex((c) => c.id === a.status) -
-            columns.findIndex((c) => c.id === b.status),
+            lanes.findIndex((lane) => lane.id === a.lane) -
+            lanes.findIndex((lane) => lane.id === b.lane),
         ),
       },
     ];
@@ -446,13 +459,14 @@ export function Board({
           {onMove ? (
             <StatusPicker
               task={t}
+              lanes={lanes}
               pending={pending.get(t.id)}
               onMove={onMove}
             />
           ) : (
             <span className="status-cell">
-              <StatusIcon status={t.status} />
-              {statusTitle(t.status)}
+              <RoleIcon role={t.role} />
+              {lanes.find((lane) => lane.id === t.lane)?.name}
             </span>
           )}
         </td>
@@ -503,19 +517,24 @@ export function Board({
     );
   }
   return (
-    <div className="board" role="region" aria-label="Kanban board">
-      {columns.map((col) => {
-        const cards = tasks.filter((t) => t.status === col.id);
+    <div
+      className="board"
+      role="region"
+      aria-label="Kanban board"
+      style={{ "--lanes": lanes.length } as React.CSSProperties}
+    >
+      {lanes.map((lane) => {
+        const cards = tasks.filter((t) => t.lane === lane.id);
         return (
           <section
-            className={`column ${dropTarget === col.id ? "drop-target" : ""}`}
-            key={col.id}
-            aria-labelledby={`column-${col.id}`}
+            className={`column ${dropTarget === lane.id ? "drop-target" : ""}`}
+            key={lane.id}
+            aria-labelledby={`column-${lane.id}`}
             onDragOver={(e) => {
               if (!canDrag) return;
               e.preventDefault();
               e.dataTransfer.dropEffect = "move";
-              if (dropTarget !== col.id) setDropTarget(col.id);
+              if (dropTarget !== lane.id) setDropTarget(lane.id);
             }}
             onDragLeave={(e) => {
               if (!e.currentTarget.contains(e.relatedTarget as Node))
@@ -528,22 +547,22 @@ export function Board({
               const t = tasks.find(
                 (t) => t.id === e.dataTransfer.getData("text/plain"),
               );
-              if (t && t.status !== col.id) onMove?.(t, col.id);
+              if (t && t.lane !== lane.id) onMove?.(t, lane.id);
             }}
           >
             <header>
-              <StatusIcon status={col.id} />
-              <h2 id={`column-${col.id}`}>{col.title}</h2>
+              <RoleIcon role={lane.role} />
+              <h2 id={`column-${lane.id}`}>{lane.name}</h2>
               <span className="count" aria-label={`${cards.length} tasks`}>
                 {cards.length}
               </span>
-              {onNew && col.id === "backlog" && (
+              {onNew && lane.role === "todo" && (
                 <button
                   type="button"
                   className="icon-button column-add"
-                  aria-label="New task in Backlog"
-                  title="New task in Backlog"
-                  onClick={onNew}
+                  aria-label={`New task in ${lane.name}`}
+                  title={`New task in ${lane.name}`}
+                  onClick={() => onNew(lane.id)}
                 >
                   <Icon name="plus" size={16} />
                 </button>
@@ -554,6 +573,7 @@ export function Board({
                 <TaskCard
                   key={t.id}
                   task={t}
+                  lanes={lanes}
                   agents={agents}
                   epics={epics}
                   onOpen={onOpen}
@@ -565,7 +585,7 @@ export function Board({
                 />
               ))}
               {!cards.length && (
-                <div className="empty-column">No tasks in {col.title}</div>
+                <div className="empty-column">No tasks in {lane.name}</div>
               )}
             </div>
           </section>

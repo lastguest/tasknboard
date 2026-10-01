@@ -95,7 +95,7 @@ test("boards scope task keys, persist selection, and own task deep links", async
   await expect(editBoard).toContainText(`Former prefixes: ${prefix}-.`);
   await editBoard.getByRole("textbox", { name: "Description" }).fill("Runbooks and incidents.");
   const renamedBoard = `${boardName} renamed`;
-  await editBoard.getByRole("textbox", { name: "Name" }).fill(renamedBoard);
+  await editBoard.getByRole("textbox", { name: "Name", exact: true }).fill(renamedBoard);
   await editBoard.getByRole("button", { name: "Save changes" }).click();
   await expect(editBoard).toBeHidden();
   await expect(page.locator(".page-title p")).toHaveText("Runbooks and incidents.");
@@ -136,7 +136,7 @@ test("boards scope task keys, persist selection, and own task deep links", async
   await boardSwitch.click();
   await page.getByRole("menuitem", { name: "Edit board" }).click();
   const editFromMenu = page.getByRole("dialog", { name: "Edit board" });
-  await expect(editFromMenu.getByRole("textbox", { name: "Name" })).toHaveValue("Default");
+  await expect(editFromMenu.getByRole("textbox", { name: "Name", exact: true })).toHaveValue("Default");
   await editFromMenu.getByRole("button", { name: "Cancel" }).click();
   await expect(editFromMenu).toBeHidden();
 

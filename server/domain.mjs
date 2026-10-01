@@ -10,7 +10,10 @@ import {
 /** 5 MB of image bytes, base64-encoded inside a data URL. */
 export const imageBytesLimit = 5 * 1024 * 1024;
 export const imageDataUrlLimit = Math.ceil(imageBytesLimit / 3) * 4 + 32;
-export const statuses = ["backlog", "in_progress", "in_review", "done"];
+/** What a lane means to the agent and review workflow. See docs/contracts/lanes.md. */
+export const laneRoles = ["todo", "in_progress", "in_review", "done"];
+/** At most this many lanes on one board. */
+export const laneLimit = 12;
 const text = z.string().trim().min(1).max(300);
 const long = z.string().max(20000);
 const version = z.number().int().positive();
@@ -19,6 +22,10 @@ const key = z.string().regex(/^[A-Z][A-Z0-9]{0,9}-\d+$/, "Key like ABC-12 requir
 const id = key;
 const epicId = key;
 const boardId = z.string().regex(/^BOARD-\d+$/);
+const laneId = z.string().regex(/^LANE-\d+$/, "Lane ID like LANE-3 required");
+const laneRole = z.enum(laneRoles);
+const laneName = z.string().trim().min(1).max(40);
+const lanePosition = z.number().int().min(0);
 /** 2–10 letters or digits, starting with a letter. Entered case is ignored. */
 export const keyPrefix = z
   .string()
@@ -67,7 +74,8 @@ const epicColor = z.union([
 const viewId = z.string().regex(/^VIEW-\d+$/);
 /** Valid values per view field; "" means none (unassigned, no epic, no labels). */
 const viewValue = {
-  status: z.enum(statuses),
+  role: laneRole,
+  lane: laneId,
   priority: z.enum(["low", "medium", "high"]),
   assignee: z.union([z.literal(ME), z.string().max(80)]),
   label: z.union([z.literal(""), z.string().trim().min(1).max(40)]),
@@ -107,7 +115,7 @@ const viewFilters = z
 const viewDisplay = z
   .object({
     layout: z.enum(viewLayouts).default("board"),
-    groupBy: z.enum(viewGroups).default("status"),
+    groupBy: z.enum(viewGroups).default("lane"),
     orderBy: z.enum(viewOrders).default("created"),
   })
   .strict();
@@ -159,7 +167,7 @@ const patch = z
     title: text.optional(),
     description: long.optional(),
     acceptance: long.optional(),
-    status: z.enum(statuses).optional(),
+    lane: laneId.optional(),
     priority: z.enum(["low", "medium", "high"]).optional(),
     assignee: z.string().max(80).optional(),
     labels: labels.optional(),
@@ -171,7 +179,8 @@ export const schemas = {
   list_tasks: z
     .object({
       query: z.string().max(300).optional(),
-      status: z.enum(statuses).optional(),
+      role: laneRole.optional(),
+      lane: laneId.optional(),
       assignee: z.string().max(80).optional(),
       epic: z.union([z.literal("none"), epicId]).optional(),
       boardId: boardId.optional(),
@@ -184,6 +193,7 @@ export const schemas = {
   create_task: z
     .object({
       boardId,
+      lane: laneId.optional(),
       title: text,
       description: long.default(""),
       acceptance: long.default(""),
@@ -324,7 +334,7 @@ export const schemas = {
       filters: viewFilters.default({ query: "", conditions: [] }),
       display: viewDisplay.default({
         layout: "board",
-        groupBy: "status",
+        groupBy: "lane",
         orderBy: "created",
       }),
     })
@@ -372,6 +382,29 @@ export const schemas = {
         .refine((v) => Object.keys(v).length > 0, "Empty patch"),
     })
     .strict(),
+  create_lane: z
+    .object({
+      boardId,
+      expectedVersion: version,
+      name: laneName,
+      role: laneRole,
+      position: lanePosition.optional(),
+    })
+    .strict(),
+  update_lane: z
+    .object({
+      id: laneId,
+      expectedVersion: version,
+      patch: z
+        .object({ name: laneName.optional(), position: lanePosition.optional() })
+        .strict()
+        .refine((v) => Object.keys(v).length > 0, "Empty patch"),
+    })
+    .strict(),
+  delete_lane: z
+    .object({ id: laneId, expectedVersion: version, moveTo: laneId })
+    .strict()
+    .refine((v) => v.id !== v.moveTo, "moveTo: Choose another lane"),
   set_board_sidebar: z
     .object({ id: boardId, inSidebar: z.boolean() })
     .strict(),

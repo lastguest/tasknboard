@@ -40,6 +40,8 @@ Task text is stripped of control characters before it reaches the terminal.
 
 List → get → claim (expected version, 15-minute lease) → heartbeat → update /
 comment → submit_review (summary + artifact URL) → human review → done.
+Each board has its own [lanes](contracts/lanes.md). The flow reads lane roles
+(todo, in_progress, in_review, done), not lane names.
 Claim is atomic inside BEGIN IMMEDIATE. Every mutation increments the task
 version. The actor is derived from configuration/authentication, not a tool
 argument. An agent can only edit a task with its own unexpired lease. A review
@@ -64,7 +66,7 @@ version conflicts, minimal actor tokens, server polling, backup export.
 Not implemented: organization membership UI, OAuth/SSO, remote Streamable HTTP
 MCP endpoint, granular per-project roles, offline replica sync, notification
 service, general attachments (only description images are stored), enforced
-dependencies (task links do not block status changes), custom workflows.
+dependencies (task links do not block lane changes), lane transitions beyond the four roles.
 Remote MCP currently means a local stdio bridge to the shared authenticated API.
 For public deployment, terminate HTTPS and configure tokens. Token rotation is
 by process configuration. Database must be on local disk, not NFS.
@@ -105,7 +107,7 @@ manage epics, and an epic with open work cannot be archived.
 
 The [task links contract](contracts/task-links.md) relates two tasks:
 relates, blocks, or duplicates. A link is a versioned write on one task.
-Links inform; the server does not block status changes because of them.
+Links inform; the server does not block lane changes because of them.
 
 ## Views
 

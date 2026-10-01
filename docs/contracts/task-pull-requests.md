@@ -2,7 +2,7 @@
 
 A task links the GitHub pull requests that carry its work, like Linear's
 pull request attachments and Jira's development panel. Links inform people and
-agents. They do not change a task's status.
+agents. They do not change a task's lane.
 
 ## Commands
 

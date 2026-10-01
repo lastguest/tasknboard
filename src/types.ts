@@ -1,5 +1,6 @@
 import type { ViewDisplay, ViewFilters } from "../server/views.mjs";
-export type Status = "backlog" | "in_progress" | "in_review" | "done";
+import type { Lane, LaneRole } from "../server/domain.mjs";
+export type { Lane, LaneRole };
 export type Priority = "low" | "medium" | "high";
 export type TaskEvent = {
   sequence: number;
@@ -29,7 +30,8 @@ export type TaskLink = {
   type: LinkType;
   id: string;
   title: string;
-  status: Status;
+  lane: string;
+  role: LaneRole;
   archived: boolean;
 };
 /** A GitHub pull request linked to a task with `link_pull_requests`. */
@@ -46,7 +48,10 @@ export type Task = {
   title: string;
   description: string;
   acceptance: string;
-  status: Status;
+  /** A lane ID of the task's board. */
+  lane: string;
+  /** The role of the task's lane, derived by the server. */
+  role: LaneRole;
   priority: Priority;
   assignee: string;
   labels: string[];
@@ -74,8 +79,8 @@ export type Epic = {
   archived: boolean;
   createdAt: string;
   updatedAt: string;
-  /** Non-archived tasks per status, derived by the server. */
-  counts: Record<Status, number>;
+  /** Non-archived tasks per lane role, derived by the server. */
+  counts: Record<LaneRole, number>;
 };
 
 export type {
@@ -133,7 +138,9 @@ export type BoardRecord = {
   formerPrefixes: string[];
   /** Whether the caller lists this board in the sidebar. Each person sets it. */
   inSidebar: boolean;
-  /** Active tasks In progress on this board. */
+  /** The board's lanes in column order. */
+  lanes: Lane[];
+  /** Non-archived tasks in lanes with role in_progress. */
   inProgress: number;
   version: number;
   createdAt: string;
@@ -146,14 +153,21 @@ export type WorkspaceInfo = {
   boards: BoardRecord[];
   schemaVersion: number;
 };
-export const columns: { id: Status; title: string; color: string }[] = [
-  { id: "backlog", title: "Backlog", color: "#88909e" },
+/** Lane roles in workflow order. Lanes of one role share its colour and icon. */
+export const roles: { id: LaneRole; title: string; color: string }[] = [
+  { id: "todo", title: "To do", color: "#88909e" },
   { id: "in_progress", title: "In progress", color: "#e8bd5a" },
   { id: "in_review", title: "In review", color: "#bca0f4" },
   { id: "done", title: "Done", color: "#9de3c1" },
 ];
-export const statusTitle = (s: Status) =>
-  columns.find((c) => c.id === s)?.title ?? s;
+export const roleTitle = (r: LaneRole) =>
+  roles.find((role) => role.id === r)?.title ?? r;
+/** A lane of any board; undefined once the lane is deleted. */
+export const findLane = (boards: BoardRecord[], id: string) =>
+  boards.flatMap((board) => board.lanes).find((lane) => lane.id === id);
+/** The leftmost lane of a role, where commands that name a role move tasks. */
+export const firstLane = (lanes: Lane[], role: LaneRole) =>
+  lanes.find((lane) => lane.role === role);
 export const priorities: { id: Priority; title: string }[] = [
   { id: "low", title: "Low" },
   { id: "medium", title: "Medium" },
@@ -183,11 +197,11 @@ export function labelTone(label: string) {
 }
 
 /** Stand-up notes, which stop mattering once the task is Done. */
-export const standupNotes = (task: Task, status: Status = task.status) =>
-  status === "done" ? undefined : task.standup;
+export const standupNotes = (task: Task, role: LaneRole = task.role) =>
+  role === "done" ? undefined : task.standup;
 
-/** The server only accepts Done for reviewed work. */
-export const doneLocked = (s: Status) => s !== "in_review" && s !== "done";
+/** The server only accepts a done lane for reviewed work. */
+export const doneLocked = (r: LaneRole) => r !== "in_review" && r !== "done";
 
 /** Tasks in an epic and how many are Done. */
 export function epicProgress(epic: Epic) {

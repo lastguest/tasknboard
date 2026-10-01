@@ -102,7 +102,7 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   const infoResponse = await post("workspace_info");
   assert.equal(infoResponse.status, 200);
   const info = await infoResponse.json();
-  assert.equal(info.schemaVersion, 15);
+  assert.equal(info.schemaVersion, 17);
   assert.equal(info.boards[0].id, "BOARD-1");
   assert.equal(Object.hasOwn(info, "settings"), false);
   assert.match(
@@ -174,10 +174,10 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   const completed = await post("update_task", {
     id: task.id,
     expectedVersion: task.version,
-    patch: { status: "done" },
+    patch: { lane: "LANE-4" },
   });
   assert.equal(completed.status, 200);
-  assert.equal((await completed.json()).status, "done");
+  assert.equal((await completed.json()).role, "done");
   // Images exceed the ordinary command size and are served as inert files.
   const bigPng = Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -208,7 +208,7 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
     413,
   );
   const backup = await (await post("export_workspace")).json();
-  assert.equal(backup.schemaVersion, 15);
+  assert.equal(backup.schemaVersion, 17);
   assert.equal(backup.boards[0].id, "BOARD-1");
   assert.ok(backup.actors.some((actor) => actor.id === "remote-agent"));
   const databaseBytes = Buffer.concat([

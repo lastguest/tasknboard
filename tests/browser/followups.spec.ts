@@ -53,7 +53,7 @@ test("Board, List and My tasks combine filters and agree on counts", async ({ pa
   await filterBy(page, "reviewer");
   await expect(page.locator(".task-card")).toHaveCount(1);
   await expect(page.locator(".task-card .comment-count")).toHaveText("1 comment");
-  await expect(page.locator("#column-backlog + .count")).toHaveText("1");
+  await expect(page.locator("#column-LANE-1 + .count")).toHaveText("1");
   await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "List" }).click();
   await expect(page.locator("tbody tr:not(.group-row)")).toHaveCount(1);
   await expect(page.locator("tbody .comment-count")).toHaveText("1 comment");
@@ -72,17 +72,17 @@ test("Status menu saves and the server rejects an invalid drag", async ({ page }
   await connect(page);
   await search(page).fill(task.id);
   const status = page.getByLabel(`Status of ${task.id}`);
-  await status.selectOption("in_progress");
-  await expect(status).toHaveValue("in_progress");
+  await status.selectOption("LANE-2");
+  await expect(status).toHaveValue("LANE-2");
   await expect(page.getByRole("status").filter({ hasText: `Moved ${task.id}` })).toBeVisible();
   const transfer = await page.evaluateHandle((id) => {
     const data = new DataTransfer();
     data.setData("text/plain", id);
     return data;
   }, task.id);
-  await page.locator('section[aria-labelledby="column-done"]').dispatchEvent("drop", { dataTransfer: transfer });
+  await page.locator('section[aria-labelledby="column-LANE-4"]').dispatchEvent("drop", { dataTransfer: transfer });
   await expect(page.getByRole("alert")).toContainText("must be reviewed before completion");
-  await expect(status).toHaveValue("in_progress");
+  await expect(status).toHaveValue("LANE-2");
   await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "List" }).click();
   await page.getByRole("button", { name: `Status of ${task.id}: In progress. Choose status` }).click();
   const picker = page.getByRole("dialog", { name: `Status of ${task.id}` });
@@ -91,7 +91,7 @@ test("Status menu saves and the server rejects an invalid drag", async ({ page }
   await expect(picker).toBeHidden();
   await expect(page.getByRole("button", { name: `Status of ${task.id}: In review. Choose status` })).toBeVisible();
   await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "Board" }).click();
-  expect((await command("get_task", { id: task.id })).status).toBe("in_review");
+  expect((await command("get_task", { id: task.id })).lane).toBe("LANE-3");
 });
 
 test("List epic picker saves on choice and hides archived epics", async ({ page }) => {
@@ -180,7 +180,7 @@ test("Task sidebar pickers search, stage changes, and save label arrays", async 
   await expect(details.getByRole("button", { name: "Labels: Existing, Second label. Edit labels" })).toBeVisible();
   await details.getByRole("button", { name: "Save changes" }).click();
   const saved = await command("get_task", { id: task.id });
-  expect(saved.status).toBe("in_review");
+  expect(saved.role).toBe("in_review");
   expect(saved.priority).toBe("high");
   expect(saved.assignee).toBe("browser-agent");
   expect(saved.labels).toEqual(["Existing", "Second label"]);
@@ -336,8 +336,8 @@ test("Done tasks hide their stand-up notes on the board and in Stand-up", async 
   const prefix = `Closed notes ${key()}`;
   let done = await create(`${prefix} done`, "reviewer");
   done = await command("set_standup_notes", { id: done.id, expectedVersion: done.version, highlight: "Shipped", blocker: "Old blocker" });
-  done = await command("update_task", { id: done.id, expectedVersion: done.version, patch: { status: "in_review" } });
-  await command("update_task", { id: done.id, expectedVersion: done.version, patch: { status: "done" } });
+  done = await command("update_task", { id: done.id, expectedVersion: done.version, patch: { lane: "LANE-3" } });
+  await command("update_task", { id: done.id, expectedVersion: done.version, patch: { lane: "LANE-4" } });
   const open = await create(`${prefix} open`, "reviewer");
   await command("set_standup_notes", { id: open.id, expectedVersion: open.version, highlight: "", blocker: "Still blocked" });
   await connect(page);
@@ -582,7 +582,7 @@ test("Needs changes explains retained review evidence", async ({ page }) => {
   await dialog.getByRole("button", { name: "Needs changes" }).click();
   await expect(dialog).toContainText("earlier submission for context");
   await expect(dialog.locator(".review-summary")).toHaveText("Earlier submission");
-  expect((await command("get_task", { id: task.id })).status).toBe("in_progress");
+  expect((await command("get_task", { id: task.id })).lane).toBe("LANE-2");
 });
 
 async function tabTo(page: Page, target: Locator) {

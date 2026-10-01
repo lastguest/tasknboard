@@ -8,7 +8,7 @@ import {
 } from "./AgentSettings";
 import { isMcpStatus, type McpStatus } from "./connection-helpers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Assignee, Board, StatusIcon } from "./Board";
+import { Assignee, Board, RoleIcon } from "./Board";
 import {
   ContextMenu,
   menuAt,
@@ -61,17 +61,15 @@ import { formatUtcTimestamp } from "./formatting";
 import { Avatar, displayName, PeopleContext, usePeople } from "./People";
 import {
   activeLease,
-  columns,
   doneLocked,
   epicPalette,
   epicStyle,
+  findLane,
   priorities,
-  statusTitle,
   type Actor,
   type BoardRecord,
   type Epic,
   type SavedView,
-  type Status,
   type Task,
   type ViewCondition,
   type ViewDisplay,
@@ -81,7 +79,7 @@ import {
 
 type View = "board" | "mine" | "agents" | "epics" | "epic" | "views" | "saved" | "pulls";
 /** The new-task dialog. Existing tasks open in tabs. */
-type Editor = null | { boardId: string; epic?: string };
+type Editor = null | { boardId: string; epic?: string; lane?: string };
 /** An open task tab. A new closeRequest value asks its editor to close. */
 type TaskTab = { task: Task; closeRequest: number };
 type EpicDialog = null | { epic: Epic | null };
@@ -199,7 +197,8 @@ export default function App() {
     error: ApiError | null;
     lastSync: string;
   }>({ loaded: false, connected: false, error: null, lastSync: "" });
-  const [pending, setPending] = useState(new Map<string, Status>());
+  /** The lane each moving task is headed for, by task ID. */
+  const [pending, setPending] = useState(new Map<string, string>());
   const [moveError, setMoveError] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
   /** Leaving a saved view drops its filters so they don't follow you around. */
@@ -534,6 +533,7 @@ export default function App() {
   }, [epics, epicsById, epicId]);
   const activeEpics = epics.filter((epic) => !epic.archived);
   const currentBoard = boards.find((board) => board.id === selectedBoardId);
+  const lanes = currentBoard?.lanes ?? [];
   const currentEpic = view === "epic" ? epicsById.get(epicId) : undefined;
   const currentSaved =
     view === "saved" ? views.find((v) => v.id === viewId) : undefined;
@@ -561,11 +561,12 @@ export default function App() {
     setEpicId(epic.id);
     setView("epic");
   };
-  const newTask = () => {
+  const newTask = (lane?: string) => {
     if (!currentBoard) return;
     setEditor({
       boardId: currentBoard.id,
       epic: view === "epic" ? epicId : undefined,
+      lane,
     });
   };
   const q = query.trim().toLowerCase();
@@ -588,6 +589,7 @@ export default function App() {
   );
   const groups = list
     ? groupTasks(visible, display.groupBy, {
+        lanes,
         epics: epicsById,
         name: (id) => displayName(people, id),
       })
@@ -598,6 +600,8 @@ export default function App() {
     me: actor.id,
     labels,
     epics,
+    lanes,
+    boards,
   };
   const describe = conditionDescriber(filterContext, people);
   const viewCount = (v: SavedView) =>
@@ -933,28 +937,29 @@ export default function App() {
     );
   }
 
-  async function move(task: Task, status: Status) {
-    if (pending.has(task.id) || task.status === status) return;
-    setPending((p) => new Map(p).set(task.id, status));
+  async function move(task: Task, lane: string) {
+    if (pending.has(task.id) || task.lane === lane) return;
+    const name = findLane(boards, lane)?.name ?? lane;
+    setPending((p) => new Map(p).set(task.id, lane));
     setMoveError("");
     try {
       const saved = await command<Task>("update_task", {
         id: task.id,
         expectedVersion: task.version,
-        patch: { status },
+        patch: { lane },
       });
       setTasks((ts) => ts.map((t) => (t.id === saved.id ? saved : t)));
       notify({
         tone: "ok",
         title: `Moved ${task.id}`,
-        body: `Now in ${statusTitle(status)}.`,
+        body: `Now in ${name}.`,
       });
     } catch (e) {
       const error = errorOf(e);
       setMoveError(
         error.code === "VERSION_CONFLICT"
           ? `${task.id} changed since the board loaded, so it was not moved. The board has been refreshed; try again.`
-          : `${task.id} was not moved to ${statusTitle(status)}. ${describeError(error)}`,
+          : `${task.id} was not moved to ${name}. ${describeError(error)}`,
       );
     } finally {
       setPending((p) => {
@@ -970,13 +975,14 @@ export default function App() {
     setEditor(null);
     await refresh();
     const shown = !overviews.includes(view) && matches(task);
+    const added = `Added to ${findLane(boards, task.lane)?.name ?? "the board"}.`;
     notify({
       tone: "ok",
       title: `Created ${task.id}`,
       body:
         shown || overviews.includes(view)
-          ? "Added to Backlog."
-          : "Added to Backlog. Your current filters hide it.",
+          ? added
+          : `${added} Your current filters hide it.`,
       actions: [
         ...(shown
           ? []
@@ -1041,6 +1047,14 @@ export default function App() {
       tone: "ok",
       title: previous ? `Saved ${saved.name}` : `Created ${saved.name}`,
     });
+  }
+
+  /** Lane writes save at once; the board and its tasks reload. */
+  function lanesChanged(saved: BoardRecord) {
+    setBoards((list) =>
+      list.map((board) => (board.id === saved.id ? saved : board)),
+    );
+    void refresh();
   }
 
   async function epicSaved(epic: Epic, isNew: boolean) {
@@ -1167,14 +1181,16 @@ export default function App() {
         },
         {
           label: "Status",
-          items: columns.map((c) => {
-            const locked = c.id === "done" && doneLocked(task.status);
+          items: (
+            boards.find((board) => board.id === task.boardId)?.lanes ?? []
+          ).map((lane) => {
+            const locked = lane.role === "done" && doneLocked(task.role);
             return {
-              label: locked ? "Done (after review)" : c.title,
-              icon: <StatusIcon status={c.id} />,
-              checked: task.status === c.id,
+              label: locked ? `${lane.name} (after review)` : lane.name,
+              icon: <RoleIcon role={lane.role} />,
+              checked: task.lane === lane.id,
               disabled: moving || locked,
-              onSelect: () => void move(task, c.id),
+              onSelect: () => void move(task, lane.id),
             };
           }),
         },
@@ -1783,6 +1799,7 @@ export default function App() {
                 task={task}
                 boardId={task.boardId}
                 boardName={boardName(task.boardId)}
+                boards={boards}
                 actor={actor}
                 agents={agents}
                 actors={actors}
@@ -2027,7 +2044,7 @@ export default function App() {
                     <button
                       type="button"
                       className="primary"
-                      onClick={newTask}
+                      onClick={() => newTask()}
                       disabled={!currentBoard}
                     >
                       <Icon name="plus" size={16} />
@@ -2114,7 +2131,7 @@ export default function App() {
                       <button
                         type="button"
                         className="primary"
-                        onClick={newTask}
+                        onClick={() => newTask()}
                         disabled={!currentBoard}
                       >
                       <Icon name="plus" size={16} /> Create the first task
@@ -2171,7 +2188,7 @@ export default function App() {
                           <button
                             type="button"
                             className="primary"
-                            onClick={newTask}
+                            onClick={() => newTask()}
                           >
                             <Icon name="plus" size={16} /> New task in this epic
                           </button>
@@ -2197,6 +2214,7 @@ export default function App() {
                 ) : (
                   <Board
                     tasks={visible}
+                    lanes={lanes}
                     agents={agents}
                     epics={view === "epic" ? undefined : epicsById}
                     onOpen={openTask}
@@ -2235,6 +2253,7 @@ export default function App() {
       {standup && (
         <Standup
           tasks={tasks}
+          lanes={lanes}
           agents={agents}
           connected={sync.connected}
           lastSync={sync.lastSync}
@@ -2250,6 +2269,7 @@ export default function App() {
           task={null}
           boardId={editor.boardId}
           boardName={boardName(editor.boardId)}
+          boards={boards}
           actor={actor}
           agents={agents}
           actors={actors}
@@ -2257,6 +2277,7 @@ export default function App() {
           labels={labels}
           epics={epics}
           initialEpic={editor.epic}
+          initialLane={editor.lane}
           onClose={() => setEditor(null)}
           onCreated={created}
           onSaved={saved}
@@ -2271,6 +2292,7 @@ export default function App() {
           boards={boards}
           onClose={() => setBoardDialog(null)}
           onSaved={boardSaved}
+          onLanes={lanesChanged}
         />
       )}
       {settings && (
@@ -2438,7 +2460,7 @@ function AgentsPage({
                   <Assignee name={name} agent />
                   <span>{assigned.length} assigned</span>
                   <span>
-                    {assigned.filter((t) => t.status === "in_progress").length}{" "}
+                    {assigned.filter((t) => t.role === "in_progress").length}{" "}
                     in progress
                   </span>
                   <span>{claims.length} active claims</span>

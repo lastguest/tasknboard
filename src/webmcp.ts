@@ -46,7 +46,7 @@ const tools = [
   ],
   [
     "list_epics",
-    "List epics (projects that group tasks) with per-status task counts.",
+    "List epics (projects that group tasks) with task counts per lane role.",
     true,
   ],
   [
@@ -66,7 +66,7 @@ const tools = [
   ],
   [
     "create_task",
-    "Create a backlog task on the explicit boardId from list_boards, optionally inside an epic.",
+    "Create a task on the explicit boardId from list_boards, optionally inside an epic. It starts in the board's first todo lane.",
     false,
   ],
   [
@@ -76,7 +76,7 @@ const tools = [
   ],
   [
     "create_view",
-    "Save a view: a named set of task filters (conditions on status, priority, assignee, label, epic; assignee \"@me\" means the viewer) with display settings. Personal unless shared is true.",
+    "Save a view: a named set of task filters (conditions on lane role, lane ID, priority, assignee, label, epic; assignee \"@me\" means the viewer) with display settings. Personal unless shared is true.",
     false,
   ],
   [

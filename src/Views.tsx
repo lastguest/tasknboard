@@ -1,15 +1,18 @@
 import { useState } from "react";
 import { ME } from "../server/views.mjs";
 import {
-  columns,
   epicColor,
   epicPalette,
+  findLane,
   labelTone,
   priorities,
-  statusTitle,
+  roles,
+  roleTitle,
+  type BoardRecord,
   type Epic,
+  type Lane,
+  type LaneRole,
   type SavedView,
-  type Status,
   type Task,
   type ViewCondition,
   type ViewDisplay,
@@ -26,13 +29,14 @@ import {
   type ChoiceOption,
 } from "./Dialogs";
 import { ColorField } from "./Epics";
-import { StatusIcon } from "./Board";
+import { RoleIcon } from "./Board";
 import { Icon } from "./Icons";
 import { Avatar, displayName, usePeople } from "./People";
 import { Markdown, MarkdownEditor, plainText } from "./Markdown";
 
 export const fieldTitles: Record<ViewField, string> = {
-  status: "Status",
+  role: "Lane role",
+  lane: "Lane",
   priority: "Priority",
   assignee: "Assignee",
   label: "Label",
@@ -46,6 +50,10 @@ export type FilterContext = {
   me: string;
   labels: string[];
   epics: Epic[];
+  /** The selected board's lanes, offered by the lane filter. */
+  lanes: Lane[];
+  /** Every board, to name lanes of other boards that a view names. */
+  boards: BoardRecord[];
 };
 
 /** The value "" means none: unassigned, no labels, or no epic. */
@@ -55,7 +63,8 @@ function valueLabel(
   context: FilterContext,
   people: ReturnType<typeof usePeople>,
 ) {
-  if (field === "status") return statusTitle(value as Status);
+  if (field === "role") return roleTitle(value as LaneRole);
+  if (field === "lane") return findLane(context.boards, value)?.name ?? "Deleted lane";
   if (field === "priority")
     return priorities.find((p) => p.id === value)?.title ?? value;
   if (field === "assignee")
@@ -75,12 +84,28 @@ function valueChoices(
   people: ReturnType<typeof usePeople>,
   selected: string[],
 ): ChoiceOption[] {
-  if (field === "status")
-    return columns.map((c) => ({
-      value: c.id,
-      label: c.title,
-      icon: <StatusIcon status={c.id} />,
+  if (field === "role")
+    return roles.map((r) => ({
+      value: r.id,
+      label: r.title,
+      icon: <RoleIcon role={r.id} />,
     }));
+  if (field === "lane") {
+    // Keep chosen lanes of other boards, or deleted ones, listed.
+    const extra = selected.filter((v) => !context.lanes.some((l) => l.id === v));
+    return [
+      ...context.lanes.map((lane) => ({
+        value: lane.id,
+        label: lane.name,
+        icon: <RoleIcon role={lane.role} />,
+      })),
+      ...extra.map((id) => ({
+        value: id,
+        label: valueLabel(field, id, context, people),
+        detail: id,
+      })),
+    ];
+  }
   if (field === "priority")
     return [...priorities].reverse().map((p) => ({ value: p.id, label: p.title }));
   if (field === "assignee") {
@@ -157,7 +182,7 @@ const opText = (condition: ViewCondition) =>
       ? "is none of"
       : "is not";
 
-/** A readable sentence for a condition, e.g. "Status is any of Backlog, In review". */
+/** A readable sentence for a condition, e.g. "Lane is any of Backlog, In review". */
 export function conditionDescriber(
   context: FilterContext,
   people: ReturnType<typeof usePeople>,
@@ -280,7 +305,7 @@ export function FilterBar({
               }
             >
               {values.length > 2
-                ? `${values.length} ${condition.field === "status" ? "statuses" : condition.field === "priority" ? "priorities" : condition.field === "assignee" ? "people" : condition.field === "label" ? "labels" : "epics"}`
+                ? `${values.length} ${condition.field === "role" ? "roles" : condition.field === "lane" ? "lanes" : condition.field === "priority" ? "priorities" : condition.field === "assignee" ? "people" : condition.field === "label" ? "labels" : "epics"}`
                 : values.join(", ")}
             </button>
             <button
@@ -341,7 +366,7 @@ export function FilterBar({
 }
 
 const groupTitles: Record<ViewGroup, string> = {
-  status: "Status",
+  lane: "Lane",
   assignee: "Assignee",
   priority: "Priority",
   epic: "Epic",
@@ -406,18 +431,23 @@ export type TaskGroup = { key: string; label: React.ReactNode; tasks: Task[] };
 
 /**
  * List sections for a grouping. Tasks keep their incoming order inside a
- * group. Empty status and priority groups are left out.
+ * group. Empty lane and priority groups are left out.
  */
 export function groupTasks(
   tasks: Task[],
   groupBy: ViewGroup,
-  context: { epics: ReadonlyMap<string, Epic>; name: (id: string) => string },
+  context: {
+    /** The board's lanes, in column order. */
+    lanes: Lane[];
+    epics: ReadonlyMap<string, Epic>;
+    name: (id: string) => string;
+  },
 ): TaskGroup[] | undefined {
   if (groupBy === "none") return undefined;
   const buckets = new Map<string, Task[]>();
   const keyOf = (t: Task) =>
-    groupBy === "status"
-      ? t.status
+    groupBy === "lane"
+      ? t.lane
       : groupBy === "priority"
         ? t.priority
         : groupBy === "assignee"
@@ -428,8 +458,8 @@ export function groupTasks(
     buckets.set(key, [...(buckets.get(key) ?? []), t]);
   }
   const order =
-    groupBy === "status"
-      ? columns.map((c) => c.id as string)
+    groupBy === "lane"
+      ? context.lanes.map((lane) => lane.id as string)
       : groupBy === "priority"
         ? ["high", "medium", "low"]
         : groupBy === "assignee"
@@ -444,9 +474,10 @@ export function groupTasks(
       key: key || "none",
       tasks: buckets.get(key)!,
       label:
-        groupBy === "status" ? (
+        groupBy === "lane" ? (
           <>
-            <StatusIcon status={key as Status} /> {statusTitle(key as Status)}
+            <RoleIcon role={buckets.get(key)![0].role} />{" "}
+            {context.lanes.find((lane) => lane.id === key)?.name}
           </>
         ) : groupBy === "priority" ? (
           `${priorities.find((p) => p.id === key)?.title} priority`

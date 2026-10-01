@@ -8,6 +8,8 @@ import { createStore } from "../server/store.mjs";
 const human = { id: "you", kind: "human" },
   a = { id: "agent-a", kind: "agent" },
   b = { id: "agent-b", kind: "agent" };
+/** The default board's lanes in a new workspace. */
+const LANE = { todo: "LANE-1", in_progress: "LANE-2", in_review: "LANE-3", done: "LANE-4" };
 function fixture(t) {
   let now = 1000000;
   const store = createStore(":memory:", { clock: () => now });
@@ -29,7 +31,7 @@ test("claim exclusion, agent ownership, heartbeat and review lifecycle", (t) => 
   const s = fixture(t);
   let task = s.make();
   task = s.execute("claim_task", { id: task.id, expectedVersion: 1 }, a);
-  assert.equal(task.status, "in_progress");
+  assert.equal(task.role, "in_progress");
   assert.throws(
     () =>
       s.execute(
@@ -64,7 +66,7 @@ test("claim exclusion, agent ownership, heartbeat and review lifecycle", (t) => 
         {
           id: task.id,
           expectedVersion: task.version,
-          patch: { status: "done" },
+          patch: { lane: LANE.done },
         },
         a,
       ),
@@ -80,14 +82,14 @@ test("claim exclusion, agent ownership, heartbeat and review lifecycle", (t) => 
     },
     a,
   );
-  assert.equal(task.status, "in_review");
+  assert.equal(task.role, "in_review");
   assert.equal(task.lease, null);
   task = s.execute(
     "update_task",
-    { id: task.id, expectedVersion: task.version, patch: { status: "done" } },
+    { id: task.id, expectedVersion: task.version, patch: { lane: LANE.done } },
     human,
   );
-  assert.equal(task.status, "done");
+  assert.equal(task.role, "done");
   assert.equal(task.events.length, 5);
 });
 test("anyone can comment on a task claimed by someone else", (t) => {
@@ -106,7 +108,7 @@ test("anyone can comment on a task claimed by someone else", (t) => {
   );
   assert.equal(task.lease.actor, a.id);
   assert.equal(task.assignee, a.id);
-  assert.equal(task.status, "in_progress");
+  assert.equal(task.role, "in_progress");
   assert.deepEqual(
     task.events.filter((e) => e.kind === "add_comment").map((e) => e.actor),
     [human.id, b.id],
@@ -214,7 +216,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
     { id: "TasknBoard Agent", kind: "human", token: "must-not-be-kept" },
   ]);
   const info = s.execute("workspace_info", {}, human);
-  assert.equal(info.schemaVersion, 15);
+  assert.equal(info.schemaVersion, 17);
   assert.equal(info.boards[0].id, "BOARD-1");
   assert.equal(Object.hasOwn(info, "settings"), false);
   assert.deepEqual(info.actor, {
@@ -245,7 +247,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
   );
   assert.equal(s.execute("list_tasks", {}, human).total, 0);
   const backup = s.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 15);
+  assert.equal(backup.schemaVersion, 17);
   assert.equal(backup.boards[0].id, "BOARD-1");
   assert.deepEqual(backup.actors, info.actors);
 });
@@ -496,7 +498,7 @@ test("stand-up notes preserve claims, validate input and enforce versions/agent 
     human,
   );
   assert.deepEqual(task.lease, ownedLease);
-  assert.equal(task.status, "in_progress");
+  assert.equal(task.role, "in_progress");
   assert.equal(task.assignee, a.id);
   assert.equal(task.standup.blocker, "Needs test credentials");
   assert.equal(task.events.at(-1).kind, "set_standup_notes");
@@ -879,7 +881,7 @@ test("epics group tasks, derive counts, and filter lists", (t) => {
   assert.equal(epic.title, "Onboarding");
   assert.equal(epic.version, 1);
   assert.deepEqual(epic.counts, {
-    backlog: 0,
+    todo: 0,
     in_progress: 0,
     in_review: 0,
     done: 0,
@@ -899,7 +901,7 @@ test("epics group tasks, derive counts, and filter lists", (t) => {
   );
   let [listed] = s.execute("list_epics", {}, a).epics;
   assert.equal(listed.counts.in_progress, 1);
-  assert.equal(listed.counts.backlog, 0);
+  assert.equal(listed.counts.todo, 0);
   const ids = (epicFilter) =>
     s
       .execute("list_tasks", { epic: epicFilter }, human)
@@ -915,7 +917,7 @@ test("epics group tasks, derive counts, and filter lists", (t) => {
   assert.equal(moved.version, outside.version + 1);
   assert.deepEqual(JSON.parse(moved.events.at(-1).body), { epic: epic.id });
   [listed] = s.execute("list_epics", {}, human).epics;
-  assert.equal(listed.counts.backlog, 1);
+  assert.equal(listed.counts.todo, 1);
   // Epic events are audited but never mixed into task activity.
   assert.ok(moved.events.every((event) => event.kind !== "create_epic"));
   const backup = s.execute("export_workspace", {}, human);
@@ -1036,7 +1038,7 @@ test("an epic archives only without open work and then rejects new tasks", (t) =
   for (const status of ["in_review", "done"])
     finished = s.execute(
       "update_task",
-      { id: finished.id, expectedVersion: finished.version, patch: { status } },
+      { id: finished.id, expectedVersion: finished.version, patch: { lane: LANE[status] } },
       human,
     );
   assert.throws(
@@ -1179,7 +1181,7 @@ test("views save filters, resolve @me per reader and filter task lists", (t) => 
   assert.equal(view.name, "My bugs");
   assert.equal(view.owner, "you");
   assert.equal(view.favorite, false);
-  assert.deepEqual(view.display, { layout: "list", groupBy: "status", orderBy: "priority" });
+  assert.deepEqual(view.display, { layout: "list", groupBy: "lane", orderBy: "priority" });
   assert.deepEqual(view.filters.conditions[1].values, ["Bug"]);
   const ids = (actor, args) =>
     s.execute("list_tasks", { view: view.id, ...args }, actor).tasks.map((x) => x.id);
@@ -1187,7 +1189,7 @@ test("views save filters, resolve @me per reader and filter task lists", (t) => 
   assert.deepEqual(ids(human), [mine.id]);
   assert.deepEqual(ids(other), [theirs.id]);
   // A view combines with the ordinary list filters.
-  assert.deepEqual(ids(human, { status: "done" }), []);
+  assert.deepEqual(ids(human, { role: "done" }), []);
   // "is not" and "none" values.
   const unlabeled = s.execute(
     "create_view",
@@ -1247,7 +1249,7 @@ test("personal views stay private; shared views are editable by people", (t) => 
   );
   assert.equal(renamed.version, 2);
   assert.equal(renamed.owner, "you");
-  assert.deepEqual(renamed.display, { layout: "list", groupBy: "status", orderBy: "created" });
+  assert.deepEqual(renamed.display, { layout: "list", groupBy: "lane", orderBy: "created" });
   assert.throws(
     () => s.execute("update_view", { id: shared.id, expectedVersion: 2, patch: { shared: false } }, other),
     { code: "FORBIDDEN" },
@@ -1302,10 +1304,10 @@ test("view filters and display settings are strictly validated", (t) => {
   const bad = [
     { name: "" },
     { name: "x".repeat(81) },
-    { name: "x", filters: { conditions: [{ field: "status", op: "is", values: ["nope"] }] } },
-    { name: "x", filters: { conditions: [{ field: "status", op: "is", values: [] }] } },
+    { name: "x", filters: { conditions: [{ field: "role", op: "is", values: ["nope"] }] } },
+    { name: "x", filters: { conditions: [{ field: "role", op: "is", values: [] }] } },
     { name: "x", filters: { conditions: [{ field: "title", op: "is", values: ["a"] }] } },
-    { name: "x", filters: { conditions: [{ field: "status", op: "has", values: ["done"] }] } },
+    { name: "x", filters: { conditions: [{ field: "role", op: "has", values: ["done"] }] } },
     { name: "x", filters: { conditions: [{ field: "epic", op: "is", values: ["Launch"] }] } },
     { name: "x", filters: { extra: true } },
     { name: "x", display: { layout: "table" } },
@@ -1360,7 +1362,7 @@ test("task links read from both sides and follow version and lease rules", (t) =
   );
   assert.equal(linked.version, 2);
   assert.deepEqual(linked.links, [
-    { type: "blocked_by", id: second.id, title: second.title, status: "backlog", archived: false },
+    { type: "blocked_by", id: second.id, title: second.title, lane: LANE.todo, role: "todo", archived: false },
   ]);
   // The other task shows the inverse link and records it, but keeps its version.
   const other = s.execute("get_task", { id: second.id }, human);
@@ -1383,9 +1385,9 @@ test("task links read from both sides and follow version and lease rules", (t) =
     () => s.execute("link_task", { id: first.id, expectedVersion: 2, type: "follows", target: second.id }, human),
     { code: "VALIDATION" },
   );
-  // Links inform; they do not block status changes.
-  const started = s.execute("update_task", { id: first.id, expectedVersion: 2, patch: { status: "in_progress" } }, human);
-  assert.equal(started.status, "in_progress");
+  // Links inform; they do not block lane changes.
+  const started = s.execute("update_task", { id: first.id, expectedVersion: 2, patch: { lane: LANE.in_progress } }, human);
+  assert.equal(started.role, "in_progress");
   // Agents link only tasks they have claimed.
   const third = s.make();
   assert.throws(

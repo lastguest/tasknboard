@@ -16,19 +16,21 @@ does not change. `favorite` is the reader's own star, not a shared property.
 matches task ID, title, and description, like the search box. `conditions` is
 up to 20 `{ field, op, values }` entries, and a task must satisfy all of them:
 
-- `field` is `status`, `priority`, `assignee`, `label`, or `epic`.
+- `field` is `role`, `lane`, `priority`, `assignee`, `label`, or `epic`.
 - `op` is `is` (the task has any of the values) or `is_not` (it has none).
-- `values` is 1–50 values, de-duplicated after normalising. Statuses and
-  priorities use their IDs. Labels are trimmed. Epics are epic IDs.
+- `values` is 1–50 values, de-duplicated after normalising. Lane roles,
+  lanes, and priorities use their IDs. A lane of any board is valid
+  (`NOT_FOUND` for an unknown lane). See the [lanes contract](lanes.md). Labels are trimmed. Epics are epic IDs.
   `""` means none: unassigned, no labels, or no epic.
 - The assignee value `@me` stands for the actor reading the view. One shared
   "My open reviews" view shows each person their own tasks.
 
 `display` is `{ layout, groupBy, orderBy }`: `layout` is `board` or `list`;
-`groupBy` is `status`, `assignee`, `priority`, `epic`, or `none`, and applies to
-the list layout (the board always has status columns); `orderBy` is `created`,
+`groupBy` is `lane`, `assignee`, `priority`, `epic`, or `none`, and applies to
+the list layout (the board always has the lanes of the selected board as
+columns); `orderBy` is `created`,
 `updated`, `priority`, or `title`. Omitted display fields take the defaults
-`board`, `status`, `created`.
+`board`, `lane`, `created`.
 
 `server/views.mjs` is the one implementation of matching and ordering. The
 store uses it for `list_tasks({ view })`, and the web interface uses it for
@@ -68,7 +70,7 @@ Migration 7 adds a `views` table and a `view_favorites(actor, view_id)` table.
 Existing tasks are not touched. View writes append events (`created`,
 `update_view`, `delete_view`) whose subject ID is the view ID. The deletion
 event's body is the view as it was. `workspace_info` and `export_workspace`
-report `schemaVersion: 14` since [task links](task-links.md). The export includes every view (personal ones too,
+report `schemaVersion: 17` since [lanes](lanes.md). The export includes every view (personal ones too,
 since exports are human-only backups) and `viewFavorites`.
 
 MCP exposes `list_views` to agents. WebMCP exposes `list_views` and
@@ -88,5 +90,4 @@ view drops its settings. Starred views are listed under Favorites in the
 sidebar with their live task counts.
 
 Not implemented: changing a view's owner, notifications when tasks enter a
-view, team-scoped views (a workspace has no teams), and board columns other
-than status.
+view, and team-scoped views (a workspace has no teams).

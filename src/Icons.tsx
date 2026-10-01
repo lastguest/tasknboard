@@ -80,6 +80,7 @@ const paths: Record<string, React.ReactNode> = {
       <path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01" />
     </>
   ),
+  trash: <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5" />,
   archive: (
     <>
       <rect x="3" y="4" width="18" height="5" rx="1" />
@@ -197,6 +198,7 @@ const paths: Record<string, React.ReactNode> = {
     </>
   ),
   chevronDown: <path d="m6 9 6 6 6-6" />,
+  chevronUp: <path d="m6 15 6-6 6 6" />,
   chevronRight: <path d="m9 6 6 6-6 6" />,
   github: (
     <path d="M9 19c-4.5 1.4-4.5-2.5-6-3m12 5v-3.5a3 3 0 0 0-.9-2.4c3-.3 6.1-1.5 6.1-6.6a5.2 5.2 0 0 0-1.4-3.6 4.8 4.8 0 0 0-.1-3.6s-1.1-.3-3.7 1.4a12.8 12.8 0 0 0-6.8 0C5.6 1 4.5 1.3 4.5 1.3a4.8 4.8 0 0 0-.1 3.6A5.2 5.2 0 0 0 3 8.5c0 5.1 3.1 6.3 6.1 6.6a3 3 0 0 0-.9 2.4V21" />

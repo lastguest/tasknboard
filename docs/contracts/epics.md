@@ -14,7 +14,7 @@ palette name (`aurora`, `lagoon`, `cobalt`, `iris`, `orchid`, `flamingo`,
 `coral`, `tangerine`, `saffron`, `lime`, `jade`, `glacier`) or a custom
 `#rrggbb` value, stored lowercase. The UI owns the palette's hex values. A new
 epic without a color takes the next palette color in creation order. `counts` maps
-each status to the number of non-archived tasks in the epic. Counts are
+each [lane role](lanes.md) to the number of non-archived tasks in the epic. Counts are
 derived from tasks when read; they are not stored.
 
 Tasks carry `epic: string`: an epic ID, or `""` for no epic. It appears in
@@ -29,7 +29,7 @@ create, update, list, detail, and export responses. New tasks default to `""`.
   uses the same version check as tasks. A stale version fails with
   `VERSION_CONFLICT`.
 - `archive_epic({ id, expectedVersion })` hides the epic. It fails with
-  `EPIC_NOT_EMPTY` while any non-archived task in it is not Done. Done and
+  `EPIC_NOT_EMPTY` while any non-archived task in it is not in a `done` lane. Done and
   archived tasks keep their `epic` value, so history still names the project.
 - `list_tasks({ epic })` accepts an epic ID, or `"none"` for tasks without one.
 - `create_task({ epic })` and `update_task({ patch: { epic } })` accept an epic

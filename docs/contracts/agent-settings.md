@@ -42,12 +42,12 @@ TasknBoard skill lives.
 | --- | --- | --- |
 | `task_assigned` | A person creates or assigns a task for the agent. | On |
 | `task_unassigned` | A person reassigns the agent's task. The run on that task stops and its queued work is dropped. It has no prompt. | On |
-| `changes_requested` | A person moves the agent's task from In review back to In progress or Backlog. | On |
+| `changes_requested` | A person moves the agent's task from an `in_review` lane back to an `in_progress` or `todo` lane. | On |
 | `mention` | A person writes `@identity` in a comment. The agent replies with a comment; comments need no claim, so replying leaves the assignee as it is. | Off |
-| `standup` | A person opens the stand-up and the agent has tasks in progress or in review. | Off |
+| `standup` | A person opens the stand-up and the agent has tasks in `in_progress` or `in_review` lanes. The prompt names each task's lane. | Off |
 
 Task events start only when the task is still assigned to the agent, is in
-Backlog or In progress, and has no active claim. Mentions and stand-ups start
+a `todo` or `in_progress` lane, and has no active claim. Mentions and stand-ups start
 unless another actor holds the claim. Agents never trigger events: only a
 person's writes do.
 

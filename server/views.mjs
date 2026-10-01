@@ -4,19 +4,19 @@
  */
 
 /** Task properties a view condition can test. */
-export const viewFields = ["status", "priority", "assignee", "label", "epic"];
+export const viewFields = ["role", "lane", "priority", "assignee", "label", "epic"];
 /** Condition operators: the task has any of the values, or none of them. */
 export const viewOps = ["is", "is_not"];
 /** An assignee value that stands for whoever is looking at the view. */
 export const ME = "@me";
 export const viewLayouts = ["board", "list"];
-export const viewGroups = ["status", "assignee", "priority", "epic", "none"];
+export const viewGroups = ["lane", "assignee", "priority", "epic", "none"];
 export const viewOrders = ["created", "updated", "priority", "title"];
 
 export const emptyFilters = () => ({ query: "", conditions: [] });
 export const defaultDisplay = () => ({
   layout: "board",
-  groupBy: "status",
+  groupBy: "lane",
   orderBy: "created",
 });
 

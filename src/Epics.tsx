@@ -116,7 +116,7 @@ export function EpicsPage({
                 <dl className="epic-counts">
                   {(
                     [
-                      ["Backlog", epic.counts.backlog],
+                      ["To do", epic.counts.todo],
                       ["In progress", epic.counts.in_progress],
                       ["In review", epic.counts.in_review],
                     ] as const
@@ -255,7 +255,7 @@ export function ColorField({
             archived: false,
             createdAt: "",
             updatedAt: "",
-            counts: { backlog: 0, in_progress: 0, in_review: 0, done: 0 },
+            counts: { todo: 0, in_progress: 0, in_review: 0, done: 0 },
           }}
         />}
         <span className="small">

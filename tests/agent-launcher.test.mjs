@@ -400,7 +400,7 @@ test("Needs changes starts the agent with the changes prompt", async (t) => {
   );
   const after = store.execute(
     "update_task",
-    { id: task.id, expectedVersion: task.version, patch: { status: "in_progress" } },
+    { id: task.id, expectedVersion: task.version, patch: { lane: "LANE-2" } },
     human,
   );
   launcher.changed(task, after);
@@ -456,7 +456,7 @@ test("the stand-up starts bound agents that have open tasks", async (t) => {
   assert.deepEqual(launcher.standup(["bot", "idle"]), ["bot"]);
   await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
-  assert.match(calls[0].args[1], /stand-up just started\. Your open tasks: TNB-1 \(in progress\)\./);
+  assert.match(calls[0].args[1], /stand-up just started\. Your open tasks: TNB-1 \(In progress\)\./);
   assert.deepEqual(launcher.status("bot").running, { event: "standup", taskId: "TNB-1" });
 });
 

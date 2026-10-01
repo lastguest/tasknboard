@@ -9,6 +9,8 @@ import {
   linkTypes,
   imageBytesLimit,
   pullRequestLimit,
+  laneRoles,
+  laneLimit,
 } from "./domain.mjs";
 import { taskMatchesView } from "./views.mjs";
 
@@ -79,6 +81,25 @@ export function createStore(path, { clock = Date.now } = {}) {
           return `](/files/${saved.get(key)}`;
         })
       : text;
+  /** Lanes of a new board, one per role, in column order. */
+  const defaultLanes = [
+    ["Backlog", "todo"],
+    ["In progress", "in_progress"],
+    ["In review", "in_review"],
+    ["Done", "done"],
+  ];
+  /** Adds the default lanes to a board. Returns the lane ID of each role. */
+  const insertDefaultLanes = (boardId) => {
+    const insert = db.prepare(
+      "INSERT INTO lanes(board_id, position, name, role) VALUES(?,?,?,?)",
+    );
+    return Object.fromEntries(
+      defaultLanes.map(([name, role], position) => [
+        role,
+        `LANE-${insert.run(boardId, position, name, role).lastInsertRowid}`,
+      ]),
+    );
+  };
   // Upgrade stored records once so every execution path uses the same contract.
   transaction(() => {
     if (!db.prepare("SELECT version FROM migrations WHERE version=3").get()) {
@@ -226,6 +247,56 @@ export function createStore(path, { clock = Date.now } = {}) {
       }
       db.prepare("INSERT INTO migrations VALUES(16)").run();
     }
+    if (!db.prepare("SELECT version FROM migrations WHERE version=17").get()) {
+      // Board lanes replace the four fixed task statuses. Each board gets one
+      // lane per former status. Tasks, their history and views name lanes.
+      db.exec(`CREATE TABLE lanes(number INTEGER PRIMARY KEY AUTOINCREMENT, board_id TEXT NOT NULL, position INTEGER NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('todo','in_progress','in_review','done')));
+ CREATE INDEX lanes_by_board ON lanes(board_id, position);`);
+      const roleOfStatus = {
+        backlog: "todo",
+        in_progress: "in_progress",
+        in_review: "in_review",
+        done: "done",
+      };
+      const lanes = new Map(
+        db
+          .prepare("SELECT json_extract(data, '$.id') AS id FROM boards ORDER BY number")
+          .all()
+          .map((row) => [row.id, insertDefaultLanes(row.id)]),
+      );
+      const laneOf = (boardId, status) => lanes.get(boardId)[roleOfStatus[status]];
+      const boardOfTask = new Map();
+      const updateTask = db.prepare("UPDATE tasks SET data=? WHERE number=?");
+      for (const row of db.prepare("SELECT number, data FROM tasks").all()) {
+        const { status, ...task } = JSON.parse(row.data);
+        task.lane = laneOf(task.boardId, status);
+        boardOfTask.set(task.id, task.boardId);
+        updateTask.run(JSON.stringify(task), row.number);
+      }
+      const updateEvent = db.prepare("UPDATE events SET body=? WHERE sequence=?");
+      for (const row of db
+        .prepare(
+          `SELECT sequence, task_id, body FROM events WHERE kind='update_task' AND instr(body, '"status"')`,
+        )
+        .all()) {
+        const { status, ...patch } = JSON.parse(row.body);
+        if (status === undefined) continue;
+        patch.lane = laneOf(boardOfTask.get(row.task_id), status);
+        updateEvent.run(JSON.stringify(patch), row.sequence);
+      }
+      const updateView = db.prepare("UPDATE views SET data=? WHERE number=?");
+      for (const row of db.prepare("SELECT number, data FROM views").all()) {
+        const view = JSON.parse(row.data);
+        view.filters.conditions = view.filters.conditions.map((c) =>
+          c.field === "status"
+            ? { ...c, field: "role", values: c.values.map((v) => roleOfStatus[v]) }
+            : c,
+        );
+        if (view.display.groupBy === "status") view.display.groupBy = "lane";
+        updateView.run(JSON.stringify(view), row.number);
+      }
+      db.prepare("INSERT INTO migrations VALUES(17)").run();
+    }
   });
   const readTransaction = (fn) => {
     db.exec("BEGIN");
@@ -253,6 +324,38 @@ export function createStore(path, { clock = Date.now } = {}) {
     if (board.id !== id) fail("NOT_FOUND", "Board not found", 404);
     return board;
   };
+  const laneNumber = (id) => Number(id.slice("LANE-".length));
+  const laneRecord = (row) => ({ id: `LANE-${row.number}`, name: row.name, role: row.role });
+  /** A board's lanes in column order. */
+  const lanesOf = (boardId) =>
+    db
+      .prepare("SELECT number, name, role FROM lanes WHERE board_id=? ORDER BY position")
+      .all(boardId)
+      .map(laneRecord);
+  const getLane = (id) => {
+    const row = db
+      .prepare("SELECT number, board_id, name, role FROM lanes WHERE number=?")
+      .get(laneNumber(id));
+    if (!row) fail("NOT_FOUND", "Lane not found", 404);
+    return { ...laneRecord(row), boardId: row.board_id };
+  };
+  /** The leftmost lane with a role. Every board has one. */
+  const firstLane = (boardId, role) =>
+    lanesOf(boardId).find((lane) => lane.role === role).id;
+  const saveLaneOrder = (ids) => {
+    const update = db.prepare("UPDATE lanes SET position=? WHERE number=?");
+    ids.forEach((id, position) => update.run(position, laneNumber(id)));
+  };
+  /** The role of every lane, by lane ID. */
+  const laneRoleMap = () =>
+    new Map(
+      db
+        .prepare("SELECT number, role FROM lanes")
+        .all()
+        .map((row) => [`LANE-${row.number}`, row.role]),
+    );
+  /** A task with `role`, derived from its lane on every read. */
+  const withRole = (t, roles = laneRoleMap()) => ({ ...t, role: roles.get(t.lane) });
   const saveBoard = (board) =>
     db
       .prepare("UPDATE boards SET data=? WHERE number=?")
@@ -269,8 +372,9 @@ export function createStore(path, { clock = Date.now } = {}) {
       .run(prefix, boardId);
   /**
    * Adds `formerPrefixes`, the retired prefixes whose task keys still resolve
-   * on each board, `inSidebar`, the caller's own sidebar preference, and
-   * `inProgress`, the number of active tasks In progress. Derived on every read.
+   * on each board, `inSidebar`, the caller's own sidebar preference, `lanes`,
+   * and `inProgress`, the number of active tasks in lanes with role
+   * in_progress. Derived on every read.
    */
   const boardsFor = (identity, boards) => {
     const reservations = db
@@ -285,8 +389,9 @@ export function createStore(path, { clock = Date.now } = {}) {
     const inProgress = new Map(
       db
         .prepare(
-          `SELECT json_extract(data, '$.boardId') AS board_id, COUNT(*) AS count FROM tasks
- WHERE json_extract(data, '$.status') = 'in_progress' AND NOT coalesce(json_extract(data, '$.archived'), 0)
+          `SELECT json_extract(t.data, '$.boardId') AS board_id, COUNT(*) AS count FROM tasks t
+ JOIN lanes l ON json_extract(t.data, '$.lane') = 'LANE-' || l.number
+ WHERE l.role = 'in_progress' AND NOT coalesce(json_extract(t.data, '$.archived'), 0)
  GROUP BY board_id`,
         )
         .all()
@@ -298,6 +403,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         .filter((r) => r.board_id === board.id && r.prefix !== board.prefix)
         .map((r) => r.prefix),
       inSidebar: !hidden.has(board.id),
+      lanes: lanesOf(board.id),
       inProgress: inProgress.get(board.id) ?? 0,
     }));
   };
@@ -399,8 +505,11 @@ export function createStore(path, { clock = Date.now } = {}) {
     );
     return views.map((v) => ({ ...v, favorite: favorites.has(v.id) }));
   };
-  /** Filters may name only existing epics; archived epics stay valid. */
-  const checkFilterEpics = (filters) =>
+  /**
+   * Filters may name only existing epics and lanes. Archived epics stay valid.
+   * Lanes of any board are valid, because views are workspace records.
+   */
+  const checkFilterRecords = (filters) =>
     filters && {
       ...filters,
       conditions: filters.conditions.map((condition) =>
@@ -413,7 +522,9 @@ export function createStore(path, { clock = Date.now } = {}) {
                 ),
               ],
             }
-          : condition,
+          : condition.field === "lane"
+            ? { ...condition, values: condition.values.map((value) => getLane(value).id) }
+            : condition,
       ),
     };
   /** Rewrite one board's task keys and event references in the current transaction. */
@@ -441,16 +552,14 @@ export function createStore(path, { clock = Date.now } = {}) {
     for (const board of allBoards()) renameBoardTaskKeys(board, board.prefix);
     db.prepare("INSERT INTO migrations VALUES(15)").run();
   });
-  /** Status counts of non-archived tasks, per epic. Derived on every read. */
+  /** Lane role counts of non-archived tasks, per epic. Derived on every read. */
   const withCounts = (epics, tasks = all()) => {
+    const roles = laneRoleMap();
     const counts = new Map(
-      epics.map((e) => [
-        e.id,
-        { backlog: 0, in_progress: 0, in_review: 0, done: 0 },
-      ]),
+      epics.map((e) => [e.id, Object.fromEntries(laneRoles.map((role) => [role, 0]))]),
     );
     for (const t of tasks)
-      if (!t.archived && counts.has(t.epic)) counts.get(t.epic)[t.status]++;
+      if (!t.archived && counts.has(t.epic)) counts.get(t.epic)[roles.get(t.lane)]++;
     return epics.map((e) => ({ ...e, counts: counts.get(e.id) }));
   };
   /** A task may join only an existing, active epic. Returns its current key. */
@@ -586,7 +695,8 @@ export function createStore(path, { clock = Date.now } = {}) {
           type: row.from_number === number ? row.kind : inverseLink[row.kind],
           id: other.id,
           title: other.title,
-          status: other.status,
+          lane: other.lane,
+          role: getLane(other.lane).role,
           archived: other.archived,
         };
       })
@@ -604,7 +714,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       .all(t.id);
     return {
       ...withCommentCount(
-        t,
+        withRole(t),
         events.filter((event) => event.kind === "add_comment").length,
       ),
       links: linksOf(t),
@@ -682,6 +792,7 @@ export function createStore(path, { clock = Date.now } = {}) {
           updatedAt: now,
         };
         saveBoard(board);
+        insertDefaultLanes(board.id);
         reserveBoardPrefix(board.prefix, board.id);
         event(board.id, identity, "created");
         return boardsFor(identity, [board])[0];
@@ -724,6 +835,91 @@ export function createStore(path, { clock = Date.now } = {}) {
           ).run(identity.id, board.id);
         return boardsFor(identity, [board])[0];
       });
+    if (["create_lane", "update_lane", "delete_lane"].includes(command))
+      return transaction(() => {
+        humanOnly(
+          identity,
+          { create_lane: "create", update_lane: "edit", delete_lane: "delete" }[command],
+          "lanes",
+        );
+        const lane = command === "create_lane" ? null : getLane(p.id);
+        const board = getBoard(lane?.boardId ?? p.boardId);
+        if (board.version !== p.expectedVersion)
+          fail(
+            "VERSION_CONFLICT",
+            `Board changed. Read it again. Current version: ${board.version}`,
+          );
+        const lanes = lanesOf(board.id);
+        const order = lanes.map((l) => l.id).filter((id) => id !== lane?.id);
+        const name = command === "create_lane" ? p.name : p.patch?.name;
+        if (
+          name !== undefined &&
+          lanes.some((l) => l.id !== lane?.id && l.name.toLowerCase() === name.toLowerCase())
+        )
+          fail("VALIDATION", `name: ${board.name} already has a lane named ${name}`, 400);
+        const now = new Date(clock()).toISOString();
+        let body;
+        if (command === "create_lane") {
+          if (lanes.length >= laneLimit)
+            fail("VALIDATION", `A board has at most ${laneLimit} lanes`, 400);
+          const id = `LANE-${
+            db
+              .prepare("INSERT INTO lanes(board_id, position, name, role) VALUES(?,?,?,?)")
+              .run(board.id, lanes.length, p.name, p.role).lastInsertRowid
+          }`;
+          order.splice(p.position ?? order.length, 0, id);
+          body = { id, name: p.name, role: p.role };
+        } else if (command === "update_lane") {
+          if (p.patch.name !== undefined)
+            db.prepare("UPDATE lanes SET name=? WHERE number=?").run(
+              p.patch.name,
+              laneNumber(lane.id),
+            );
+          order.splice(p.patch.position ?? lanes.findIndex((l) => l.id === lane.id), 0, lane.id);
+          body = { id: lane.id, ...p.patch };
+        } else {
+          if (!lanes.some((l) => l.id !== lane.id && l.role === lane.role))
+            fail(
+              "LANE_REQUIRED",
+              `${board.name} needs at least one ${lane.role} lane, so ${lane.name} cannot be deleted`,
+            );
+          const target = getLane(p.moveTo);
+          if (target.boardId !== board.id || target.role !== lane.role)
+            fail("VALIDATION", `moveTo: Choose another ${lane.role} lane of ${board.name}`, 400);
+          // Moved tasks keep their role, so claims and the review gate stay
+          // valid. Their versions advance so stale writes are caught.
+          const moved = JSON.stringify({ from: lane.id, to: target.id });
+          for (const t of all()) {
+            if (t.lane !== lane.id) continue;
+            t.lane = target.id;
+            t.version++;
+            t.updatedAt = now;
+            save(t);
+            event(t.id, identity, command, moved);
+          }
+          for (const v of allViews()) {
+            if (!v.filters.conditions.some((c) => c.field === "lane" && c.values.includes(lane.id)))
+              continue;
+            v.filters.conditions = v.filters.conditions.map((c) =>
+              c.field === "lane"
+                ? { ...c, values: [...new Set(c.values.map((x) => (x === lane.id ? target.id : x)))] }
+                : c,
+            );
+            v.version++;
+            v.updatedAt = now;
+            saveView(v);
+            event(v.id, identity, command, moved);
+          }
+          db.prepare("DELETE FROM lanes WHERE number=?").run(laneNumber(lane.id));
+          body = { id: lane.id, moveTo: target.id };
+        }
+        saveLaneOrder(order);
+        board.version++;
+        board.updatedAt = now;
+        saveBoard(board);
+        event(board.id, identity, command, JSON.stringify(body));
+        return boardsFor(identity, [board])[0];
+      });
     if (command === "workspace_info")
       return {
         name: "Studio",
@@ -731,7 +927,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         actors: actorRoster(),
         leaseSeconds: 900,
         boards: boardsFor(identity, allBoards()),
-        schemaVersion: 15,
+        schemaVersion: 17,
       };
     if (command === "update_profile")
       return transaction(() => {
@@ -783,14 +979,16 @@ export function createStore(path, { clock = Date.now } = {}) {
         const epic =
           p.epic && p.epic !== "none" ? (findEpic(p.epic)?.id ?? p.epic) : p.epic;
         const q = p.query?.toLowerCase();
-        const rows = all().filter(
+        const roles = laneRoleMap();
+        const rows = all().map((t) => withRole(t, roles)).filter(
           (t) =>
             !t.archived &&
             (!q ||
               `${t.id} ${t.title} ${t.description}`
                 .toLowerCase()
                 .includes(q)) &&
-            (!p.status || t.status === p.status) &&
+            (!p.role || t.role === p.role) &&
+            (!p.lane || t.lane === p.lane) &&
             (!p.assignee || t.assignee === p.assignee) &&
             (!p.boardId || t.boardId === p.boardId) &&
             (!epic || (t.epic || "none") === epic) &&
@@ -827,7 +1025,7 @@ export function createStore(path, { clock = Date.now } = {}) {
     if (command === "create_view")
       return transaction(() => {
         humanOnly(identity, "create", "views");
-        const filters = checkFilterEpics(p.filters);
+        const filters = checkFilterRecords(p.filters);
         const result = db.prepare("INSERT INTO views(data) VALUES('{}')").run();
         const now = new Date(clock()).toISOString();
         const view = {
@@ -873,7 +1071,7 @@ export function createStore(path, { clock = Date.now } = {}) {
           view.owner !== identity.id
         )
           fail("FORBIDDEN", "Only the view's owner can change who sees it", 403);
-        if (p.patch.filters) p.patch.filters = checkFilterEpics(p.patch.filters);
+        if (p.patch.filters) p.patch.filters = checkFilterRecords(p.patch.filters);
         Object.assign(view, p.patch);
         view.version++;
         view.updatedAt = new Date(clock()).toISOString();
@@ -986,8 +1184,9 @@ export function createStore(path, { clock = Date.now } = {}) {
           );
         if (command === "update_epic") Object.assign(epic, p.patch);
         else {
+          const roles = laneRoleMap();
           const open = all().filter(
-            (t) => !t.archived && t.epic === epic.id && t.status !== "done",
+            (t) => !t.archived && t.epic === epic.id && roles.get(t.lane) !== "done",
           ).length;
           if (open)
             fail(
@@ -1011,9 +1210,9 @@ export function createStore(path, { clock = Date.now } = {}) {
       if (identity.kind !== "human")
         fail("FORBIDDEN", "Human access required", 403);
       return transaction(() => ({
-        schemaVersion: 15,
+        schemaVersion: 17,
         exportedAt: new Date(clock()).toISOString(),
-        boards: allBoards(),
+        boards: allBoards().map((board) => ({ ...board, lanes: lanesOf(board.id) })),
         actors: actorRoster(),
         epics: allEpics(),
         views: allViews(),
@@ -1057,13 +1256,16 @@ export function createStore(path, { clock = Date.now } = {}) {
         const board = getBoard(p.boardId);
         const nextNumber = nextTaskNumber(board.id);
         const epic = assignableEpic(p.epic);
+        const lane = p.lane ? getLane(p.lane) : null;
+        if (lane && (lane.boardId !== board.id || lane.role !== "todo"))
+          fail("VALIDATION", `lane: Choose a todo lane of ${board.name}`, 400);
         const result = db.prepare("INSERT INTO tasks(data) VALUES('{}')").run();
         const now = new Date(clock()).toISOString();
         const t = {
           ...p,
           epic,
           id: taskKey(board, nextNumber),
-          status: "backlog",
+          lane: lane?.id ?? firstLane(board.id, "todo"),
           version: 1,
           createdAt: now,
           updatedAt: now,
@@ -1092,14 +1294,15 @@ export function createStore(path, { clock = Date.now } = {}) {
       } else if (command === "claim_task") {
         if (active(t))
           fail("LEASE_CONFLICT", `Task is claimed by ${t.lease.actor}`);
-        if (!["backlog", "in_progress"].includes(t.status))
+        const role = getLane(t.lane).role;
+        if (!["todo", "in_progress"].includes(role))
           fail(
             "INVALID_TRANSITION",
-            "Only backlog or in-progress tasks can be claimed",
+            "Only tasks in a todo or in_progress lane can be claimed",
           );
         t.lease = { actor: identity.id, expiresAt: clock() + 900000 };
         t.assignee = identity.id;
-        t.status = "in_progress";
+        if (role === "todo") t.lane = firstLane(t.boardId, "in_progress");
       } else if (command === "add_comment") {
         // Anyone may reply, claimed or not; the comment changes no task field.
       } else {
@@ -1117,18 +1320,23 @@ export function createStore(path, { clock = Date.now } = {}) {
           else t.lease = null;
         }
         if (command === "update_task") {
+          const target = p.patch.lane !== undefined ? getLane(p.patch.lane) : null;
+          if (target && target.boardId !== t.boardId)
+            fail("VALIDATION", "lane: Choose a lane of this task's board", 400);
           if (
             identity.kind === "agent" &&
             (p.patch.assignee !== undefined ||
-              (p.patch.status !== undefined &&
-                p.patch.status !== "in_progress"))
+              (target && target.role !== "in_progress"))
           )
             fail(
               "FORBIDDEN",
               "Agents use submit_review; reassignment and completion require a human",
               403,
             );
-          if (p.patch.status === "done" && t.status !== "in_review")
+          if (
+            target?.role === "done" &&
+            !["in_review", "done"].includes(getLane(t.lane).role)
+          )
             fail(
               "INVALID_TRANSITION",
               "Tasks must be reviewed before completion",
@@ -1139,18 +1347,18 @@ export function createStore(path, { clock = Date.now } = {}) {
             p.patch.epic = epic;
           }
           Object.assign(t, p.patch);
-          if (["in_review", "done"].includes(t.status)) t.lease = null;
+          if (["in_review", "done"].includes(getLane(t.lane).role)) t.lease = null;
         }
         if (command === "set_standup_notes") {
           t.standup = { highlight: p.highlight, blocker: p.blocker };
         }
         if (command === "submit_review") {
-          if (t.status !== "in_progress")
+          if (getLane(t.lane).role !== "in_progress")
             fail(
               "INVALID_TRANSITION",
-              "Only in-progress tasks can be submitted",
+              "Only tasks in an in_progress lane can be submitted",
             );
-          t.status = "in_review";
+          t.lane = firstLane(t.boardId, "in_review");
           t.lease = null;
           t.review = {
             summary: p.summary,

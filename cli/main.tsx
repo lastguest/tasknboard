@@ -16,7 +16,7 @@ Example:
   tasknboard list_boards
   tasknboard create_board '{"name":"Engineering","prefix":"ENG"}'
   tasknboard create_task '{"boardId":"BOARD-1","title":"Ship it"}'
-  tasknboard list_tasks '{"boardId":"BOARD-1","status":"in_review"}'
+  tasknboard list_tasks '{"boardId":"BOARD-1","role":"in_review"}'
 
 The local SQLite file is TASKNBOARD_DB (default data/tasknboard.sqlite).
 Set TASKNBOARD_SERVER_URL and TASKNBOARD_TOKEN to use a shared server.`;

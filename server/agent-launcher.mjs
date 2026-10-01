@@ -200,7 +200,7 @@ export function createAgentLauncher({
       const claimed = task.lease && task.lease.expiresAt > clock();
       if (
         task.assignee !== identity ||
-        !["backlog", "in_progress"].includes(task.status) ||
+        !["todo", "in_progress"].includes(task.role) ||
         claimed
       )
         return null;
@@ -417,8 +417,8 @@ export function createAgentLauncher({
       if (before.assignee) unassigned(before.assignee, after);
       assigned(after);
     } else if (
-      before.status === "in_review" &&
-      ["in_progress", "backlog"].includes(after.status) &&
+      before.role === "in_review" &&
+      ["in_progress", "todo"].includes(after.role) &&
       after.assignee
     )
       trigger(after.assignee, "changes_requested", after.id);
@@ -441,10 +441,15 @@ export function createAgentLauncher({
       if (!config?.enabled || !config.events.standup.enabled) continue;
       const open = store
         .execute("list_tasks", { assignee: identity }, asAgent(identity))
-        .tasks.filter((t) => ["in_progress", "in_review"].includes(t.status));
+        .tasks.filter((t) => ["in_progress", "in_review"].includes(t.role));
       if (!open.length) continue;
+      const laneNames = new Map(
+        store
+          .execute("list_boards", {}, asAgent(identity))
+          .boards.flatMap((board) => board.lanes.map((lane) => [lane.id, lane.name])),
+      );
       trigger(identity, "standup", open[0].id, {
-        tasks: open.map((t) => `${t.id} (${t.status.replace("_", " ")})`).join(", "),
+        tasks: open.map((t) => `${t.id} (${laneNames.get(t.lane)})`).join(", "),
       });
       started.push(identity);
     }

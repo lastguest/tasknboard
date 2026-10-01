@@ -10,15 +10,15 @@ const client = connect({
 });
 const descriptions = {
   list_boards:
-    "List boards and their task prefixes. Use a board ID when creating a task or filtering tasks.",
+    "List boards with their task prefixes and lanes. Each lane has a role: todo, in_progress, in_review or done. Use a board ID when creating a task or filtering tasks.",
   workspace_info:
     "Read workspace identity, authenticated actor and lease duration.",
   list_tasks:
-    "Find non-archived tasks. Paginated; use offset and limit. Filter by epic ID, or \"none\", or by a saved view ID from list_views. Read task before claiming.",
+    "Find non-archived tasks. Paginated; use offset and limit. Filter by lane role (role: \"todo\" finds unstarted work), lane ID, epic ID or \"none\", or by a saved view ID from list_views. Each task carries its lane and the lane's role. Read task before claiming.",
   list_views:
     "List saved views: named task filters and display settings that people share with the workspace. Pass a view's ID to list_tasks to get its tasks.",
   list_epics:
-    "List epics (projects that group tasks) with per-status task counts. Humans manage epics; agents read them.",
+    "List epics (projects that group tasks) with task counts per lane role. Humans manage epics; agents read them.",
   list_labels:
     "List the labels used by non-archived tasks, with how many tasks carry each.",
   rename_label:
@@ -26,20 +26,20 @@ const descriptions = {
   get_task:
     "Read full task context, acceptance criteria, version, claim, links to other tasks, linked pull requests and activity.",
   create_task:
-    "Create a backlog task on the explicit boardId from list_boards, with instructions and acceptance criteria, optionally inside an existing epic.",
+    "Create a task on the explicit boardId from list_boards, with instructions and acceptance criteria, optionally inside an existing epic. It starts in the board's first todo lane, or in the todo lane you pass.",
   update_task:
-    "Update your claimed task using expectedVersion. Agents cannot reassign or close tasks.",
+    "Update your claimed task using expectedVersion. You may move it only to another in_progress lane of its board. Agents cannot reassign tasks, move them to review except with submit_review, or complete them.",
   claim_task:
-    "Atomically acquire a task for 15 minutes and start work. Fails if already claimed or version changed.",
+    "Atomically acquire a task in a todo or in_progress lane for 15 minutes and start work. A todo task moves to the board's first in_progress lane. Fails if already claimed or version changed.",
   heartbeat:
     "Extend your owned lease by 15 minutes. Returns a NEW task version; use it in subsequent writes.",
-  release_task: "Release your active claim without changing the task status.",
+  release_task: "Release your active claim without changing the task's lane.",
   add_comment:
     "Append progress, a question, or a reply to any task, claimed or not. Requires current expectedVersion.",
   set_standup_notes:
     "Set highlight and blocker notes for stand-up (500 chars each). Empty strings clear notes. Agents require their own active claim; humans may annotate without changing a claim. Returns a new task version.",
   link_task:
-    "Link your claimed task to another task: relates, blocks, blocked_by, duplicates, or duplicated_by. Two tasks have at most one link. Links inform; they do not block status changes. Returns a new task version.",
+    "Link your claimed task to another task: relates, blocks, blocked_by, duplicates, or duplicated_by. Two tasks have at most one link. Links inform; they do not block lane changes. Returns a new task version.",
   unlink_task:
     "Remove the link between your claimed task and target, in either direction. Returns a new task version.",
   link_pull_requests:
@@ -51,7 +51,7 @@ const descriptions = {
   upload_image:
     "Store a PNG, JPEG, WebP, or GIF (data URL, up to 5 MB) and get a /files/ URL to embed in a Markdown description as ![alt](url). Inline ![alt](data:image/...) in any text is stored the same way automatically.",
   submit_review:
-    "Hand completed work to a human with summary and optional HTTP(S) artifact URL; releases your claim.",
+    "Hand completed work to a human with summary and optional HTTP(S) artifact URL. Moves the task to the board's first in_review lane and releases your claim. Only a human can then complete it.",
 };
 const server = new McpServer(
   { name: "tasknboard", version: "0.1.0" },

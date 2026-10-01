@@ -17,7 +17,9 @@ type Board = {
   formerPrefixes: string[];
   /** Whether the caller lists this board in the sidebar. */
   inSidebar: boolean;
-  /** Tasks In progress on this board, without archived tasks. */
+  /** The board's lanes in column order. See the lanes contract. */
+  lanes: Lane[];
+  /** Tasks in lanes with role in_progress, without archived tasks. */
   inProgress: number;
   version: number;
   createdAt: string;
@@ -28,9 +30,10 @@ type Board = {
 The server exposes these commands:
 
 - `list_boards({})` returns `{ boards }`.
-- `create_board({ name, prefix, description? })` creates a board. The description defaults to `""`.
+- `create_board({ name, prefix, description? })` creates a board with the four default [lanes](lanes.md). The description defaults to `""`.
 - `update_board({ id, expectedVersion, patch })` changes its name, prefix, or description.
 - `set_board_sidebar({ id, inSidebar })` shows or hides a board in the caller's sidebar.
+- `create_lane`, `update_lane`, and `delete_lane` change the board's lanes. The [lanes contract](lanes.md) describes them.
 
 Board writes require a human actor. Create and update actions append events under the board ID. Updates require the current version. A stale version returns `VERSION_CONFLICT`.
 
@@ -52,6 +55,6 @@ A former task key keeps resolving after the rename. Every command that takes a t
 
 ## Workspace and export
 
-`workspace_info` returns the board list and schema version `12`. It does not return workspace task or epic prefix settings. `export_workspace` includes all boards, task `boardId` values, board prefix reservations, and `boardSidebarHidden` as `{ actor, boardId }` rows.
+`workspace_info` returns the board list and schema version `17`. It does not return workspace task or epic prefix settings. `export_workspace` includes all boards with their lanes, task `boardId` values, board prefix reservations, and `boardSidebarHidden` as `{ actor, boardId }` rows.
 
 The schema upgrade creates `BOARD-1` with the task prefix that was active before the upgrade. It adds `boardId: "BOARD-1"` to stored tasks without changing their task keys, epic IDs, or task-to-epic references. The old workspace prefix settings are then removed from runtime storage. Schema version `12` adds the per-person sidebar choices; every board starts in every sidebar.

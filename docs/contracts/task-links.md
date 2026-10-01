@@ -1,7 +1,7 @@
 # Task links contract
 
 A link records how two tasks relate. Links inform people and agents.
-The server does not use them to accept or reject a status change.
+The server does not use them to accept or reject a lane change.
 
 ## Types
 
@@ -36,7 +36,7 @@ a draft on the other task.
 ## Reads
 
 `get_task` and every task write return `links`:
-`{ type, id, title, status, archived }[]`, ordered by type and then key.
+`{ type, id, title, lane, role, archived }[]`, ordered by type and then key.
 `id` is the other task's current key. `list_tasks` does not return links.
 Links to archived tasks stay and carry `archived: true`.
 

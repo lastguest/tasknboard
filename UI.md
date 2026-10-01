@@ -36,14 +36,16 @@ Do not offer a workspace switcher or membership management: these capabilities d
 
 ## 2. Board and list
 
-Support the four existing statuses:
+Each board has its own lanes. A person adds, renames, orders, and deletes them
+in the board settings. Each lane has one of four roles:
 
-1. Backlog.
-2. In progress.
-3. In review.
-4. Done.
+1. To do (`todo`).
+2. In progress (`in_progress`).
+3. In review (`in_review`).
+4. Done (`done`).
 
-Show tasks grouped by status in Board view.
+Show one Board view column per lane, in board order. Lanes of one role share
+its colour and icon.
 Show the corresponding tasks as rows in List view.
 Both views must use the same filters and open the same task details.
 Column counts must reflect the tasks currently displayed.
@@ -54,8 +56,8 @@ Distinguish human and agent assignments without implying that an agent is connec
 Expose claim information where relevant.
 Show comment counts only when accurate counts are available from the current data contract.
 
-Allow users to move tasks through drag and drop or the task's status field.
-The status field must provide a keyboard and touch alternative to dragging.
+Allow users to move tasks through drag and drop or the task's lane field.
+The lane field must provide a keyboard and touch alternative to dragging.
 Use server validation for each move. Show rejected moves without presenting them as successful.
 
 ## 3. Search and filters
@@ -71,8 +73,8 @@ Do not silently omit tasks because the API returns paginated results.
 ## 4. Task creation
 
 Allow task creation from the workspace and existing column creation controls.
-Create tasks in Backlog, as required by the current command contract.
-Do not imply that a column control creates directly in another status.
+Create tasks in the first `todo` lane, or in the `todo` lane of the column
+control. Only `todo` columns have a creation control.
 
 The form includes:
 
@@ -95,10 +97,10 @@ Open the current task from either Board or List.
 Open each task in its own tab in a horizontal strip above the page. Keep each tab's draft while the user switches tabs.
 Load the full task before editing, including its latest version, activity, claim, and review information.
 
-Allow editing of title, context, acceptance criteria, priority, assignee, labels, and permitted status changes.
-Keep Status, Priority, Assignee, and Labels controls only in the right sidebar.
+Allow editing of title, context, acceptance criteria, priority, assignee, labels, and permitted lane changes.
+Keep Lane, Priority, Assignee, and Labels controls only in the right sidebar.
 Open a searchable picker when a metadata control is clicked. Focus its search field immediately.
-Status, Priority, and Assignee each select one value. Labels select multiple tags.
+Lane, Priority, and Assignee each select one value. Labels select multiple tags.
 Keep selections in the draft until Save.
 Provide Save and Cancel actions.
 Do not overwrite an unsaved draft when the background task collection refreshes.
@@ -149,7 +151,7 @@ Stand-up supports screen sharing of the team board and each participant's work.
 It must preserve these existing behaviors:
 
 - Open with Team overview, regardless of ordinary board filters.
-- Include all four task statuses.
+- Include every lane of the board.
 - Build participant order from current assignees, alphabetically, with Unassigned last.
 - Include agent assignees.
 - Keep participant order fixed until the user exits and starts another session.
@@ -158,7 +160,7 @@ It must preserve these existing behaviors:
 - Use Home to return to Team overview.
 - Support All tasks, Highlights, and Blockers filters.
 - Reset the talking-point filter when the participant changes.
-- Order blocked tasks before highlighted tasks within each status.
+- Order blocked tasks before highlighted tasks within each lane.
 - Disable task creation and drag and drop during presentation.
 - Support fullscreen where the browser provides it.
 - Indicate loss of connection rather than presenting stale content as current.
@@ -317,7 +319,7 @@ Demonstrate these outcomes:
 
 - A task can be created, found, edited, commented on, reviewed, and archived through permitted transitions.
 - Board, List, and My tasks apply filters consistently and show accurate counts.
-- Status changes work without dragging.
+- Lane changes work without dragging.
 - A failed save retains input, and a stale write cannot overwrite newer work.
 - Claim restrictions and server errors remain visible and actionable.
 - Stand-up starts with the whole team, navigates participants, saves notes, and restores the workspace after exit.

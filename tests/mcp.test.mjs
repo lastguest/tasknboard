@@ -37,7 +37,7 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
     return JSON.parse(r.content[0].text);
   };
   const info = await call("workspace_info", {});
-  assert.equal(info.schemaVersion, 15);
+  assert.equal(info.schemaVersion, 17);
   assert.ok(
     info.actors.some((entry) => entry.id === "test-agent" && entry.kind === "agent"),
   );
@@ -97,14 +97,14 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
     expectedVersion: task.version,
     summary: "Verified through SDK client",
   });
-  assert.equal(task.status, "in_review");
+  assert.equal(task.role, "in_review");
   assert.equal(task.lease, null);
   const denied = await client.callTool({
     name: "update_task",
     arguments: {
       id: task.id,
       expectedVersion: task.version,
-      patch: { status: "done" },
+      patch: { lane: "LANE-4" },
     },
   });
   assert.equal(denied.isError, true);
