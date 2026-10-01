@@ -181,6 +181,7 @@ export const schemas = {
     })
     .strict(),
   get_task: z.object({ id }).strict(),
+  get_tasks: z.object({ ids: z.array(id).min(1).max(100) }).strict(),
   create_task: z
     .object({
       boardId,

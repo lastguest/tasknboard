@@ -107,6 +107,13 @@ The [task links contract](contracts/task-links.md) relates two tasks:
 relates, blocks, or duplicates. A link is a versioned write on one task.
 Links inform; the server does not block status changes because of them.
 
+## Task references
+
+The [task references contract](contracts/task-references.md) turns a task key
+in rendered Markdown into a chip with the current status of the task. A pure
+function recognizes keys with known board prefixes. The `get_tasks` command
+reads the cited tasks in one batch. The application refresh reads them again.
+
 ## Views
 
 The [views contract](contracts/views.md) saves task filters and display

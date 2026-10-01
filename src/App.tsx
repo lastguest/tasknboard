@@ -60,6 +60,11 @@ import type { ModelContext } from "./webmcp";
 import { formatUtcTimestamp } from "./formatting";
 import { Avatar, displayName, PeopleContext, usePeople } from "./People";
 import {
+  refreshTaskReferences,
+  TaskReferenceContext,
+} from "./TaskReferences";
+import { referencePrefixes } from "./task-references";
+import {
   activeLease,
   columns,
   doneLocked,
@@ -270,6 +275,7 @@ export default function App() {
         return { ok: true };
       setTasks(next);
       setEpics(epicList.epics);
+      refreshTaskReferences();
       setSync({
         loaded: true,
         connected: true,
@@ -908,6 +914,21 @@ export default function App() {
     return openTaskById(task.id);
   }
 
+  // Chips read the latest opener; the context changes only with the boards.
+  const openReference = useRef(openTaskById);
+  openReference.current = openTaskById;
+  const taskReferences = useMemo(
+    () => ({
+      prefixes: referencePrefixes(boards),
+      open: (id: string) => {
+        // A chip in the stand-up opens the task in the ordinary application.
+        setStandup(false);
+        void openReference.current(id);
+      },
+    }),
+    [boards],
+  );
+
   function closeTab(id: string) {
     const list = tabsRef.current;
     const index = list.findIndex((tab) => tab.task.id === id);
@@ -1417,6 +1438,7 @@ export default function App() {
 
   return (
     <PeopleContext.Provider value={people}>
+      <TaskReferenceContext.Provider value={taskReferences}>
       <div className="app-shell" hidden={standup} inert={standup}>
         <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
           <div className="brand-row">
@@ -2318,6 +2340,7 @@ export default function App() {
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
       {logTask && <AgentLogs taskId={logTask} onClose={() => setLogTask("")} />}
       {!standup && <Toasts toasts={toasts} onDismiss={dismissToast} />}
+      </TaskReferenceContext.Provider>
     </PeopleContext.Provider>
   );
 }
