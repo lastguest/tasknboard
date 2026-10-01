@@ -74,3 +74,14 @@ serves them with `Content-Security-Policy: sandbox` and `nosniff`. The route
 needs no token, so `<img>` tags work: the 128-bit random ID is the capability.
 Anyone holding the URL can view the image. `export_workspace` includes every
 image as base64. Images are not deleted when a description stops using them.
+
+Image data embedded in Markdown, as in `![alt](data:image/png;base64,…)`, is
+saved the same way. Any command text (descriptions, acceptance, comments,
+review summaries, epic descriptions) has such targets stored in `images` and
+rewritten to `/files/<id>` before validation, so task data and activity history
+never hold the bytes. Identical data in one command is stored once. Data that
+fails the signature check rejects the command with `VALIDATION`; a command that
+fails removes the images it stored. Profile avatars stay data URLs. Migration
+16 moves embedded image data already saved in tasks, epics and activity into
+`images`; invalid data is left as written. In the editor, pasted HTML with
+embedded images keeps its plain text and uploads each image.

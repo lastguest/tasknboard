@@ -2,7 +2,13 @@ import { DatabaseSync } from "node:sqlite";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { schemas, fail, epicColors, linkTypes } from "./domain.mjs";
+import {
+  schemas,
+  fail,
+  epicColors,
+  linkTypes,
+  imageBytesLimit,
+} from "./domain.mjs";
 import { taskMatchesView } from "./views.mjs";
 
 // Decoded bytes must match the declared type; the data URL prefix alone is not trusted.
@@ -14,6 +20,10 @@ const imageSignatures = {
     b.subarray(0, 4).toString("latin1") === "RIFF" &&
     b.subarray(8, 12).toString("latin1") === "WEBP",
 };
+// A Markdown link or image target holding inline image data, as in
+// ![shot](data:image/png;base64,...). Pasted text and agents can carry these.
+const embeddedImage =
+  /\]\(\s*<?data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})>?/g;
 
 export function createStore(path, { clock = Date.now } = {}) {
   if (path !== ":memory:")
@@ -41,6 +51,33 @@ export function createStore(path, { clock = Date.now } = {}) {
       throw e;
     }
   };
+  const saveImage = (mime, bytes, actor) => {
+    const id = randomBytes(16).toString("hex");
+    db.prepare(
+      "INSERT INTO images(id,mime,data,actor,created_at) VALUES(?,?,?,?,?)",
+    ).run(id, mime, bytes, actor, new Date(clock()).toISOString());
+    return id;
+  };
+  /**
+   * Moves inline image data out of Markdown into the images table, leaving a
+   * /files/ link. `saved` maps data already stored by this call to its ID, so a
+   * repeated image is stored once. Data that is not a valid image calls `invalid`.
+   */
+  const storeEmbeddedImages = (text, actor, saved, invalid) =>
+    text.includes("data:image/")
+      ? text.replace(embeddedImage, (match, mime, base64) => {
+          const bytes = Buffer.from(base64, "base64");
+          if (
+            !bytes.length ||
+            bytes.length > imageBytesLimit ||
+            !imageSignatures[mime](bytes)
+          )
+            return invalid(match);
+          const key = `${mime};${base64}`;
+          if (!saved.has(key)) saved.set(key, saveImage(mime, bytes, actor));
+          return `](/files/${saved.get(key)}`;
+        })
+      : text;
   // Upgrade stored records once so every execution path uses the same contract.
   transaction(() => {
     if (!db.prepare("SELECT version FROM migrations WHERE version=3").get()) {
@@ -160,6 +197,33 @@ export function createStore(path, { clock = Date.now } = {}) {
       db.exec(`CREATE TABLE task_links(from_number INTEGER NOT NULL REFERENCES tasks(number), to_number INTEGER NOT NULL REFERENCES tasks(number), kind TEXT NOT NULL CHECK(kind IN ('relates','blocks','duplicates')), PRIMARY KEY(from_number, to_number));
  CREATE INDEX task_links_to ON task_links(to_number);
  INSERT INTO migrations VALUES(14);`);
+    }
+    if (!db.prepare("SELECT version FROM migrations WHERE version=16").get()) {
+      // Images embedded as data in Markdown move to the images table. Invalid
+      // data stays as written; the renderer never displays it.
+      const saved = new Map();
+      const keep = (match) => match;
+      const events = db
+        .prepare(
+          "SELECT sequence, actor, body FROM events WHERE instr(body, 'data:image/') ORDER BY sequence",
+        )
+        .all();
+      const updateEvent = db.prepare("UPDATE events SET body=? WHERE sequence=?");
+      for (const row of events) {
+        const body = storeEmbeddedImages(row.body, row.actor, saved, keep);
+        if (body !== row.body) updateEvent.run(body, row.sequence);
+      }
+      for (const table of ["tasks", "epics"]) {
+        const rows = db
+          .prepare(`SELECT number, data FROM ${table} WHERE instr(data, 'data:image/')`)
+          .all();
+        const update = db.prepare(`UPDATE ${table} SET data=? WHERE number=?`);
+        for (const row of rows) {
+          const data = storeEmbeddedImages(row.data, "tasknboard", saved, keep);
+          if (data !== row.data) update.run(data, row.number);
+        }
+      }
+      db.prepare("INSERT INTO migrations VALUES(16)").run();
     }
   });
   const readTransaction = (fn) => {
@@ -547,7 +611,43 @@ export function createStore(path, { clock = Date.now } = {}) {
     };
   };
   const active = (t) => t.lease && t.lease.expiresAt > clock();
+  /**
+   * Stores image data embedded in any Markdown text of a command, so tasks,
+   * comments and their history keep only /files/ links. If the command then
+   * fails, the images it stored are removed again.
+   */
   function execute(command, input, actor) {
+    if (
+      ["upload_image", "update_profile"].includes(command) ||
+      !JSON.stringify(input ?? null).includes("data:image/")
+    )
+      return run(command, input, actor);
+    const saved = new Map();
+    const identity = validActor(actor);
+    const rewrite = (value) =>
+      typeof value === "string"
+        ? storeEmbeddedImages(value, identity.id, saved, () =>
+            fail("VALIDATION", "data: image content does not match its type", 400),
+          )
+        : Array.isArray(value)
+          ? value.map(rewrite)
+          : value && typeof value === "object"
+            ? Object.fromEntries(
+                Object.entries(value).map(([k, v]) => [k, rewrite(v)]),
+              )
+            : value;
+    try {
+      return run(command, transaction(() => rewrite(input)), actor);
+    } catch (e) {
+      if (saved.size)
+        transaction(() => {
+          const remove = db.prepare("DELETE FROM images WHERE id=?");
+          for (const id of saved.values()) remove.run(id);
+        });
+      throw e;
+    }
+  }
+  function run(command, input, actor) {
     const identity = validActor(actor);
     registerActors([identity]);
     const schema = schemas[command];
@@ -672,14 +772,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       const bytes = Buffer.from(base64, "base64");
       if (!bytes.length || !imageSignatures[mime](bytes))
         fail("VALIDATION", "data: image content does not match its type", 400);
-      const id = randomBytes(16).toString("hex");
-      transaction(() =>
-        db
-          .prepare(
-            "INSERT INTO images(id,mime,data,actor,created_at) VALUES(?,?,?,?,?)",
-          )
-          .run(id, mime, bytes, identity.id, new Date(clock()).toISOString()),
-      );
+      const id = transaction(() => saveImage(mime, bytes, identity.id));
       return { id, url: `/files/${id}`, mime, bytes: bytes.length };
     }
     if (command === "list_tasks") {

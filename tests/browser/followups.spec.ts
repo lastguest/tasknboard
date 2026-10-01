@@ -766,6 +766,40 @@ test("Markdown descriptions format, upload pasted images, and render safely", as
   expect(saved.description).toMatch(/^\*\*Ship it\*\*\n1\. One\n2\. \n!\[shot\]\(\/files\/[0-9a-f]{32}\)$/);
 });
 
+test("Images embedded as data are stored as uploads and render", async ({ page }) => {
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  // An agent or script writing Markdown with inline data gets a stored image.
+  const task = await command("create_task", {
+    boardId: "BOARD-1",
+    title: `Embedded ${key()}`,
+    description: `![chart](data:image/png;base64,${png})`,
+  });
+  expect(task.description).toMatch(/^!\[chart\]\(\/files\/[0-9a-f]{32}\)$/);
+  await connect(page);
+  await card(page, task.id).click();
+  const dialog = page.getByRole("region", { name: /Task details/ });
+  const preview = dialog.locator(".md-preview");
+  await expect(preview.getByRole("img", { name: "chart" })).toHaveJSProperty("naturalWidth", 1);
+
+  // Pasted HTML with an embedded picture keeps its text and uploads the picture.
+  await dialog.getByRole("button", { name: "Write", exact: true }).click();
+  const editor = dialog.getByLabel("Context", { exact: true });
+  await editor.fill("");
+  await editor.evaluate((el, data) => {
+    const clip = new DataTransfer();
+    clip.setData("text/html", `<p>Copied note</p><img alt="diagram" src="data:image/png;base64,${data}">`);
+    clip.setData("text/plain", "Copied note\n");
+    el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: clip, bubbles: true, cancelable: true }));
+  }, png);
+  await expect(editor).toHaveValue(/^Copied note\n!\[diagram\]\(\/files\/[0-9a-f]{32}\)$/);
+  await dialog.getByRole("button", { name: "Preview" }).click();
+  await expect(preview.getByRole("img", { name: "diagram" })).toHaveJSProperty("naturalWidth", 1);
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(saveButton(dialog)).toBeHidden();
+  const saved = await command("get_task", { id: task.id });
+  expect(saved.description).toMatch(/^Copied note\n!\[diagram\]\(\/files\/[0-9a-f]{32}\)$/);
+});
+
 test("Epics group tasks: create, file, filter, progress and guarded archive", async ({ page }) => {
   let name = `Project ${key()}`;
   const loose = await create(`Loose ${key()}`);

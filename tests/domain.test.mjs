@@ -665,6 +665,130 @@ test("uploaded images are validated by content and exported", (t) => {
     ],
   );
 });
+const pixel =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+const fileLinks = (text) => [...text.matchAll(/\/files\/([0-9a-f]{32})/g)].map((m) => m[1]);
+test("image data embedded in Markdown is stored as an uploaded image", (t) => {
+  const s = fixture(t);
+  const embedded = `![shot](data:image/png;base64,${pixel})`;
+  const task = s.execute(
+    "create_task",
+    {
+      boardId: "BOARD-1",
+      title: "Embedded",
+      description: `Before\n${embedded}\nAgain ![same](<data:image/png;base64,${pixel}>)`,
+    },
+    human,
+  );
+  const [id, again] = fileLinks(task.description);
+  assert.equal(id, again, "the same data is stored once");
+  assert.equal(
+    task.description,
+    `Before\n![shot](/files/${id})\nAgain ![same](/files/${id})`,
+  );
+  assert.deepEqual(s.image(id), {
+    mime: "image/png",
+    data: Buffer.from(pixel, "base64"),
+  });
+  let claimed = s.execute("claim_task", { id: task.id, expectedVersion: 1 }, a);
+  claimed = s.execute(
+    "add_comment",
+    { id: task.id, expectedVersion: claimed.version, body: `Result ${embedded}` },
+    a,
+  );
+  claimed = s.execute(
+    "update_task",
+    {
+      id: task.id,
+      expectedVersion: claimed.version,
+      patch: { acceptance: embedded },
+    },
+    a,
+  );
+  assert.match(claimed.acceptance, /^!\[shot\]\(\/files\/[0-9a-f]{32}\)$/);
+  // Activity history keeps links too, never the image data.
+  for (const e of claimed.events) assert.doesNotMatch(e.body, /data:image/);
+  const backup = s.execute("export_workspace", {}, human);
+  assert.equal(backup.images.length, 3);
+  assert.deepEqual(
+    backup.images.map((i) => i.actor).sort(),
+    ["agent-a", "agent-a", "you"],
+  );
+  // Data that is not the declared image type is rejected and nothing is kept.
+  assert.throws(
+    () =>
+      s.execute(
+        "add_comment",
+        {
+          id: task.id,
+          expectedVersion: claimed.version,
+          body: `${embedded} ![bad](data:image/png;base64,${Buffer.from("<svg>").toString("base64")})`,
+        },
+        a,
+      ),
+    { code: "VALIDATION" },
+  );
+  // A command that fails after storing its images removes them again.
+  assert.throws(
+    () =>
+      s.execute(
+        "add_comment",
+        { id: task.id, expectedVersion: 1, body: embedded },
+        a,
+      ),
+    { code: "VERSION_CONFLICT" },
+  );
+  assert.equal(s.execute("export_workspace", {}, human).images.length, 3);
+  // Profile pictures stay data URLs on the profile.
+  const avatar = `data:image/png;base64,${pixel}`;
+  assert.equal(
+    s.execute("update_profile", { avatar }, human).avatar,
+    avatar,
+  );
+});
+test("a migration moves embedded image data out of saved tasks, epics and history", async (t) => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const dir = mkdtempSync(join(tmpdir(), "tasknboard-images-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "workspace.sqlite");
+  let store = createStore(path);
+  const task = store.execute(
+    "create_task",
+    { boardId: "BOARD-1", title: "Old task" },
+    human,
+  );
+  const epic = store.execute("create_epic", { title: "Old epic" }, human);
+  store.close();
+  const embedded = `![old](data:image/png;base64,${pixel})`;
+  const invalid = `![bad](data:image/png;base64,${Buffer.from("nope").toString("base64")})`;
+  const db = new DatabaseSync(path);
+  const { events, commentCount, links, ...saved } = task;
+  db.prepare("UPDATE tasks SET data=? WHERE number=1").run(
+    JSON.stringify({ ...saved, description: `${embedded} ${invalid}` }),
+  );
+  db.prepare("UPDATE epics SET data=json_set(data, '$.description', ?) WHERE number=1").run(embedded);
+  db.prepare(
+    "INSERT INTO events(task_id, actor, kind, body, created_at) VALUES(?,?,?,?,?)",
+  ).run(task.id, "agent-a", "add_comment", `See ${embedded}`, task.createdAt);
+  db.exec("DELETE FROM migrations WHERE version=16");
+  db.close();
+  store = createStore(path);
+  t.after(() => store.close());
+  const upgraded = store.execute("get_task", { id: task.id }, human);
+  const [id] = fileLinks(upgraded.description);
+  assert.equal(upgraded.description, `![old](/files/${id}) ${invalid}`);
+  assert.equal(upgraded.version, task.version);
+  assert.equal(upgraded.events.at(-1).body, `See ![old](/files/${id})`);
+  assert.equal(
+    store.execute("list_epics", {}, human).epics.find((e) => e.id === epic.id).description,
+    `![old](/files/${id})`,
+  );
+  const backup = store.execute("export_workspace", {}, human);
+  assert.deepEqual(
+    backup.images.map((i) => [i.id, i.actor]),
+    [[id, "agent-a"]],
+  );
+});
 test("epics group tasks, derive counts, and filter lists", (t) => {
   const s = fixture(t);
   const epic = s.execute(

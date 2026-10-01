@@ -427,6 +427,20 @@ const readDataUrl = (file: Blob) =>
     reader.readAsDataURL(file);
   });
 
+/** Images carried as data inside pasted HTML, as some apps copy them. */
+const htmlImages = (html: string) =>
+  [...new DOMParser().parseFromString(html, "text/html").images].flatMap(
+    (img, i) => {
+      const m = img
+        .getAttribute("src")
+        ?.match(/^data:(image\/[\w+.-]+);base64,([A-Za-z0-9+/]+={0,2})$/);
+      if (!m) return [];
+      const bytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
+      const alt = img.getAttribute("alt")?.trim();
+      return [new File([bytes], alt || `image-${i + 1}`, { type: m[1] })];
+    },
+  );
+
 type Format = {
   id: string;
   label: string;
@@ -840,9 +854,20 @@ export function MarkdownEditor({
           const files = [...e.clipboardData.files].filter((f) =>
             f.type.startsWith("image/"),
           );
-          if (!files.length) return;
+          if (files.length) {
+            e.preventDefault();
+            void upload(files);
+            return;
+          }
+          // Embedded images are uploaded rather than pasted as data.
+          const html = e.clipboardData.getData("text/html");
+          const embedded = html.includes("data:image/") ? htmlImages(html) : [];
+          if (!embedded.length) return;
           e.preventDefault();
-          void upload(files);
+          const t = edit();
+          const { selectionStart: s, selectionEnd: end } = t.el;
+          t.replace(s, end, e.clipboardData.getData("text/plain").trimEnd());
+          void upload(embedded);
         }}
       />
       {preview && (

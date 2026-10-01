@@ -41,7 +41,7 @@ const descriptions = {
   update_profile:
     "Set your own display name and uploaded avatar. Set useGravatar to enable Gravatar. Omit gravatarEmail to keep the saved address; an empty email clears it when useGravatar is false. Enabling Gravatar requires an email. The email appears only in your own profile response. Your actor ID does not change.",
   upload_image:
-    "Store a PNG, JPEG, WebP, or GIF (data URL, up to 5 MB) and get a /files/ URL to embed in a Markdown description as ![alt](url).",
+    "Store a PNG, JPEG, WebP, or GIF (data URL, up to 5 MB) and get a /files/ URL to embed in a Markdown description as ![alt](url). Inline ![alt](data:image/...) in any text is stored the same way automatically.",
   submit_review:
     "Hand completed work to a human with summary and optional HTTP(S) artifact URL; releases your claim.",
 };
