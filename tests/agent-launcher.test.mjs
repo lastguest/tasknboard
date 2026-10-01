@@ -21,6 +21,11 @@ import {
 
 const human = { id: "you", kind: "human" };
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+// Waits for a run that starts asynchronously; slow CI runners can need more than one settle.
+const waitFor = async (condition, message) => {
+  for (let attempt = 0; attempt < 60 && !condition(); attempt++) await settle();
+  assert.ok(condition(), message);
+};
 
 async function fixture(t, { client = "claude" } = {}) {
   const home = await mkdtemp(join(tmpdir(), "tnb-launch-"));
@@ -560,9 +565,8 @@ test("quitting records the stopped run, releases its claim, and starts it again 
     },
   });
   next.resume();
-  await settle();
+  await waitFor(() => reopened.length === 1, "the interrupted run starts again");
   assert.equal(store.setting("agent_runs.interrupted"), "");
-  assert.equal(reopened.length, 1);
   assert.match(reopened[0].args[1], /TasknBoard quit while an earlier run worked on this/);
   assert.match(reopened[0].args[1], new RegExp(first.id));
   const started = store
@@ -570,8 +574,7 @@ test("quitting records the stopped run, releases its claim, and starts it again 
     .events.findLast((e) => e.kind === "agent_started");
   assert.match(started.body, /again after TasknBoard restarted/);
   reopened[0].child.emit("exit", 0);
-  await settle();
-  assert.equal(reopened.length, 2);
+  await waitFor(() => reopened.length === 2, "the waiting task starts after the first run");
   assert.match(reopened[1].args[1], new RegExp(second.id));
   next.stop();
 });
