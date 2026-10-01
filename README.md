@@ -2,6 +2,8 @@
 
 A lightweight Kanban workspace for small teams and coding agents.
 
+Website: [lastguest.github.io/tasknboard](https://lastguest.github.io/tasknboard/)
+
 ![Stand-up mode showing the team board](docs/images/tasknboard-standup-team.png)
 
 React + Vite, Node.js, SQLite, a Tauri desktop shell, and an MCP stdio server. One application core owns validation, leases, optimistic concurrency and activity events. No cloud AI dependency.
