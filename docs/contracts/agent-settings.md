@@ -22,6 +22,14 @@ it. A plugin install records a default configuration for its CLI. An older
 | `env` | Up to 40 variables added to the user's environment. `HOME`, `USERPROFILE`, and `TASKNBOARD_*` are rejected. |
 | `events` | One `{ enabled, prompt? }` binding for every event below. |
 
+Each run starts from a copy of the user's environment, not the service's.
+The desktop host clears the service's environment and passes its own original
+one in `TASKNBOARD_USER_ENV`. On macOS and Linux the launcher also reads the
+login shell's environment once (`$SHELL -ilc env`), so an app opened from the
+Dock or Finder still gets profile PATH entries and keys. Variables that describe
+the service (`TASKNBOARD_*`, `HOST`, `PORT`) stay out. The CLI is found on the
+copied PATH. Restart the app to read a changed profile.
+
 The app always passes the CLI's full-auto switch, because nobody approves
 prompts during a run: `--dangerously-skip-permissions` (Claude Code),
 `--dangerously-bypass-approvals-and-sandbox` (Codex), `--auto` (OpenCode).

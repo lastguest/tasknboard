@@ -85,6 +85,16 @@ fn start_service(app: &tauri::App) -> Result<(Service, tauri::Url), Box<dyn std:
     {
         command.env("TASKNBOARD_GITHUB_CLIENT_ID", client_id);
     }
+    // The service runs with a cleared environment, but agent CLIs it starts
+    // need the user's own: Claude Code finds its macOS keychain login by USER.
+    // The service keeps this copy for those runs only.
+    let user_env: std::collections::BTreeMap<String, String> = env::vars_os()
+        .map(|(key, value)| {
+            (key.to_string_lossy().into_owned(), value.to_string_lossy().into_owned())
+        })
+        .filter(|(key, _)| !key.starts_with("TASKNBOARD_"))
+        .collect();
+    command.env("TASKNBOARD_USER_ENV", serde_json::to_string(&user_env)?);
     #[cfg(windows)]
     {
         let system_root = env::var_os("SystemRoot")

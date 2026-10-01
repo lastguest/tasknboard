@@ -1,7 +1,8 @@
 import { access, mkdir, open, readFile, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, join } from "node:path";
-import { spawn as spawnProcess } from "node:child_process";
+import { execFile, spawn as spawnProcess } from "node:child_process";
+import { userInfo } from "node:os";
 import {
   agentClients,
   agentEvents,
@@ -55,15 +56,86 @@ const taskWork = new Set(["task_assigned", "changes_requested"]);
  * assigning it a task. Only agents configured from this app start. One run per
  * agent at a time; later events wait in that agent's queue.
  */
+/** USER, LOGNAME, and SHELL for the account this service runs as. */
+function account() {
+  try {
+    const { username, shell } = userInfo();
+    return { USER: username, LOGNAME: username, ...(shell ? { SHELL: shell } : {}) };
+  } catch {
+    return {};
+  }
+}
+
+/** Variables that describe this service or one shell, never the user. */
+const serviceOnly = /^(TASKNBOARD_.*|HOST|PORT|PWD|OLDPWD|SHLVL|_)$/;
+const withoutServiceOnly = (env) =>
+  Object.fromEntries(
+    Object.entries(env).filter(
+      ([key, value]) => typeof value === "string" && !serviceOnly.test(key),
+    ),
+  );
+const marker = "__TASKNBOARD_ENV__";
+
+/**
+ * A copy of the user's environment for agent runs. The desktop host starts
+ * this service with a cleared environment and passes its own original one in
+ * TASKNBOARD_USER_ENV. On macOS and Linux the login shell adds what the
+ * user's profile sets, such as PATH entries and API keys, which an app opened
+ * from the Dock or Finder does not get.
+ */
+export async function userEnvironment({
+  hostEnv = process.env,
+  platform = process.platform,
+  home,
+  run = execFile,
+} = {}) {
+  let host = hostEnv;
+  try {
+    if (hostEnv.TASKNBOARD_USER_ENV) host = JSON.parse(hostEnv.TASKNBOARD_USER_ENV);
+  } catch {
+    // A malformed copy falls back to this service's environment.
+  }
+  const base = { ...account(), ...withoutServiceOnly(host) };
+  if (platform === "win32") return base;
+  const shell = base.SHELL || "/bin/sh";
+  const output = await new Promise((resolve) =>
+    run(
+      shell,
+      // Interactive and login, so both .zprofile and .zshrc style files load.
+      ["-ilc", `printf ${marker}; command env -0; printf ${marker}`],
+      {
+        env: { ...base, ...(home ? { HOME: home } : {}) },
+        cwd: home || undefined,
+        timeout: 10000,
+        maxBuffer: 4 * 1024 * 1024,
+        windowsHide: true,
+      },
+      (error, stdout) => resolve(error ? "" : String(stdout)),
+    ),
+  );
+  const parts = output.split(marker);
+  if (parts.length < 3) return base;
+  const fromShell = {};
+  for (const entry of parts[1].split("\0")) {
+    const at = entry.indexOf("=");
+    if (at > 0) fromShell[entry.slice(0, at)] = entry.slice(at + 1);
+  }
+  return { ...base, ...withoutServiceOnly(fromShell) };
+}
+
 export function createAgentLauncher({
   store,
   desktop = process.env.TASKNBOARD_DESKTOP === "1",
   home = process.env.TASKNBOARD_USER_HOME,
   platform = process.platform,
-  searchPath = process.env.PATH || "",
+  searchPath,
   spawn = spawnProcess,
   clock = Date.now,
+  environment = () => userEnvironment({ platform, home }),
 } = {}) {
+  /** The user's environment, read once for the life of the service. */
+  let copied;
+  const runEnvironment = () => (copied ??= environment());
   /** Per agent: jobs of { event, taskId, values }. */
   const queues = new Map();
   /** Per agent: the current run's { child, job, cancelled }. */
@@ -79,9 +151,9 @@ export function createAgentLauncher({
     }
   };
   const asAgent = (identity) => ({ id: identity, kind: "agent" });
-  async function findExecutable(name) {
+  async function findExecutable(name, path) {
     const windows = platform === "win32";
-    for (const directory of searchPath
+    for (const directory of (searchPath ?? path ?? "")
       .split(windows ? ";" : delimiter)
       .filter(Boolean))
       for (const file of windows ? [`${name}.exe`, `${name}.cmd`] : [name]) {
@@ -166,9 +238,10 @@ export function createAgentLauncher({
       );
       return false;
     }
+    const userEnv = await runEnvironment();
     const executable = config.command
       ? await executableAt(config.command)
-      : await findExecutable(client.executable);
+      : await findExecutable(client.executable, userEnv.PATH ?? userEnv.Path);
     if (!executable) {
       note(
         task.id,
@@ -192,9 +265,10 @@ export function createAgentLauncher({
     const args = client.promptLast
       ? [...base, ...config.args, prompt]
       : [...base, ...config.args];
-    // Keep the user's own environment: on macOS, setting CLAUDE_CONFIG_DIR
-    // makes Claude Code read a different keychain login and report "Not logged in".
-    const env = { ...process.env, ...config.env, HOME: home, USERPROFILE: home };
+    // Runs get a copy of the user's environment, not this service's: Claude
+    // Code finds its macOS keychain login by USER, and setting CLAUDE_CONFIG_DIR
+    // would make it read a different login and report "Not logged in".
+    const env = { ...userEnv, ...config.env, HOME: home, USERPROFILE: home };
     const logs = join(home, ".tasknboard", "logs", identity);
     await mkdir(logs, { recursive: true });
     const log = join(

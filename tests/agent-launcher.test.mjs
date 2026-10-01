@@ -2,10 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { createStore } from "../server/store.mjs";
-import { createAgentLauncher, failureReason } from "../server/agent-launcher.mjs";
+import {
+  createAgentLauncher,
+  failureReason,
+  userEnvironment,
+} from "../server/agent-launcher.mjs";
 import {
   defaultConfig,
   listConfigs,
@@ -53,6 +57,8 @@ async function fixture(t, { client = "claude" } = {}) {
     home,
     searchPath: bin,
     spawn,
+    // The user's environment, as the desktop host and login shell provide it.
+    environment: async () => ({ USER: "someone", PATH: bin, FROM_PROFILE: "yes" }),
   });
   const [board] = store.execute("list_boards", {}, human).boards;
   const withFolder = store.execute(
@@ -443,4 +449,69 @@ test("the stand-up starts bound agents that have open tasks", async (t) => {
   assert.equal(calls.length, 1);
   assert.match(calls[0].args[1], /stand-up just started\. Your open tasks: TNB-1 \(in progress\)\./);
   assert.deepEqual(launcher.status("bot").running, { event: "standup", taskId: "TNB-1" });
+});
+
+test("runs get a copy of the user's environment, not the service's", async (t) => {
+  const { store, launcher, calls, board } = await fixture(t);
+  launcher.assigned(
+    store.execute("create_task", { boardId: board.id, title: "Env", assignee: "bot" }, human),
+  );
+  await settle();
+  const { env } = calls[0].options;
+  assert.equal(env.USER, "someone");
+  assert.equal(env.FROM_PROFILE, "yes");
+  // The service's own variables, such as its port, stay out of the agent's shell.
+  assert.equal(env.TASKNBOARD_DB, undefined);
+  assert.equal(env.PORT, undefined);
+});
+
+test("the user's environment combines the host copy, the account, and the login shell", async () => {
+  const hostEnv = {
+    PORT: "0",
+    TASKNBOARD_DB: "/data/db.sqlite",
+    TASKNBOARD_USER_ENV: JSON.stringify({
+      PATH: "/usr/bin",
+      SHELL: "/bin/zsh",
+      TASKNBOARD_DB: "/leak",
+      HOST_ONLY: "1",
+    }),
+  };
+  let shellCall;
+  const run = (file, args, options, done) => {
+    shellCall = { file, args, options };
+    done(null, "banner\n__TASKNBOARD_ENV__PATH=/opt/bin:/usr/bin\0API_KEY=a=b\0PWD=/x\0__TASKNBOARD_ENV__");
+  };
+  const env = await userEnvironment({ hostEnv, platform: "darwin", home: "/Users/me", run });
+  assert.equal(shellCall.file, "/bin/zsh");
+  assert.deepEqual(shellCall.args.slice(0, 1), ["-ilc"]);
+  assert.equal(shellCall.options.env.HOME, "/Users/me");
+  assert.equal(env.PATH, "/opt/bin:/usr/bin");
+  assert.equal(env.API_KEY, "a=b");
+  assert.equal(env.HOST_ONLY, "1");
+  assert.equal(env.USER, userInfo().username);
+  for (const name of ["PORT", "TASKNBOARD_DB", "TASKNBOARD_USER_ENV", "PWD"])
+    assert.equal(env[name], undefined, name);
+
+  // A failing shell keeps the host copy; Windows never starts one.
+  const failed = await userEnvironment({
+    hostEnv,
+    platform: "darwin",
+    run: (file, args, options, done) => done(new Error("timeout"), ""),
+  });
+  assert.equal(failed.PATH, "/usr/bin");
+  const windows = await userEnvironment({
+    hostEnv,
+    platform: "win32",
+    run: () => assert.fail("no shell on Windows"),
+  });
+  assert.equal(windows.HOST_ONLY, "1");
+});
+
+test("the login shell supplies the account and profile variables", { skip: process.platform === "win32" }, async () => {
+  const env = await userEnvironment({
+    hostEnv: { PATH: "/usr/bin:/bin", SHELL: "/bin/sh" },
+    home: tmpdir(),
+  });
+  assert.equal(env.USER, userInfo().username);
+  assert.match(env.PATH, /\/bin/);
 });
