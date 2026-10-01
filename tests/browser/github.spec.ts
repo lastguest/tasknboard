@@ -65,7 +65,6 @@ async function openVerificationPage(page: Page, settings: Locator) {
 test("GitHub device authorization shows pending code, honors slow_down, and keeps saved account on cancel", async ({
   page,
 }) => {
-  const settings = await openGitHubSettings(page, connected("saved-user"));
   const times: number[] = [];
   let polls = 0;
   let cancellations = 0;
@@ -83,6 +82,7 @@ test("GitHub device authorization shows pending code, honors slow_down, and keep
     cancellations++;
     await route.fulfill({ json: connected("saved-user") });
   });
+  const settings = await openGitHubSettings(page, connected("saved-user"));
 
   await expect(settings.getByLabel("GitHub authorization code")).toHaveText(
     "ABCD-EFGH",
@@ -111,15 +111,15 @@ test("GitHub device authorization shows pending code, honors slow_down, and keep
 test("GitHub device authorization updates status after approval", async ({
   page,
 }) => {
-  const settings = await openGitHubSettings(page, disconnected);
   let polls = 0;
   await page.route("**/api/poll_github_authorization", async (route) => {
     polls++;
     await route.fulfill({
       json:
-        polls === 1 ? { pending: true, interval: 0.02 } : connected("new-user"),
+        polls === 1 ? { pending: true, interval: 1 } : connected("new-user"),
     });
   });
+  const settings = await openGitHubSettings(page, disconnected);
 
   const popup = await openVerificationPage(page, settings);
   await expect(settings.getByRole("status")).toContainText(
@@ -133,7 +133,6 @@ test("GitHub device authorization updates status after approval", async ({
 test("GitHub device authorization reports a rejected or expired request", async ({
   page,
 }) => {
-  const settings = await openGitHubSettings(page, disconnected);
   await page.route("**/api/poll_github_authorization", (route) =>
     route.fulfill({
       status: 410,
@@ -143,15 +142,36 @@ test("GitHub device authorization reports a rejected or expired request", async 
       },
     }),
   );
+  const settings = await openGitHubSettings(page, disconnected);
 
-  const popup = await openVerificationPage(page, settings);
   await expect(settings.getByRole("alert")).toContainText(
     "The authorization code expired.",
   );
   await expect(
     settings.getByRole("link", { name: /Connect GitHub/ }),
   ).toHaveCount(0);
-  await popup.close();
+});
+
+test("GitHub device authorization notices approval when GitHub was opened outside the link", async ({
+  page,
+}) => {
+  let polls = 0;
+  await page.route("**/api/poll_github_authorization", async (route) => {
+    polls++;
+    await route.fulfill({
+      json:
+        polls === 1 ? { pending: true, interval: 0.02 } : connected("new-user"),
+    });
+  });
+  const settings = await openGitHubSettings(page, disconnected);
+
+  // The person opens the verification page from the context menu or another
+  // device, so the Connect link is never clicked.
+  await expect(settings.getByRole("status")).toContainText(
+    "Connected as @new-user",
+  );
+  await expect(settings.getByText("Connected", { exact: true })).toBeVisible();
+  expect(polls).toBe(2);
 });
 
 test("GitHub settings hide authorization when the server is not configured", async ({
@@ -189,10 +209,10 @@ test("the desktop authorization link uses the native external browser opener", a
       },
     };
   });
-  const settings = await openGitHubSettings(page, disconnected);
   await page.route("**/api/poll_github_authorization", (route) =>
     route.fulfill({ json: { pending: true, interval: 1 } }),
   );
+  const settings = await openGitHubSettings(page, disconnected);
   await settings.getByRole("link", { name: "Connect GitHub", exact: true }).click();
   expect(await page.evaluate(() => (window as any).externalOpen)).toEqual({
     command: "open_external_url",

@@ -1400,7 +1400,6 @@ export function GitHubSettings({
   const [authorization, setAuthorization] =
     useState<GitHubDeviceAuthorization | null>(null);
   const [preparing, setPreparing] = useState(false);
-  const [polling, setPolling] = useState(false);
   const [canceling, setCanceling] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [message, setMessage] = useState<null | { ok: boolean; text: string }>(
@@ -1466,8 +1465,10 @@ export function GitHubSettings({
     };
   }, [canManage, prepareAuthorization]);
 
+  // Poll as soon as the code is shown, so approval reaches the app however the
+  // person opens GitHub: this link, the context menu, or another device.
   useEffect(() => {
-    if (!authorization || !polling) return;
+    if (!authorization) return;
     const currentAuthorization = authorization;
     const controller = new AbortController();
     pollController.current = controller;
@@ -1493,7 +1494,6 @@ export function GitHubSettings({
           if (controller.signal.aborted) return;
           setStatus(next);
           setAuthorization(null);
-          setPolling(false);
           setMessage({
             ok: true,
             text: `Connected as @${next.account.login}.`,
@@ -1503,7 +1503,6 @@ export function GitHubSettings({
       } catch (e) {
         if (controller.signal.aborted) return;
         setAuthorization(null);
-        setPolling(false);
         setMessage({ ok: false, text: githubError(errorOf(e)) });
       }
     }
@@ -1512,7 +1511,7 @@ export function GitHubSettings({
       controller.abort();
       if (pollController.current === controller) pollController.current = null;
     };
-  }, [authorization, polling]);
+  }, [authorization]);
 
   useEffect(() => {
     if (!authorization) return;
@@ -1521,7 +1520,6 @@ export function GitHubSettings({
         pollController.current?.abort();
         pollController.current = null;
         setAuthorization(null);
-        setPolling(false);
         setMessage({
           ok: false,
           text: "The GitHub authorization code expired. Prepare a new code to continue.",
@@ -1540,7 +1538,6 @@ export function GitHubSettings({
     pollController.current?.abort();
     pollController.current = null;
     setAuthorization(null);
-    setPolling(false);
     try {
       const next = await command<GitHubStatus>("disconnect_github");
       setStatus(next);
@@ -1559,7 +1556,6 @@ export function GitHubSettings({
     pollController.current?.abort();
     pollController.current = null;
     setAuthorization(null);
-    setPolling(false);
     setCanceling(true);
     setMessage(null);
     cancelController.current?.abort();
@@ -1677,20 +1673,16 @@ export function GitHubSettings({
                   rel="noopener noreferrer"
                   onClick={(event) => {
                     setMessage(null);
-                    if (isTauri()) {
-                      event.preventDefault();
-                      void invoke("open_external_url", {
-                        url: authorization.verificationUri,
-                      }).then(
-                        () => setPolling(true),
-                        () => setMessage({
-                          ok: false,
-                          text: "Could not open GitHub in your browser. Try again.",
-                        }),
-                      );
-                      return;
-                    }
-                    setPolling(true);
+                    if (!isTauri()) return;
+                    event.preventDefault();
+                    invoke("open_external_url", {
+                      url: authorization.verificationUri,
+                    }).catch(() =>
+                      setMessage({
+                        ok: false,
+                        text: `Could not open your browser. Go to ${authorization.verificationUri} and enter the code.`,
+                      }),
+                    );
                   }}
                 >
                   {status.connected
@@ -1722,7 +1714,7 @@ export function GitHubSettings({
                   Cancel authorization
                 </button>
               )}
-              {polling && (
+              {authorization && (
                 <p className="small" role="status" aria-live="polite">
                   Waiting for approval in GitHub…
                 </p>

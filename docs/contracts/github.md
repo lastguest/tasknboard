@@ -13,7 +13,8 @@ The service operator registers a GitHub OAuth app with **Device Flow** enabled
 and sets `TASKNBOARD_GITHUB_CLIENT_ID`. No client secret is required.
 The button opens GitHub's verification page. The user enters the displayed code
 and approves access. The service polls GitHub and saves the token after it
-verifies the account with `GET /user`.
+verifies the account with `GET /user`. Settings starts polling as soon as the
+code is shown, so approval is detected however the page was opened.
 
 The OAuth app requests `repo` scope for private pull requests. GitHub includes
 write permissions in this scope; TasknBoard only performs reads.
