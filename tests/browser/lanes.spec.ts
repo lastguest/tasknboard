@@ -87,3 +87,17 @@ test("a lane name typed before Esc closes the board dialog is saved", async ({ p
   // Other specs expect the default lane names.
   await command("update_lane", { id: "LANE-1", expectedVersion: board.version, patch: { name: "Backlog" } });
 });
+
+test("lane counts in an open board dialog follow task moves", async ({ page }) => {
+  await connect(page);
+  const dialog = await editBoard(page);
+  const count = (lane: string) =>
+    dialog.locator(".lane-row", { has: page.getByRole("textbox", { name: `Name of ${lane}` }) }).locator(".count");
+  const before = Number(await count("In review").textContent());
+  // Another client sends a task to review while the dialog stays open.
+  let task = await command("create_task", { boardId: "BOARD-1", title: `Count ${key()}` });
+  task = await command("update_task", { id: task.id, expectedVersion: task.version, patch: { lane: "LANE-3" } });
+  await expect(count("In review")).toHaveText(String(before + 1), { timeout: 10_000 });
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await command("archive_task", { id: task.id, expectedVersion: task.version });
+});

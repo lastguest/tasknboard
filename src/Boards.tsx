@@ -542,7 +542,8 @@ export function BoardEditor({
       </form>
       {board && (
         <LaneSettings
-          board={board}
+          // Live updates refresh the app's boards, so lanes and counts stay current.
+          board={boards.find((b) => b.id === board.id) ?? board}
           onSaved={(saved) => {
             setBoard(saved);
             onLanes(saved);
