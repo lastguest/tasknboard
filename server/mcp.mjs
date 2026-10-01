@@ -19,6 +19,10 @@ const descriptions = {
     "List saved views: named task filters and display settings that people share with the workspace. Pass a view's ID to list_tasks to get its tasks.",
   list_epics:
     "List epics (projects that group tasks) with per-status task counts. Humans manage epics; agents read them.",
+  list_labels:
+    "List the labels used by non-archived tasks, with how many tasks carry each.",
+  rename_label:
+    "Rename a label on every non-archived task (merging into an existing label), or remove it with to: \"\". Saved views follow a rename. Changed tasks get a new version, even when claimed; re-read before writing them.",
   get_task:
     "Read full task context, acceptance criteria, version, claim, links to other tasks, linked pull requests and activity.",
   create_task:
@@ -63,6 +67,7 @@ const read = [
   "get_task",
   "list_epics",
   "list_views",
+  "list_labels",
 ];
 for (const [name, description] of Object.entries(descriptions)) {
   server.registerTool(

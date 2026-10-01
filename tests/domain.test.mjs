@@ -602,6 +602,60 @@ test("labels support multiple tags, normalization, clearing and strict validatio
   );
 });
 
+test("new tasks start without labels", (t) => {
+  const s = fixture(t);
+  assert.deepEqual(s.make().labels, []);
+});
+
+test("labels are listed, renamed, merged and removed across the workspace", (t) => {
+  const s = fixture(t);
+  const create = (title, labels) =>
+    s.execute("create_task", { boardId: "BOARD-1", title, labels }, human);
+  const first = create("First", ["UX", "Bug"]);
+  const second = create("Second", ["Bug"]);
+  const archived = create("Gone", ["Bug"]);
+  s.execute("archive_task", { id: archived.id, expectedVersion: 1 }, human);
+  // A claim held by someone else does not block the workspace-wide edit.
+  s.execute("claim_task", { id: second.id, expectedVersion: 1 }, a);
+  const view = s.execute(
+    "create_view",
+    {
+      name: "Bugs",
+      filters: { conditions: [{ field: "label", op: "is", values: ["Bug"] }] },
+    },
+    human,
+  );
+  assert.deepEqual(s.execute("list_labels", {}, b).labels, [
+    { name: "Bug", tasks: 2 },
+    { name: "UX", tasks: 1 },
+  ]);
+
+  // Agents may rename too; renaming into an existing label merges it.
+  assert.deepEqual(
+    s.execute("rename_label", { from: "Bug", to: "UX" }, b),
+    { from: "Bug", to: "UX", tasks: 2, views: 1 },
+  );
+  const renamed = s.execute("get_task", { id: first.id }, human);
+  assert.deepEqual(renamed.labels, ["UX"]);
+  assert.equal(renamed.version, first.version + 1);
+  assert.deepEqual(s.execute("get_task", { id: second.id }, human).labels, ["UX"]);
+  assert.deepEqual(s.execute("get_task", { id: archived.id }, human).labels, ["Bug"]);
+  const saved = s.execute("list_views", {}, human).views.find((v) => v.id === view.id);
+  assert.deepEqual(saved.filters.conditions[0].values, ["UX"]);
+  assert.equal(saved.version, view.version + 1);
+  assert.ok(
+    renamed.events.some((e) => e.kind === "rename_label" && e.actor === b.id),
+  );
+
+  assert.deepEqual(
+    s.execute("rename_label", { from: "UX", to: "" }, human),
+    { from: "UX", to: "", tasks: 2, views: 0 },
+  );
+  assert.deepEqual(s.execute("list_labels", {}, human).labels, []);
+  for (const args of [{ from: "UX", to: "UX" }, { from: "", to: "X" }, { from: "A", to: "x".repeat(41) }])
+    assert.throws(() => s.execute("rename_label", args, human), { code: "VALIDATION" });
+});
+
 test("stored single labels upgrade once without changing task history", async (t) => {
   const { DatabaseSync } = await import("node:sqlite");
   const dir = mkdtempSync(join(tmpdir(), "tasknboard-labels-"));

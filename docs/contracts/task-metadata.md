@@ -40,10 +40,24 @@ Existing task and event records remain intact.
 
 Tasks use `labels: string[]` in create, update, list, detail, and export responses.
 Each label contains 1–40 characters after trimming. Duplicate labels are removed.
-An empty array clears the labels. New tasks default to `["Product"]`.
+An empty array clears the labels. New tasks start with no labels.
 The old `label` command field is rejected. Stored single labels convert once to
 arrays when the database opens. Task versions and activity remain unchanged.
 Status remains a single workflow state.
+
+`list_labels({})` returns `{ labels: { name, tasks }[] }`: every label on a
+non-archived task, sorted by name, with how many such tasks carry it.
+
+`rename_label({ from, to })` replaces `from` with `to` on every non-archived
+task; renaming into an existing label merges the two, and `to: ""` removes the
+label. People and agents may both call it. It is a workspace-wide edit, so it
+takes no `expectedVersion` and ignores claims, but each changed task advances
+its version and records a `rename_label` event with `{ from, to }`; open drafts
+and lease holders see the usual version conflict. Saved views whose label
+conditions name `from` follow a rename the same way. A removal leaves views
+unchanged, so a view never widens to match more tasks. Archived tasks keep
+their labels. It returns `{ from, to, tasks, views }`, the counts changed.
+`from` and `to` must differ.
 
 ## Profiles
 

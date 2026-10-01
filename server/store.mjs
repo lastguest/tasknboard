@@ -896,6 +896,59 @@ export function createStore(path, { clock = Date.now } = {}) {
           ).run(identity.id, view.id);
         return withFavorite(identity, [view])[0];
       });
+    if (command === "list_labels")
+      return readTransaction(() => {
+        const counts = new Map();
+        for (const t of all())
+          if (!t.archived)
+            for (const label of t.labels)
+              counts.set(label, (counts.get(label) ?? 0) + 1);
+        return {
+          labels: [...counts]
+            .map(([name, tasks]) => ({ name, tasks }))
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        };
+      });
+    if (command === "rename_label")
+      return transaction(() => {
+        const swap = (values) => [
+          ...new Set(values.flatMap((v) => (v !== p.from ? [v] : p.to ? [p.to] : []))),
+        ];
+        // A workspace-wide edit open to people and agents: active tasks change
+        // whoever holds their claim, and advance their version so stale
+        // drafts and leases are caught by the usual version check.
+        let tasks = 0;
+        for (const t of all()) {
+          if (t.archived || !t.labels.includes(p.from)) continue;
+          t.labels = swap(t.labels);
+          t.version++;
+          t.updatedAt = new Date(clock()).toISOString();
+          save(t);
+          event(t.id, identity, command, JSON.stringify({ from: p.from, to: p.to }));
+          tasks++;
+        }
+        // Views follow a rename. A removed label stays in their filters,
+        // so a view never silently widens to match more tasks.
+        let views = 0;
+        if (p.to)
+          for (const v of allViews()) {
+            if (
+              !v.filters.conditions.some(
+                (c) => c.field === "label" && c.values.includes(p.from),
+              )
+            )
+              continue;
+            v.filters.conditions = v.filters.conditions.map((c) =>
+              c.field === "label" ? { ...c, values: swap(c.values) } : c,
+            );
+            v.version++;
+            v.updatedAt = new Date(clock()).toISOString();
+            saveView(v);
+            event(v.id, identity, command, JSON.stringify({ from: p.from, to: p.to }));
+            views++;
+          }
+        return { from: p.from, to: p.to, tasks, views };
+      });
     if (command === "create_epic")
       return transaction(() => {
         humanOnly(identity, "create");

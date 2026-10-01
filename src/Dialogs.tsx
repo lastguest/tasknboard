@@ -502,6 +502,7 @@ const kindText: Record<string, string> = {
   unlink_task: "removed a link",
   link_pull_requests: "linked pull requests",
   unlink_pull_request: "removed a pull request",
+  rename_label: "edited a label",
   agent_started: "started work automatically",
   agent_not_started: "could not start automatically",
   agent_stopped: "stopped before finishing",
@@ -533,6 +534,10 @@ function eventDetail(e: TaskEvent, epicTitle: (id: string) => string) {
                 : `${fieldLabels[k] ?? k} → ${String(v) || "none"}`,
         )
         .join(" · ");
+    if (e.kind === "rename_label")
+      return body.to
+        ? `Label ${body.from} → ${body.to}`
+        : `Label ${body.from} removed`;
     if (e.kind === "set_standup_notes")
       return (
         [
@@ -656,7 +661,7 @@ const draftOf = (t: Task | null, epic = ""): Draft =>
         status: "backlog",
         priority: "medium",
         assignee: "",
-        labels: ["Product"],
+        labels: [],
         epic,
       };
 
@@ -2013,6 +2018,13 @@ export function Settings({
         "token access auth server sign in status workspace export import download json backup archive activity",
     },
     {
+      id: "labels",
+      label: "Labels",
+      icon: "hash",
+      group: "Workspace",
+      keywords: "label tag rename remove delete merge",
+    },
+    {
       id: "github",
       label: "GitHub",
       icon: "github",
@@ -2229,6 +2241,9 @@ export function Settings({
                 </SettingsGroup>
               </>
             )}
+            {page === "labels" && (
+              <LabelSettings connected={connected} onChanged={onReconnect} />
+            )}
             {page === "github" && (
               <GitHubSettings
                 canManage={connected && actor.kind === "human"}
@@ -2271,6 +2286,7 @@ export function Settings({
 export type SettingsPage =
   | "profile"
   | "connection-data"
+  | "labels"
   | "github"
   | "shortcuts"
   | "cli"
@@ -2503,6 +2519,197 @@ function ProfileSettings({
         </button>
       </div>
     </form>
+  );
+}
+
+type LabelUse = { name: string; tasks: number };
+
+/** Rename, merge or remove a label on every active task in the workspace. */
+function LabelSettings({
+  connected,
+  onChanged,
+}: {
+  connected: boolean;
+  onChanged: () => Promise<unknown>;
+}) {
+  const [labels, setLabels] = useState<LabelUse[] | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [editing, setEditing] = useState<null | {
+    from: string;
+    mode: "rename" | "remove";
+    to: string;
+  }>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<null | { ok: boolean; text: string }>(null);
+  const inputId = useId();
+
+  async function load() {
+    try {
+      const result = await command<{ labels: LabelUse[] }>("list_labels");
+      setLabels(result.labels);
+      setLoadError("");
+    } catch (e) {
+      setLoadError(errorOf(e).message);
+    }
+  }
+  useEffect(() => {
+    if (connected) void load();
+  }, [connected]);
+
+  async function apply(from: string, to: string) {
+    setBusy(true);
+    setNote(null);
+    try {
+      const result = await command<{ tasks: number; views: number }>(
+        "rename_label",
+        { from, to },
+      );
+      const count = `${result.tasks} ${result.tasks === 1 ? "task" : "tasks"}`;
+      const views = result.views
+        ? ` and ${result.views} saved ${result.views === 1 ? "view" : "views"}`
+        : "";
+      setNote({
+        ok: true,
+        text: to
+          ? `Renamed “${from}” to “${to}” on ${count}${views}.`
+          : `Removed “${from}” from ${count}.`,
+      });
+      setEditing(null);
+      await Promise.all([load(), onChanged()]);
+    } catch (e) {
+      setNote({ ok: false, text: errorOf(e).message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!connected)
+    return (
+      <p className="small">Connect to the workspace to manage its labels.</p>
+    );
+  return (
+    <SettingsGroup
+      title="Labels"
+      note="Changes apply to every active task, including claimed ones. Renaming to a label that already exists merges the two. Archived tasks keep their labels."
+    >
+      {loadError && (
+        <p className="settings-row-note inline-error" role="alert">
+          Couldn't load labels: {loadError}
+        </p>
+      )}
+      {labels && !labels.length && (
+        <p className="settings-row-note small">No task uses a label yet.</p>
+      )}
+      {labels?.map((label) =>
+        editing?.from === label.name ? (
+          <form
+            key={label.name}
+            className="settings-row settings-row-stack"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const to = editing.mode === "rename" ? editing.to.trim() : "";
+              if (editing.mode === "rename" && (!to || to === label.name))
+                return setEditing(null);
+              void apply(label.name, to);
+            }}
+          >
+            {editing.mode === "rename" ? (
+              <>
+                <label className="settings-row-title" htmlFor={inputId}>
+                  Rename “{label.name}”
+                </label>
+                <div className="settings-token">
+                  <input
+                    id={inputId}
+                    autoFocus
+                    onFocus={(e) => e.target.select()}
+                    maxLength={40}
+                    autoComplete="off"
+                    value={editing.to}
+                    onChange={(e) =>
+                      setEditing({ ...editing, to: e.target.value })
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="secondary small-button"
+                    disabled={busy}
+                    onClick={() => setEditing(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button className="primary small-button" disabled={busy}>
+                    {busy ? "Saving…" : "Rename"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="settings-token">
+                <span className="settings-row-title">
+                  Remove “{label.name}” from {label.tasks}{" "}
+                  {label.tasks === 1 ? "task" : "tasks"}?
+                </span>
+                <span className="spacer" />
+                <button
+                  type="button"
+                  className="secondary small-button"
+                  disabled={busy}
+                  onClick={() => setEditing(null)}
+                >
+                  Cancel
+                </button>
+                <button className="danger-button small-button" disabled={busy}>
+                  {busy ? "Removing…" : "Remove"}
+                </button>
+              </div>
+            )}
+          </form>
+        ) : (
+          <div key={label.name} className="settings-row">
+            <div className="settings-row-text">
+              <span className="settings-row-title">
+                <Label label={label.name} />
+              </span>
+              <span className="settings-row-hint">
+                {label.tasks} {label.tasks === 1 ? "task" : "tasks"}
+              </span>
+            </div>
+            <div className="settings-row-control">
+              <button
+                type="button"
+                className="secondary small-button"
+                aria-label={`Rename ${label.name}`}
+                disabled={busy}
+                onClick={() =>
+                  setEditing({ from: label.name, mode: "rename", to: label.name })
+                }
+              >
+                Rename
+              </button>
+              <button
+                type="button"
+                className="secondary small-button"
+                aria-label={`Remove ${label.name}`}
+                disabled={busy}
+                onClick={() =>
+                  setEditing({ from: label.name, mode: "remove", to: "" })
+                }
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        ),
+      )}
+      {note && (
+        <p
+          className={`settings-row-note ${note.ok ? "small ok" : "inline-error"}`}
+          role={note.ok ? "status" : "alert"}
+        >
+          {note.text}
+        </p>
+      )}
+    </SettingsGroup>
   );
 }
 

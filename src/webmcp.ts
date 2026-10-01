@@ -55,6 +55,16 @@ const tools = [
     true,
   ],
   [
+    "list_labels",
+    "List the labels used by non-archived tasks, with how many tasks carry each.",
+    true,
+  ],
+  [
+    "rename_label",
+    "Rename a label on every non-archived task (merging into an existing label), or remove it with to: \"\". Saved views follow a rename. Changed tasks get a new version.",
+    false,
+  ],
+  [
     "create_task",
     "Create a backlog task on the explicit boardId from list_boards, optionally inside an epic.",
     false,

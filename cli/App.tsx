@@ -77,6 +77,7 @@ const eventVerb: Record<string, string> = {
   unlink_task: "unlinked",
   link_pull_requests: "linked pull requests",
   unlink_pull_request: "removed a pull request",
+  rename_label: "edited a label",
 };
 
 /** One message format for every failed request. */

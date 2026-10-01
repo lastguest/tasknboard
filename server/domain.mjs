@@ -151,7 +151,8 @@ const pullRequest = z
     }
     return pr;
   });
-const labels = z.array(z.string().trim().min(1).max(40))
+const label = z.string().trim().min(1).max(40);
+const labels = z.array(label)
   .transform((values) => [...new Set(values)]);
 const patch = z
   .object({
@@ -188,7 +189,7 @@ export const schemas = {
       acceptance: long.default(""),
       priority: z.enum(["low", "medium", "high"]).default("medium"),
       assignee: z.string().max(80).default(""),
-      labels: labels.default(["Product"]),
+      labels: labels.default([]),
       epic: taskEpic.default(""),
     })
     .strict(),
@@ -374,6 +375,11 @@ export const schemas = {
   set_board_sidebar: z
     .object({ id: boardId, inSidebar: z.boolean() })
     .strict(),
+  list_labels: z.object({}).strict(),
+  rename_label: z
+    .object({ from: label, to: z.union([z.literal(""), label]) })
+    .strict()
+    .refine((v) => v.from !== v.to, "to: Choose a different label"),
   workspace_info: z.object({}).strict(),
   export_workspace: z.object({}).strict(),
 };
