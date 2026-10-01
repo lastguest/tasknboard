@@ -8,6 +8,7 @@ import {
 } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { command, errorOf, type ApiError } from "./api";
+import { relativeTime } from "./formatting";
 import { Icon } from "./Icons";
 import { Markdown } from "./Markdown";
 import type { Task, TaskPullRequest } from "./types";
@@ -123,24 +124,6 @@ export function linkedTasks(tasks: Task[], ref: PullRef) {
   );
 }
 
-export function relativeTime(value: string, now = Date.now()) {
-  const seconds = Math.max(0, (now - Date.parse(value)) / 1000);
-  if (seconds < 60) return "now";
-  const steps: [number, string][] = [
-    [60, "m"],
-    [24, "h"],
-    [7, "d"],
-    [4.35, "w"],
-    [12, "mo"],
-    [Infinity, "y"],
-  ];
-  let n = seconds / 60;
-  for (const [size, unit] of steps) {
-    if (n < size) return `${Math.floor(n)}${unit}`;
-    n /= size;
-  }
-  return "";
-}
 const stateTitle: Record<PrState, string> = {
   open: "Open",
   draft: "Draft",

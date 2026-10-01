@@ -62,5 +62,13 @@ updates with the application's normal refresh.
 
 Migration 17 adds `inbox_cursors(actor TEXT PRIMARY KEY, sequence INTEGER NOT NULL)`.
 An actor without a row has cursor 0, so all their items are unread.
+It also adds the index `tasks_by_id` on the task key, so the Inbox and
+every task lookup by key avoid a full table scan.
+
+A read walks events from the newest. It stops when it has `limit` items and
+reaches events at or below the cursor. So the cost grows with the unread
+items, not with the full history. An actor that never marked anything read
+reads the full history on each request.
+
 `export_workspace` does not include cursors. They are personal read state,
 not workspace data, and the export schema version does not change.
