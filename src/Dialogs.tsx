@@ -20,7 +20,7 @@ import {
 } from "./types";
 import { ApiError, command, errorOf, token } from "./api";
 import { formatUtcTimestamp } from "./formatting";
-import { Assignee, Label, StatusIcon } from "./Board";
+import { Assignee, Label, PullCount, StatusIcon } from "./Board";
 import { Icon } from "./Icons";
 import { ContextMenu, type MenuState } from "./ContextMenu";
 import { CliHelper } from "./CliHelper";
@@ -157,6 +157,8 @@ export type ChoiceOption = {
   detail?: string;
   disabled?: boolean;
   icon?: React.ReactNode;
+  /** Shown at the end of the row, such as a task's pull request mark. */
+  trailing?: React.ReactNode;
 };
 
 /** Status choices shared by the task sidebar and the list view. */
@@ -398,6 +400,9 @@ export function SearchableChoiceDialog({
                       </span>
                     )}
                   </span>
+                  {option.trailing && (
+                    <span className="picker-option-trailing">{option.trailing}</span>
+                  )}
                 </label>
               </li>
             ))}
@@ -1835,6 +1840,7 @@ export function TaskEditor({
             label: `${task.id} ${task.title}`,
             detail: statusTitle(task.status),
             icon: <StatusIcon status={task.status} />,
+            trailing: <PullCount task={task} />,
           }))}
         selected={[]}
         onSelect={(value) => {

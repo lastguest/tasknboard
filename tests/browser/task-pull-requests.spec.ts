@@ -279,3 +279,43 @@ test("Saved views mark tasks that link pull requests", async ({ page }) => {
     await command("delete_view", { id: view.id, expectedVersion: view.version });
   }
 });
+
+test("Search results mark tasks that link pull requests", async ({ page }) => {
+  const stamp = `Searchable ${Date.now()}`;
+  const task = await command("create_task", { boardId: "BOARD-1", title: stamp });
+  await command("link_pull_requests", {
+    id: task.id,
+    expectedVersion: task.version,
+    pullRequests: ["acme/api#1001", "acme/api#1002"],
+  });
+  await page.addInitScript((value) => {
+    sessionStorage.setItem("tasknboard-token", value);
+  }, humanToken);
+  await page.goto(baseURL);
+  await page.getByRole("searchbox", { name: "Search tasks by ID, title, or context" }).fill(stamp);
+  await expect(page.locator(".task-card")).toHaveCount(1);
+  await expect(page.locator(".task-card .pr-count")).toHaveAttribute("title", "2 pull requests");
+});
+
+test("The task link picker marks tasks that link pull requests", async ({ page }) => {
+  const stamp = Date.now();
+  const source = await command("create_task", { boardId: "BOARD-1", title: `Link source ${stamp}` });
+  const target = await command("create_task", { boardId: "BOARD-1", title: `Link target ${stamp}` });
+  const plain = await command("create_task", { boardId: "BOARD-1", title: `Plain target ${stamp}` });
+  await command("link_pull_requests", {
+    id: target.id,
+    expectedVersion: target.version,
+    pullRequests: ["acme/api#1101", "acme/api#1102"],
+  });
+  await page.addInitScript((value) => {
+    sessionStorage.setItem("tasknboard-token", value);
+  }, humanToken);
+  await page.goto(`${baseURL}/#task/${source.id}`);
+  await page.getByRole("region", { name: "Links" }).getByRole("button", { name: "Add link" }).click();
+  await page.getByRole("menuitem", { name: "Related to" }).click();
+  const picker = page.getByRole("dialog", { name: new RegExp(`^${source.id} related to`) });
+  await picker.getByRole("searchbox").fill(String(stamp));
+  const option = (id: string) => picker.locator(".picker-option").filter({ hasText: id });
+  await expect(option(target.id).locator(".pr-count")).toHaveAttribute("title", "2 pull requests");
+  await expect(option(plain.id).locator(".pr-count")).toHaveCount(0);
+});

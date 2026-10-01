@@ -1487,6 +1487,10 @@ footer {
   gap: 2px;
   min-width: 0;
 }
+.picker-option-trailing {
+  flex: none;
+  margin-left: auto;
+}
 .picker-option-detail,
 .picker-empty {
   color: var(--subtle);
