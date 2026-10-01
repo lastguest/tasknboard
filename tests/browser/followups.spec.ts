@@ -858,8 +858,8 @@ test("Task links are added, followed, and removed from the details panel", async
   await expect(links).toContainText("No linked tasks.");
   // A link is its own write: the unsaved draft stays.
   await details.getByLabel("Title", { exact: true }).fill("Draft kept across a link");
-  await links.getByLabel("Link type").selectOption("blocked_by");
-  await links.getByRole("button", { name: "Link task…" }).click();
+  await links.getByRole("button", { name: "Add link" }).click();
+  await page.getByRole("menu", { name: "Link type" }).getByRole("menuitem", { name: "Blocked by" }).click();
   const picker = page.getByRole("dialog", { name: `${first.id} blocked by…` });
   await picker.getByLabel("Search tasks").fill(second.id);
   await picker.getByText(`${second.id} ${second.title}`).click();

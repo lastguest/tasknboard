@@ -1702,6 +1702,22 @@ footer {
   letter-spacing: 0.5px;
   color: var(--muted);
 }
+.side-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: -4px 0;
+}
+.icon-button.compact {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 4px;
+  color: var(--muted);
+}
+.icon-button.compact:hover:not(:disabled) {
+  color: var(--text);
+}
 .side-block .quiet {
   padding-left: 0;
 }
@@ -1716,13 +1732,14 @@ footer {
 .task-links {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 .task-links li {
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr) auto;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
+  min-height: 26px;
 }
 .task-links a {
   display: flex;

@@ -22,6 +22,7 @@ import { ApiError, command, errorOf, token } from "./api";
 import { formatUtcTimestamp } from "./formatting";
 import { Assignee, Label, StatusIcon } from "./Board";
 import { Icon } from "./Icons";
+import { ContextMenu, type MenuState } from "./ContextMenu";
 import { CliHelper } from "./CliHelper";
 import { MarkdownEditor } from "./Markdown";
 import { EpicTag } from "./Epics";
@@ -695,6 +696,7 @@ export function TaskEditor({
   const [archiveError, setArchiveError] = useState<ApiError | null>(null);
   const [linkType, setLinkType] = useState<LinkType>("blocks");
   const [linkPicker, setLinkPicker] = useState(false);
+  const [linkMenu, setLinkMenu] = useState<MenuState | null>(null);
   const [linkError, setLinkError] = useState<ApiError | null>(null);
   /** What the discard confirmation leads to: closing, or a revert to the saved task. */
   const [discard, setDiscard] = useState<false | "close" | "revert">(false);
@@ -1306,9 +1308,42 @@ export function TaskEditor({
           {current && (
             <>
             <section className="side-block" aria-label="Links">
-              <h3>
-                <Icon name="link" size={14} /> Links
-              </h3>
+              <div className="side-block-head">
+                <h3>
+                  <Icon name="link" size={14} /> Links
+                </h3>
+                <button
+                  type="button"
+                  className="icon-button compact"
+                  aria-label={pending === "link" ? "Saving link…" : "Add link"}
+                  title="Add link"
+                  aria-haspopup="menu"
+                  disabled={Boolean(pending)}
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setLinkMenu({
+                      label: "Link type",
+                      x: rect.right - 200,
+                      y: rect.bottom + 4,
+                      trigger: e.currentTarget,
+                      groups: [
+                        {
+                          label: "Link type",
+                          items: linkTypes.map((type) => ({
+                            label: type.title,
+                            onSelect: () => {
+                              setLinkType(type.id);
+                              setLinkPicker(true);
+                            },
+                          })),
+                        },
+                      ],
+                    });
+                  }}
+                >
+                  <Icon name="plus" size={14} />
+                </button>
+              </div>
               {current.links?.length ? (
                 <ul className="task-links">
                   {current.links.map((link) => (
@@ -1316,6 +1351,7 @@ export function TaskEditor({
                       <span className="small">{linkTitle(link.type)}</span>
                       <a
                         href={`#task/${link.id}`}
+                        title={`${link.id} ${link.title}`}
                         onClick={(e) => {
                           if (!onOpenTask) return;
                           e.preventDefault();
@@ -1329,13 +1365,13 @@ export function TaskEditor({
                       </a>
                       <button
                         type="button"
-                        className="icon-button"
+                        className="icon-button compact"
                         aria-label={`Remove link to ${link.id}`}
                         title="Remove link"
                         disabled={Boolean(pending)}
                         onClick={() => writeLink("unlink_task", link.id)}
                       >
-                        <Icon name="close" size={13} />
+                        <Icon name="close" size={12} />
                       </button>
                     </li>
                   ))}
@@ -1343,27 +1379,9 @@ export function TaskEditor({
               ) : (
                 <p className="small">No linked tasks.</p>
               )}
-              <div className="review-actions">
-                <select
-                  aria-label="Link type"
-                  value={linkType}
-                  onChange={(e) => setLinkType(e.target.value as LinkType)}
-                >
-                  {linkTypes.map((type) => (
-                    <option key={type.id} value={type.id}>
-                      {type.title}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={Boolean(pending)}
-                  onClick={() => setLinkPicker(true)}
-                >
-                  {pending === "link" ? "Saving…" : "Link task…"}
-                </button>
-              </div>
+              {linkMenu && (
+                <ContextMenu menu={linkMenu} onClose={() => setLinkMenu(null)} />
+              )}
               {linkError && (
                 <ErrorNote
                   error={linkError}
