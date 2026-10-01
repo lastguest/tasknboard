@@ -41,7 +41,7 @@ The sidebar lists your boards, as Linear lists teams. Expand a board to open its
 Right-click a board to hide it from your own sidebar; **hidden boards** at the end of the list shows it again.
 You can also select any board on the Board page. Use **New board** to create one, or **Edit board**
 to change its name and task prefix. Each board has its own task number sequence.
-Changing a prefix changes existing task keys on that board. Old keys keep working: `TNB-1` opens `APP-1` after a change from `TNB` to `APP`.
+Changing a prefix changes existing task keys on that board. Old keys keep working: `TNB-1` opens `APP-1` after a change from `TNB` to `APP`. They work until another board takes `TNB`; then `TNB-1` names that board's task. The board dialog asks you to confirm before it takes another board's former prefix.
 Create and rename epics by custom name on their pages.
 
 Views save filters (status, priority, assignee, label, epic, and search) and display settings (board or list, grouping, order) under a name, like Linear's custom views. Filter any board with **Filter**, then choose **Save as view**. A view is personal or shared with the workspace. Star it to keep it under Favorites in the sidebar. The assignee value **Me** means whoever opens the view. Agents read shared views through MCP (`list_views`, and `list_tasks` with `view`). See [docs/contracts/views.md](docs/contracts/views.md).

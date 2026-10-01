@@ -208,10 +208,13 @@ const prefixProblem = (value: string) =>
 
 export function BoardEditor({
   board,
+  boards,
   onClose,
   onSaved,
 }: {
   board: BoardRecord | null;
+  /** Every board, to warn before taking another board's former prefix. */
+  boards: BoardRecord[];
   onClose: () => void;
   onSaved: (saved: BoardRecord, previous: BoardRecord | null) => void;
 }) {
@@ -226,8 +229,14 @@ export function BoardEditor({
   const [pending, setPending] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const normalizedName = name.trim();
   const normalizedPrefix = prefix.trim().toUpperCase();
+  // Taking another board's former prefix ends the redirect of its old keys.
+  const retiredBy = boards.find(
+    (other) =>
+      other.id !== board?.id && other.formerPrefixes.includes(normalizedPrefix),
+  );
   const normalizedDescription = description.trim();
   const normalizedRepository = repository.trim();
   const nameError = normalizedName ? "" : "Enter a board name.";
@@ -245,12 +254,18 @@ export function BoardEditor({
     normalizedDescription !== board.description ||
     normalizedRepository !== (board.repository ?? "");
 
-  async function save(event: React.FormEvent) {
-    event.preventDefault();
+  /** `confirmed` is true after the person accepts a retired prefix. */
+  async function save(event?: React.FormEvent, confirmed = false) {
+    event?.preventDefault();
     if (pending) return;
     setAttempted(true);
     if (nameError || prefixError || repositoryError) return;
     if (board && !changed) return onClose();
+    if (retiredBy && !confirmed) {
+      setConfirming(true);
+      return;
+    }
+    setConfirming(false);
     setPending(true);
     setError(null);
     try {
@@ -293,6 +308,36 @@ export function BoardEditor({
       className="board-editor"
       footer={
         <>
+          {confirming && retiredBy && (
+            <div
+              className="discard-bar"
+              role="alertdialog"
+              aria-label="Use a retired prefix"
+            >
+              <span>
+                {normalizedPrefix}- is a former prefix of {retiredBy.name}.
+                Using it here will orphan the old {normalizedPrefix}- task keys:
+                links to them will stop opening {retiredBy.name} tasks. Are you
+                sure?
+              </span>
+              <span className="spacer" />
+              <button
+                type="button"
+                className="secondary"
+                autoFocus
+                onClick={() => setConfirming(false)}
+              >
+                Keep editing
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                onClick={() => void save(undefined, true)}
+              >
+                Use {normalizedPrefix} anyway
+              </button>
+            </div>
+          )}
           {error && (
             <p className="inline-error" role="alert">
               <Icon name="alert" size={16} />
@@ -301,7 +346,7 @@ export function BoardEditor({
               </span>
             </p>
           )}
-          <div className="form-actions">
+          <div className="form-actions" hidden={confirming && Boolean(retiredBy)}>
             <span className="spacer" />
             <button
               type="button"
@@ -364,7 +409,10 @@ export function BoardEditor({
             value={prefix}
             aria-invalid={attempted && Boolean(prefixError)}
             aria-describedby={`${prefixId}-hint${attempted && prefixError ? ` ${prefixId}-error` : ""}`}
-            onChange={(event) => setPrefix(event.target.value.toUpperCase())}
+            onChange={(event) => {
+              setPrefix(event.target.value.toUpperCase());
+              setConfirming(false);
+            }}
           />
           <span className="field-hint" id={`${prefixId}-hint`}>
             Every task on this board uses this prefix. Prefixes must be unique

@@ -2216,6 +2216,7 @@ export default function App() {
         <BoardEditor
           key={boardDialog.board?.id ?? "create"}
           board={boardDialog.board}
+          boards={boards}
           onClose={() => setBoardDialog(null)}
           onSaved={boardSaved}
         />

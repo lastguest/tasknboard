@@ -192,18 +192,16 @@ export function createStore(path, { clock = Date.now } = {}) {
     db
       .prepare("UPDATE boards SET data=? WHERE number=?")
       .run(JSON.stringify(board), Number(board.id.slice("BOARD-".length)));
-  const reserveBoardPrefix = (prefix, boardId) => {
-    const owner = db
-      .prepare("SELECT board_id FROM board_prefixes WHERE prefix=?")
-      .get(prefix);
-    if (owner && owner.board_id !== boardId)
-      fail("VALIDATION", `Prefix ${prefix} belongs to another board`, 400);
-    if (!owner)
-      db.prepare("INSERT INTO board_prefixes(prefix, board_id) VALUES(?, ?)").run(
-        prefix,
-        boardId,
-      );
-  };
+  /**
+   * Records the prefix for the board, after checkBoardPrefix. Taking another
+   * board's former prefix moves the reservation, which ends its redirect.
+   */
+  const reserveBoardPrefix = (prefix, boardId) =>
+    db
+      .prepare(
+        "INSERT INTO board_prefixes(prefix, board_id) VALUES(?, ?) ON CONFLICT(prefix) DO UPDATE SET board_id=excluded.board_id",
+      )
+      .run(prefix, boardId);
   /**
    * Adds `formerPrefixes`, the retired prefixes whose task keys still resolve
    * on each board, `inSidebar`, the caller's own sidebar preference, and
@@ -285,11 +283,16 @@ export function createStore(path, { clock = Date.now } = {}) {
     return row && JSON.parse(row.data);
   };
   const getEpic = (id) => findEpic(id) ?? fail("NOT_FOUND", "Epic not found", 404);
+  /** A prefix is free unless another board uses it now. Former prefixes are free. */
   const checkBoardPrefix = (prefix, exceptBoardId) => {
     const owner = db
       .prepare("SELECT board_id FROM board_prefixes WHERE prefix=?")
       .get(prefix);
-    if (owner && owner.board_id !== exceptBoardId)
+    if (
+      owner &&
+      owner.board_id !== exceptBoardId &&
+      getBoard(owner.board_id).prefix === prefix
+    )
       fail("VALIDATION", `Prefix ${prefix} belongs to another board`, 400);
     if (
       allEpics().some(

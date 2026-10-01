@@ -157,7 +157,7 @@ test("boards store a trimmed description that defaults to empty", (t) => {
   assert.equal(defaultBoard.description, "");
 });
 
-test("former task keys redirect to their own board and never to another", (t) => {
+test("former task keys redirect until another board takes the prefix", (t) => {
   const store = fixture(t);
   const [originalBoard] = store.execute("list_boards", {}, human).boards;
   const originalTask = store.execute(
@@ -176,7 +176,7 @@ test("former task keys redirect to their own board and never to another", (t) =>
   );
 
   assert.throws(
-    () => store.execute("create_board", { name: "Reuse", prefix: "TNB" }, human),
+    () => store.execute("create_board", { name: "Reuse", prefix: "APP" }, human),
     { code: "VALIDATION" },
   );
   const otherBoard = store.execute(
@@ -213,8 +213,9 @@ test("former task keys redirect to their own board and never to another", (t) =>
   );
   assert.equal(reclaimed.prefix, "TNB");
   assert.deepEqual(reclaimed.formerPrefixes, ["APP"]);
+  // A prefix in use stays with its board.
   assert.throws(
-    () => store.execute("create_board", { name: "Reuse former", prefix: "APP" }, human),
+    () => store.execute("create_board", { name: "Reuse current", prefix: "TNB" }, human),
     { code: "VALIDATION" },
   );
   const reclaimedTask = store.execute("get_task", { id: "APP-1" }, human);
@@ -247,6 +248,49 @@ test("former task keys redirect to their own board and never to another", (t) =>
   assert.equal(
     Object.hasOwn(store.execute("export_workspace", {}, human).boards[0], "formerPrefixes"),
     false,
+  );
+
+  // Registering a former prefix again ends that redirect only.
+  const newApp = store.execute("create_board", { name: "New app", prefix: "APP" }, human);
+  assert.throws(() => store.execute("get_task", { id: "APP-1" }, human), {
+    code: "NOT_FOUND",
+  });
+  const fresh = store.execute(
+    "create_task",
+    { boardId: newApp.id, title: "Fresh app task" },
+    human,
+  );
+  assert.equal(fresh.id, "APP-1");
+  assert.equal(store.execute("get_task", { id: "APP-1" }, human).title, "Fresh app task");
+  assert.equal(store.execute("get_task", { id: "TNB-1" }, human).id, "WEB-1");
+  assert.deepEqual(
+    store
+      .execute("list_boards", {}, human)
+      .boards.map((board) => [board.prefix, board.formerPrefixes]),
+    [
+      ["WEB", ["TNB"]],
+      ["OPS", []],
+      ["APP", []],
+    ],
+  );
+  assert.deepEqual(
+    store.execute("export_workspace", {}, human).boardPrefixReservations,
+    [
+      { prefix: "APP", boardId: newApp.id },
+      { prefix: "OPS", boardId: otherBoard.id },
+      { prefix: "TNB", boardId: originalBoard.id },
+      { prefix: "WEB", boardId: originalBoard.id },
+    ],
+  );
+  // The original board can no longer take APP back while APP is in use.
+  assert.throws(
+    () =>
+      store.execute(
+        "update_board",
+        { id: originalBoard.id, expectedVersion: 4, patch: { prefix: "APP" } },
+        human,
+      ),
+    { code: "VALIDATION" },
   );
 });
 
@@ -415,7 +459,7 @@ test("the board migration preserves legacy keys and epic references", (t) => {
     { code: "VALIDATION" },
   );
   assert.throws(
-    () => store.execute("create_board", { name: "Former", prefix: "TNB" }, human),
+    () => store.execute("create_board", { name: "Current", prefix: "APP" }, human),
     { code: "VALIDATION" },
   );
   assert.throws(

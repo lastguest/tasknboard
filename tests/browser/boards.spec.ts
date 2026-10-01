@@ -193,3 +193,47 @@ test("the sidebar lists boards with their pages, and each person hides boards", 
   await page.getByRole("menuitem", { name }).click();
   await expect(row).toBeVisible();
 });
+
+test("taking another board's former prefix asks for confirmation and ends the redirect", async ({ page }) => {
+  const suffix = key();
+  const retired = `OLD${suffix}`;
+  const owner = await command<any>("create_board", { name: `Owner ${suffix}`, prefix: retired });
+  const task = await command<any>("create_task", { boardId: owner.id, title: `Owned ${suffix}` });
+  await command("update_board", {
+    id: owner.id,
+    expectedVersion: owner.version,
+    patch: { prefix: `NEW${suffix}` },
+  });
+  await connect(page);
+
+  await page
+    .getByRole("group", { name: "Board actions" })
+    .getByRole("button", { name: "New board" })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "New board" });
+  await dialog.getByRole("textbox", { name: "Name" }).fill(`Taker ${suffix}`);
+  await dialog.getByRole("textbox", { name: "Board prefix" }).fill(retired);
+  await dialog.getByRole("button", { name: "Create board" }).click();
+  const confirm = dialog.getByRole("alertdialog", { name: "Use a retired prefix" });
+  await expect(confirm).toContainText(`will orphan the old ${retired}- task keys`);
+  await expect(confirm).toContainText("Are you sure?");
+  await expect(dialog.getByRole("button", { name: "Create board" })).toBeHidden();
+
+  // Keep editing sends nothing, and the redirect still works.
+  await confirm.getByRole("button", { name: "Keep editing" }).click();
+  await expect(confirm).toBeHidden();
+  expect((await command<any>("get_task", { id: task.id })).id).toBe(`NEW${suffix}-1`);
+
+  await dialog.getByRole("button", { name: "Create board" }).click();
+  await confirm.getByRole("button", { name: `Use ${retired} anyway` }).click();
+  await expect(dialog).toBeHidden();
+  const boards = (await command<{ boards: any[] }>("list_boards")).boards;
+  expect(boards.find((b) => b.name === `Taker ${suffix}`)?.prefix).toBe(retired);
+  expect(boards.find((b) => b.id === owner.id)?.formerPrefixes).toEqual([]);
+  const old = await fetch(`${baseURL}/api/get_task`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${humanToken}` },
+    body: JSON.stringify({ id: task.id }),
+  });
+  expect(old.status).toBe(404);
+});
