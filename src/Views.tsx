@@ -168,10 +168,36 @@ export function conditionDescriber(
       .join(", ")}`;
 }
 
-type Picking =
-  | null
-  | { step: "field" }
-  | { step: "values"; field: ViewField; index: number; values: string[] };
+type Picking = null | {
+  step: "values";
+  field: ViewField;
+  index: number;
+  values: string[];
+};
+
+/** Opens the field picker for a new filter; FilterBar shows the picker and the chips. */
+export function FilterAddButton({
+  count,
+  onClick,
+}: {
+  count: number;
+  onClick: () => void;
+}) {
+  const label = count ? "Add filter" : "Filter";
+  return (
+    <button
+      type="button"
+      className="secondary small-button square-button filter-add"
+      aria-haspopup="dialog"
+      aria-label={label}
+      title={label}
+      disabled={count >= 20}
+      onClick={onClick}
+    >
+      <Icon name="filter" size={14} />
+    </button>
+  );
+}
 
 /**
  * Linear-style filter chips. Every chip is one condition; all of them must
@@ -181,10 +207,15 @@ export function FilterBar({
   conditions,
   context,
   onChange,
+  adding,
+  onAdding,
 }: {
   conditions: ViewCondition[];
   context: FilterContext;
   onChange: (conditions: ViewCondition[]) => void;
+  /** The field picker for a new filter is open; FilterAddButton opens it. */
+  adding: boolean;
+  onAdding: (open: boolean) => void;
 }) {
   const people = usePeople();
   const [picking, setPicking] = useState<Picking>(null);
@@ -192,7 +223,7 @@ export function FilterBar({
     valueLabel(field, value, context, people);
 
   function commit() {
-    if (picking?.step !== "values") return setPicking(null);
+    if (!picking) return;
     const { field, index, values } = picking;
     const next = [...conditions];
     if (!values.length) {
@@ -264,17 +295,7 @@ export function FilterBar({
           </span>
         );
       })}
-      <button
-        type="button"
-        className="secondary small-button filter-add"
-        aria-haspopup="dialog"
-        disabled={conditions.length >= 20}
-        onClick={() => setPicking({ step: "field" })}
-      >
-        <Icon name="filter" size={14} />
-        {conditions.length ? <span className="sr-only">Add filter</span> : "Filter"}
-      </button>
-      {picking?.step === "field" && (
+      {adding && (
         <SearchableChoiceDialog
           title="Add filter"
           searchLabel="Filter by…"
@@ -283,19 +304,20 @@ export function FilterBar({
             label: fieldTitles[field],
           }))}
           selected={[]}
-          onSelect={(field) =>
+          onSelect={(field) => {
+            onAdding(false);
             setPicking({
               step: "values",
               field: field as ViewField,
               index: -1,
               values: [],
-            })
-          }
+            });
+          }}
           onToggle={() => {}}
-          onClose={() => setPicking(null)}
+          onClose={() => onAdding(false)}
         />
       )}
-      {picking?.step === "values" && (
+      {picking && (
         <SearchableChoiceDialog
           title={`${fieldTitles[picking.field]} filter`}
           searchLabel={`Search ${fieldTitles[picking.field].toLowerCase()}`}

@@ -38,6 +38,7 @@ import type { SettingsPage } from "./Dialogs";
 import {
   DisplayOptions,
   FavoriteButton,
+  FilterAddButton,
   FilterBar,
   ViewEditor,
   ViewGlyph,
@@ -156,6 +157,7 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [assignee, setAssignee] = useState("");
   const [conditions, setConditions] = useState<ViewCondition[]>([]);
+  const [addingFilter, setAddingFilter] = useState(false);
   const [editor, setEditor] = useState<Editor>(null);
   const [tabs, setTabs] = useState<TaskTab[]>([]);
   /** The task ID of the active tab; empty for the page tab. */
@@ -659,6 +661,10 @@ export default function App() {
   }, [currentSaved?.version]);
   const canSaveView =
     isHuman && !overviews.includes(view) && sync.connected;
+  const showSaveView =
+    canSaveView &&
+    view !== "saved" &&
+    (filtersActive || view === "mine" || view === "epic");
   saveAsRef.current = () => {
     if (canSaveView) setViewDialog({ view: null, ...working() });
   };
@@ -1996,6 +2002,10 @@ export default function App() {
                     </button>
                   </div>
                   <div className="toolbar-actions">
+                    <FilterAddButton
+                      count={conditions.length}
+                      onClick={() => setAddingFilter(true)}
+                    />
                     <DisplayOptions display={display} onChange={setDisplay} />
                     {filtersActive && (
                       <button
@@ -2025,15 +2035,15 @@ export default function App() {
                     </button>
                   </div>
                 </div>
-                <div className="filter-row">
+                <div className={conditions.length || showSaveView ? "filter-row" : "filter-row empty"}>
                   <FilterBar
                     conditions={conditions}
                     context={filterContext}
                     onChange={setConditions}
+                    adding={addingFilter}
+                    onAdding={setAddingFilter}
                   />
-                  {canSaveView &&
-                    view !== "saved" &&
-                    (filtersActive || view === "mine" || view === "epic") && (
+                  {showSaveView && (
                       <button
                         type="button"
                         className="quiet save-view"

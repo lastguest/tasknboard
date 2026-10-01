@@ -18,12 +18,24 @@ export function BoardControls({
   return (
     <div className="board-controls" role="group" aria-label="Board actions">
       {canEdit && (
-        <button type="button" className="secondary" onClick={onEdit}>
-          Edit board
+        <button
+          type="button"
+          className="secondary square-button"
+          aria-label="Edit board"
+          title="Edit board"
+          onClick={onEdit}
+        >
+          <Icon name="mdWrite" size={15} />
         </button>
       )}
-      <button type="button" className="secondary" onClick={onCreate}>
-        <Icon name="plus" size={15} /> New board
+      <button
+        type="button"
+        className="secondary square-button"
+        aria-label="New board"
+        title="New board"
+        onClick={onCreate}
+      >
+        <Icon name="plus" size={15} />
       </button>
     </div>
   );

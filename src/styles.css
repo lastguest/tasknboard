@@ -201,6 +201,14 @@ textarea::placeholder {
   padding: 5px 10px;
   font-size: 12px;
 }
+/* Icon-only buttons keep their text siblings' height and become square. */
+.square-button {
+  padding: 0;
+  width: 38px;
+}
+.small-button.square-button {
+  width: 30px;
+}
 .quiet {
   display: inline-flex;
   align-items: center;
@@ -4414,9 +4422,9 @@ footer {
   padding: 0 7px;
   color: var(--subtle);
 }
-.filter-add {
-  min-height: 28px;
-  gap: 6px;
+/* Nothing to show under the toolbar: keep the row for the filter dialogs only. */
+.filter-row.empty {
+  margin-top: 0;
 }
 .save-view {
   margin-left: auto;

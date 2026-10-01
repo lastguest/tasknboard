@@ -22,7 +22,8 @@ async function connect(page: Page) {
   await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
 }
 async function addFilter(page: Page, field: string, values: string[]) {
-  await page.getByRole("group", { name: "Filters" }).getByRole("button", { name: /Filter|Add filter/ }).click();
+  // The add-filter button is an icon in the Board/List tab row; the chips stay in the Filters group.
+  await page.locator(".toolbar").getByRole("button", { name: /^(Filter|Add filter)$/ }).click();
   await page.getByRole("dialog", { name: "Add filter" }).getByText(field, { exact: true }).click();
   const picker = page.getByRole("dialog", { name: `${field} filter` });
   for (const value of values) await picker.getByText(value, { exact: true }).click();

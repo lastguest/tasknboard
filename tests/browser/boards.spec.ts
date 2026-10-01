@@ -40,6 +40,12 @@ test("boards scope task keys, persist selection, and own task deep links", async
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Default");
   // A board without a description shows no subtitle.
   await expect(page.locator(".page-title p")).toHaveCount(0);
+  // Board actions are icon-only, named by their labels and tooltips.
+  for (const name of ["Edit board", "New board"]) {
+    const action = page.getByRole("group", { name: "Board actions" }).getByRole("button", { name });
+    await expect(action).toHaveText("");
+    await expect(action).toHaveAttribute("title", name);
+  }
   await page
     .getByRole("group", { name: "Board actions" })
     .getByRole("button", { name: "New board" })
