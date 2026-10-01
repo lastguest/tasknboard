@@ -267,7 +267,7 @@ test("A plain toast closes on its own while the app keeps polling", async ({ pag
   await expect(toast).toBeVisible();
   // A hovered toast stays, so keep the pointer away from it.
   await page.mouse.move(0, 0);
-  // Step past the 6 s timeout; the real waits let each poll finish and re-render the app.
+  // Step past the timeout; real waits let each poll finish and re-render the app.
   for (let second = 0; second < 8; second++) {
     await page.clock.runFor(1000);
     await page.waitForTimeout(100);
@@ -411,7 +411,24 @@ test("Hidden tabs pause polling and visible tabs refresh immediately", async ({ 
   expect(reads).toBe(1);
 });
 
-test("A plain toast fades out although polling refreshes the page", async ({ page }) => {
+test("A toast with actions closes after three seconds", async ({ page }) => {
+  await page.clock.install();
+  await connect(page);
+  await page.getByRole("button", { name: "New task", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "New task" });
+  await dialog.getByLabel("Title").fill(`Action toast ${key()}`);
+  await dialog.getByRole("button", { name: "Create task" }).click();
+  await expect(dialog).toBeHidden();
+  const toast = page.locator(".toast").filter({ has: page.getByRole("button", { name: "Open", exact: true }) });
+  await expect(toast).toBeVisible();
+  await page.mouse.move(0, 0);
+  await page.clock.runFor(2_500);
+  await expect(toast).toBeVisible();
+  await page.clock.runFor(501);
+  await expect(toast).toBeHidden();
+});
+
+test("A plain toast pauses on hover and closes after three seconds", async ({ page }) => {
   const task = await create(`Toast ${key()}`);
   await page.clock.install();
   await connect(page);
@@ -421,11 +438,13 @@ test("A plain toast fades out although polling refreshes the page", async ({ pag
   await details.getByRole("button", { name: "Save changes" }).click();
   const toast = page.locator(".toast").filter({ hasText: `Saved ${task.id}` });
   await expect(toast).toBeVisible();
-  // A poll inside the six seconds must not restart the toast timer.
-  const poll = page.waitForResponse((response) => response.url().endsWith("/api/list_tasks"));
+  await toast.hover();
   await page.clock.runFor(5_001);
-  await poll;
-  await page.clock.runFor(1_000);
+  await expect(toast).toBeVisible();
+  await page.mouse.move(0, 0);
+  await page.clock.runFor(2_500);
+  await expect(toast).toBeVisible();
+  await page.clock.runFor(501);
   await expect(toast).toBeHidden();
 });
 

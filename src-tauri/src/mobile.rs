@@ -65,7 +65,7 @@ fn open_link(app: &AppHandle, url: &Url) {
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![saved_server, save_server])
+        .invoke_handler(tauri::generate_handler![saved_server, save_server, crate::open_external_url])
         .setup(|app| {
             let saved = fs::read_to_string(server_file(app.handle())?)
                 .ok()

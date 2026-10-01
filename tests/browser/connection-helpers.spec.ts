@@ -45,22 +45,61 @@ test("client helpers switch formats, copy current identity, and report clipboard
     name: "Connect a coding agent",
     exact: true,
   });
-  await expect(section.getByLabel("codex connection helper")).toContainText(
-    "codex mcp add",
-  );
+  await expect(section.getByLabel("codex connection helper")).toHaveCount(0);
   await section.getByLabel("Agent identity").fill("codex-2");
+  let identity = "";
+  await page.route("**/api/codex-plugin", async (route) => {
+    identity = route.request().postDataJSON().identity;
+    await route.fulfill({ json: { installed: true, identity } });
+  });
   await section
-    .getByRole("button", { name: "Copy command", exact: true })
+    .getByRole("button", { name: "Install Codex plugin", exact: true })
     .click();
-  expect(await page.evaluate(() => (window as any).copiedHelper)).toContain(
-    "TASKNBOARD_AGENT_ID=codex-2",
+  await expect(section.getByRole("status")).toContainText("plugin installed");
+  expect(identity).toBe("codex-2");
+  await page.route("**/api/codex-plugin", (route) =>
+    route.fulfill({
+      status: 400,
+      json: { message: "Install the Codex CLI and add it to PATH." },
+    }),
   );
-  await expect(section.getByRole("status")).toContainText("Copied.");
+  await section
+    .getByRole("button", { name: "Install Codex plugin", exact: true })
+    .click();
+  await expect(section.getByRole("alert")).toContainText(
+    "Install the Codex CLI",
+  );
+  await section.getByLabel("Agent identity").fill("");
+  await expect(
+    section.getByRole("button", { name: "Install Codex plugin", exact: true }),
+  ).toBeDisabled();
   await section.getByLabel("Client", { exact: true }).selectOption("claude");
   await expect(section.getByRole("status")).toHaveCount(0);
   await expect(section.getByLabel("Agent identity")).toHaveValue("claude");
-  await expect(section.getByLabel("claude connection helper")).toContainText(
-    "claude mcp add tasknboard --transport stdio --scope user",
+  await expect(section.getByLabel("claude connection helper")).toHaveCount(0);
+  await section.getByLabel("Agent identity").fill("claude-2");
+  await page.route("**/api/claude-plugin", async (route) => {
+    identity = route.request().postDataJSON().identity;
+    await route.fulfill({ json: { installed: true, identity } });
+  });
+  await section
+    .getByRole("button", { name: "Install Claude plugin", exact: true })
+    .click();
+  await expect(section.getByRole("status")).toContainText(
+    "Restart Claude Code",
+  );
+  expect(identity).toBe("claude-2");
+  await page.route("**/api/claude-plugin", (route) =>
+    route.fulfill({
+      status: 400,
+      json: { message: "Install the Claude Code CLI and add it to PATH." },
+    }),
+  );
+  await section
+    .getByRole("button", { name: "Install Claude plugin", exact: true })
+    .click();
+  await expect(section.getByRole("alert")).toContainText(
+    "Install the Claude Code CLI",
   );
   await section.getByLabel("Client", { exact: true }).selectOption("opencode");
   await section.getByRole("button", { name: "Copy configuration" }).click();

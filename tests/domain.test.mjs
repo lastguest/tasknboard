@@ -192,7 +192,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
     { id: "TasknBoard Agent", kind: "human", token: "must-not-be-kept" },
   ]);
   const info = s.execute("workspace_info", {}, human);
-  assert.equal(info.schemaVersion, 14);
+  assert.equal(info.schemaVersion, 15);
   assert.equal(info.boards[0].id, "BOARD-1");
   assert.equal(Object.hasOwn(info, "settings"), false);
   assert.deepEqual(info.actor, {
@@ -223,7 +223,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
   );
   assert.equal(s.execute("list_tasks", {}, human).total, 0);
   const backup = s.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 14);
+  assert.equal(backup.schemaVersion, 15);
   assert.equal(backup.boards[0].id, "BOARD-1");
   assert.deepEqual(backup.actors, info.actors);
 });
@@ -1221,15 +1221,15 @@ test("links survive prefix changes and refuse archived targets", (t) => {
   s.execute("link_task", { id: first.id, expectedVersion: 1, type: "relates", target: second.id }, human);
   s.execute("update_board", { id: "BOARD-1", expectedVersion: 1, patch: { prefix: "APP" } }, human);
   const renamed = s.execute("get_task", { id: second.id }, human);
-  assert.deepEqual(renamed.links.map((l) => [l.type, l.id]), [["relates", "APP-001"]]);
+  assert.deepEqual(renamed.links.map((l) => [l.type, l.id]), [["relates", "APP-1"]]);
   const third = s.make();
   s.execute("archive_task", { id: renamed.id, expectedVersion: renamed.version }, human);
   assert.deepEqual(
-    s.execute("get_task", { id: "APP-001" }, human).links.map((l) => [l.id, l.archived]),
-    [["APP-002", true]],
+    s.execute("get_task", { id: "APP-1" }, human).links.map((l) => [l.id, l.archived]),
+    [["APP-2", true]],
   );
   assert.throws(
-    () => s.execute("link_task", { id: third.id, expectedVersion: 1, type: "blocks", target: "TNB-002" }, human),
+    () => s.execute("link_task", { id: third.id, expectedVersion: 1, type: "blocks", target: "TNB-2" }, human),
     { code: "ARCHIVED" },
   );
 });

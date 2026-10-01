@@ -113,7 +113,7 @@ test("desktop service uses its assigned port, persists tasks, and exits with its
   const otherResponse = await first.post("create_task", { title: "Other board", boardId: board.id }, { Origin: first.origin });
   assert.equal(otherResponse.status, 200);
   const other = await otherResponse.json();
-  assert.equal(other.id, "OPS-001");
+  assert.equal(other.id, "OPS-1");
   await first.stop();
   await assert.rejects(fetch(first.origin));
 

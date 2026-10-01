@@ -540,11 +540,21 @@ main {
   gap: 12px;
   flex-wrap: wrap;
 }
+.page-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.page-title-row h1 {
+  min-width: 0;
+}
 .board-controls {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin: 0 0 12px;
+  margin-left: auto;
 }
 .board-switch {
   display: inline-flex;

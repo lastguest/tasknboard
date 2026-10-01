@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { connectionHelper, isMcpStatus } from "../src/connection-helpers.ts";
 
 const entry = {
@@ -15,23 +14,11 @@ const runtime = {
   cli: { ...entry, args: ["/Apps/Task Board/cli.mjs"] },
 };
 
-test("client commands preserve literal paths and separate agent identities", () => {
-  for (const client of ["codex", "claude"]) {
-    const helper = connectionHelper(client, runtime, client);
-    // "sh" from PATH: Windows runners have it from Git for Windows.
-    const output = execFileSync(
-      "sh",
-      ["-c", `${client}() { printf '%s\\0' "$@"; }; ${helper.text}`],
-      { encoding: "utf8" },
-    );
-    const args = output.split("\0").slice(0, -1);
-    assert.deepEqual(args.slice(0, 3), ["mcp", "add", "tasknboard"]);
-    assert.deepEqual(args.slice(-3), ["--", entry.command, ...entry.args]);
-    assert.ok(args.includes(`TASKNBOARD_DB=${entry.env.TASKNBOARD_DB}`));
-    assert.ok(args.includes(`TASKNBOARD_AGENT_ID=${client}`));
-    assert.ok(args.includes("TASKNBOARD_SERVER_URL="));
-    assert.ok(args.includes("TASKNBOARD_TOKEN="));
-  }
+test("Codex uses a direct plugin install instead of a standalone MCP command", () => {
+  const helper = connectionHelper("codex", runtime, "codex");
+  assert.equal(helper.label, "Install Codex plugin");
+  assert.equal(helper.text, "");
+  assert.match(helper.instruction, /desktop app/);
 });
 
 test("OpenCode gets its native configuration and Pi gets an agent CLI skill", () => {
@@ -58,9 +45,6 @@ test("OpenCode gets its native configuration and Pi gets an agent CLI skill", ()
 
 test("Windows commands use PowerShell literal strings and invocation", () => {
   const windows = { ...runtime, platform: "win32" };
-  assert.match(connectionHelper("codex", windows, "codex").text, /Stefano''s/);
-  for (const client of ["codex", "claude"])
-    assert.match(connectionHelper(client, windows, client).text, / '--' '/);
   const pi = connectionHelper("pi", windows, "pi");
   assert.ok(pi.text.includes("$env:TASKNBOARD_AGENT_ID = 'pi';"));
   assert.ok(pi.text.includes("& '/Apps/Stefano''s $(false)/node'"));
@@ -73,4 +57,10 @@ test("incomplete runtime configuration is rejected instead of crashing the helpe
   assert.equal(isMcpStatus({ mode: "shared" }), true);
   assert.equal(isMcpStatus({ ...runtime, cli: undefined }), false);
   assert.equal(isMcpStatus({ ...runtime, config: {} }), false);
+});
+
+test("Claude uses the desktop install button instead of a setup script", () => {
+  const helper = connectionHelper("claude", runtime, "claude-2");
+  assert.equal(helper.label, "Install Claude plugin");
+  assert.equal(helper.text, "");
 });

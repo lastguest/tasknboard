@@ -48,6 +48,8 @@ Views save filters (status, priority, assignee, label, epic, and search) and dis
 
 Link related tasks under **Links** in the task details: blocks, blocked by, related to, duplicates, or duplicated by. The other task shows the inverse link. Links inform; they do not stop status changes. Agents use `link_task` and `unlink_task` on tasks they have claimed. See [docs/contracts/task-links.md](docs/contracts/task-links.md).
 
+Agents can start work as soon as you assign them a task. In the desktop app, install the Claude Code or Codex plugin from **Settings** with an agent identity, then set a **Repository folder** in **Edit board**. When a person assigns a task on that board to that identity, the app runs `claude -p` or `codex exec` in the folder. The agent claims the task, works on it, and submits it for review. Each agent runs one task at a time; later assignments wait their turn. The run does not stop for approvals (`--dangerously-skip-permissions` or `--dangerously-bypass-approvals-and-sandbox`), so assign only tasks whose text you trust. The activity shows when the agent started, stopped with an error, or could not start, and the log path in `~/.tasknboard/logs/<identity>/`. Leave the folder empty to start agents by hand. Shared servers never start agents.
+
 Keyboard: **N** new task, **Cmd/Ctrl K** search, **F** assignee filter, **⌥/Alt V** save as view, **?** shortcuts, **Esc** close dialog. Drag between columns, or use the Status menu on each card or list row (the keyboard and touch alternative). Right-click a card, list row, epic, agent, or empty page area for a context menu, or press **Shift F10** on the focused item. The task menu changes status, priority, and assignee, filters by assignee, copies the ID, and archives after a second confirmation. Every move is validated by the server; a rejected move stays in place with an explanation. Human review is required before Done: an In review task shows **Mark Done** and **Needs changes** in its details. The interface is English in this version.
 
 A task opens in its own tab in a horizontal strip above the page. The first tab returns to the page. Each tab keeps its draft while you switch tabs, stays open after **Save changes**, and asks before it discards a draft on close. **Cancel** reverts the draft to the saved task. A new task still opens in a dialog.
@@ -318,7 +320,18 @@ The service needs internet access to reach GitHub. See the
 ## Coding agents: local MCP
 
 Open **Agents → Connect a coding agent** for setup helpers with the active workspace paths.
-Choose Codex or Claude Code to copy a setup command, or OpenCode to copy its configuration.
+Choose Codex in the desktop app and press **Install Codex plugin**.
+The Codex CLI must be on the app's PATH and support `codex plugin`.
+TasknBoard creates a local marketplace under `~/.tasknboard/codex` and installs
+the plugin with the active workspace paths and selected agent identity.
+Restart Codex after installation. Check with `codex plugin list --json`.
+Remove a previous standalone entry with `codex mcp remove tasknboard` before installation.
+Choose OpenCode to copy its configuration.
+Choose Claude Code, enter an agent identity, and click **Install Claude plugin**.
+The desktop app uses the Claude Code CLI to install a local plugin with the active
+workspace paths. The CLI must be on the desktop app's PATH. Restart Claude Code
+when installation succeeds. This installs a local Claude Code plugin. Claude's
+account-wide Customize page uses a separate plugin upload flow.
 Choose Pi to copy or download a native skill that uses the TasknBoard CLI as an agent.
 Give each concurrent agent a different identity. Copying a helper does not install or connect the client.
 For source runs, build the CLI with `npm run build:cli` before using the Pi skill.

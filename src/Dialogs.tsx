@@ -411,6 +411,9 @@ const kindText: Record<string, string> = {
   set_standup_notes: "updated stand-up notes",
   link_task: "linked a task",
   unlink_task: "removed a link",
+  agent_started: "started work automatically",
+  agent_not_started: "could not start automatically",
+  agent_stopped: "stopped before finishing",
 };
 const fieldLabels: Record<string, string> = {
   title: "title",

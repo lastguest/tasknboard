@@ -6,6 +6,8 @@ export type Board = {
   id: BoardId;
   name: string;
   prefix: string;
+  /** Absolute folder where assigned agents start work; "" means none. */
+  repository: string;
   /** Retired prefixes whose task keys still resolve on this board. */
   formerPrefixes: string[];
   /** Whether the caller lists this board in the sidebar. Each person sets it. */

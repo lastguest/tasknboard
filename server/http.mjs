@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 import { timingSafeEqual } from "node:crypto";
 import { createStore } from "./store.mjs";
 import { createCliHelper } from "./cli-helper.mjs";
+import { createClaudePlugin } from "./claude-plugin.mjs";
+import { createCodexPlugin } from "./codex-plugin.mjs";
+import { createAgentLauncher } from "./agent-launcher.mjs";
 import { createGitHub } from "./github.mjs";
 import { imageDataUrlLimit } from "./domain.mjs";
 import { dbPath, localActor, tokensFromEnvironment } from "./config.mjs";
@@ -29,6 +32,13 @@ const cliEntry =
     : fileURLToPath(new URL("../dist-cli/tasknboard.mjs", import.meta.url));
 const github = createGitHub(store);
 const cliHelper = createCliHelper();
+const codexPlugin = createCodexPlugin({ mcpEntry });
+const claudePlugin = createClaudePlugin({ mcpEntry, database: dbPath });
+// Agents run on this machine only for a local workspace, as plugins do.
+const launcher = createAgentLauncher({
+  store,
+  desktop: desktop && !Object.keys(tokens).length,
+});
 store.registerActors(
   Object.keys(tokens).length ? Object.values(tokens) : [localActor],
 );
@@ -87,7 +97,10 @@ const server = createServer(async (req, res) => {
       }
       if (url.pathname === "/api/cli-helper") {
         if (actor.kind !== "human") {
-          json(res, 403, { code: "FORBIDDEN", message: "Only a person can manage the CLI helper." });
+          json(res, 403, {
+            code: "FORBIDDEN",
+            message: "Only a person can manage the CLI helper.",
+          });
         } else if (req.method === "GET") {
           json(res, 200, await cliHelper.status());
         } else if (req.method === "POST") {
@@ -163,9 +176,69 @@ const server = createServer(async (req, res) => {
         return;
       }
       const name = url.pathname.slice(5);
+      if (name === "codex-plugin") {
+        if (actor.kind !== "human") {
+          json(res, 403, {
+            code: "FORBIDDEN",
+            message: "Only a person can install the Codex plugin.",
+          });
+        } else if (Object.keys(tokens).length) {
+          json(res, 400, {
+            code: "PLUGIN_UNSUPPORTED",
+            message:
+              "Install the Codex plugin from the local TasknBoard desktop app.",
+          });
+        } else if (
+          !args ||
+          typeof args !== "object" ||
+          Array.isArray(args) ||
+          Object.keys(args).some((key) => key !== "identity")
+        ) {
+          json(res, 400, { message: "Provide only the agent identity." });
+        } else {
+          const installed = await codexPlugin.install(args.identity);
+          launcher.register(installed.identity, "codex");
+          json(res, 200, { ...installed, autoStart: true });
+        }
+        return;
+      }
+      if (name === "claude-plugin") {
+        if (actor.kind !== "human") {
+          json(res, 403, {
+            code: "FORBIDDEN",
+            message: "Only a person can install the Claude Code plugin.",
+          });
+        } else if (Object.keys(tokens).length) {
+          json(res, 400, {
+            code: "PLUGIN_UNSUPPORTED",
+            message:
+              "Install the Claude Code plugin from the local TasknBoard desktop app.",
+          });
+        } else if (
+          !args ||
+          typeof args !== "object" ||
+          Array.isArray(args) ||
+          Object.keys(args).some((key) => key !== "identity")
+        ) {
+          json(res, 400, { message: "Provide only the agent identity." });
+        } else {
+          const installed = await claudePlugin.install(args.identity);
+          launcher.register(installed.identity, "claude");
+          json(res, 200, { ...installed, autoStart: true });
+        }
+        return;
+      }
       // GitHub commands call out to GitHub, so they run outside the store.
       const result = await github.execute(name, args, actor);
-      json(res, 200, result ?? store.execute(name, args, actor));
+      const output = result ?? store.execute(name, args, actor);
+      // A person's assignment starts the agent; agents cannot reassign tasks.
+      if (
+        actor.kind === "human" &&
+        (name === "create_task" ||
+          (name === "update_task" && args.patch?.assignee !== undefined))
+      )
+        launcher.assigned(output);
+      json(res, 200, output);
       return;
     }
     if (!["GET", "HEAD"].includes(req.method)) {
@@ -234,6 +307,7 @@ let stopping = false;
 function stop() {
   if (stopping) return;
   stopping = true;
+  launcher.stop();
   server.close(() => {
     store.close();
     process.exit(0);

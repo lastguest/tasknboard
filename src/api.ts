@@ -25,6 +25,7 @@ export async function command<T>(
   name: string,
   args: unknown = {},
   signal?: AbortSignal,
+  timeoutMs = 15000,
 ): Promise<T> {
   const bearer = token.get();
   let res: Response;
@@ -37,8 +38,8 @@ export async function command<T>(
       },
       body: JSON.stringify(args),
       signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
-        : AbortSignal.timeout(15000),
+        ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+        : AbortSignal.timeout(timeoutMs),
     });
   } catch (e) {
     if (signal?.aborted) throw e;

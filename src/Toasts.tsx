@@ -9,7 +9,7 @@ export type Toast = {
   actions?: { label: string; run: () => void }[];
 };
 
-const AUTO_DISMISS_MS = 6000;
+const AUTO_DISMISS_MS = 3000;
 const icons = { ok: "check", error: "alert", info: "info" } as const;
 
 export function Toasts({
@@ -35,16 +35,15 @@ function ToastCard({
   toast: Toast;
   onDismiss: (id: number) => void;
 }) {
-  // Toasts with actions wait for the user; plain ones fade out unless hovered or focused.
+  // Pause dismissal while the user interacts with the notification.
   // The timer depends only on stable values, so a parent render does not restart it.
   const [held, setHeld] = useState(false);
-  const sticky = Boolean(toast.actions?.length);
   const { id } = toast;
   useEffect(() => {
-    if (sticky || held) return;
+    if (held) return;
     const timer = setTimeout(() => onDismiss(id), AUTO_DISMISS_MS);
     return () => clearTimeout(timer);
-  }, [sticky, held, onDismiss, id]);
+  }, [held, onDismiss, id]);
   const dismiss = () => onDismiss(id);
 
   return (

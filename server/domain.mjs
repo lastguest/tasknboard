@@ -29,6 +29,15 @@ export const keyPrefix = z
 const boardName = z.string().trim().min(1).max(80);
 /** Plain text shown under the board title; "" means none. */
 const boardDescription = z.string().trim().max(500);
+/** Absolute folder where agents assigned a task on this board start work; "" means none. */
+const boardRepository = z
+  .string()
+  .trim()
+  .max(1000)
+  .refine(
+    (v) => v === "" || v.startsWith("/") || /^[A-Za-z]:[\\/]/.test(v),
+    "Enter an absolute folder path",
+  );
 /** A task's epic: an epic ID, or "" for none. */
 const taskEpic = z.union([z.literal(""), epicId]);
 const epicTitle = z.string().trim().min(1).max(120);
@@ -303,6 +312,7 @@ export const schemas = {
       name: boardName,
       prefix: keyPrefix,
       description: boardDescription.default(""),
+      repository: boardRepository.default(""),
     })
     .strict(),
   update_board: z
@@ -314,6 +324,7 @@ export const schemas = {
           name: boardName.optional(),
           prefix: keyPrefix.optional(),
           description: boardDescription.optional(),
+          repository: boardRepository.optional(),
         })
         .strict()
         .refine((v) => Object.keys(v).length > 0, "Empty patch"),

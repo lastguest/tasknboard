@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { command, errorOf } from "./api";
 import {
   connectionHelper,
   type AgentClient,
@@ -10,6 +11,7 @@ export function ConnectionHelpers({ runtime }: { runtime: LocalConnection }) {
   const [identity, setIdentity] = useState("codex");
   const [copied, setCopied] = useState("");
   const [copyError, setCopyError] = useState("");
+  const [installing, setInstalling] = useState(false);
   const valid = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(identity);
   const helper = connectionHelper(client, runtime, identity);
   function resetFeedback() {
@@ -25,6 +27,20 @@ export function ConnectionHelpers({ runtime }: { runtime: LocalConnection }) {
       setCopyError(
         "Could not copy. Select the text below and copy it manually.",
       );
+    }
+  }
+  async function install() {
+    resetFeedback();
+    setInstalling(true);
+    try {
+      await command(`${client}-plugin`, { identity }, undefined, 60000);
+      setCopied(
+        `TasknBoard plugin installed. Restart ${client === "claude" ? "Claude Code" : "Codex"} to use it. Tasks you assign to ${identity} on a board with a repository folder now start it automatically.`,
+      );
+    } catch (error) {
+      setCopyError(errorOf(error).message);
+    } finally {
+      setInstalling(false);
     }
   }
   function download() {
@@ -45,6 +61,7 @@ export function ConnectionHelpers({ runtime }: { runtime: LocalConnection }) {
           <select
             id="connection-client"
             value={client}
+            disabled={installing}
             onChange={(event) => {
               const next = event.target.value as AgentClient;
               setClient(next);
@@ -63,6 +80,7 @@ export function ConnectionHelpers({ runtime }: { runtime: LocalConnection }) {
           <input
             id="connection-identity"
             value={identity}
+            disabled={installing}
             maxLength={80}
             aria-invalid={!valid}
             aria-describedby="agent-identity-help"
@@ -76,10 +94,14 @@ export function ConnectionHelpers({ runtime }: { runtime: LocalConnection }) {
           <button
             type="button"
             className="secondary"
-            disabled={!valid}
-            onClick={() => void copy()}
+            disabled={!valid || installing}
+            onClick={() =>
+              void (client === "codex" || client === "claude"
+                ? install()
+                : copy())
+            }
           >
-            {helper.label}
+            {installing ? "Installing plugin…" : helper.label}
           </button>
           {client === "pi" && (
             <button
@@ -98,12 +120,17 @@ export function ConnectionHelpers({ runtime }: { runtime: LocalConnection }) {
           ? "Use a unique identity for each concurrent agent."
           : "Enter 1–80 letters, numbers, dots, underscores, or hyphens. Start with a letter or number."}
       </p>
-      {valid && (
+      {valid && helper.text && (
         <pre tabIndex={0} aria-label={`${client} connection helper`}>
           {helper.text}
         </pre>
       )}
       <p className="small">{helper.instruction}</p>
+      {installing && (
+        <p role="status" className="small">
+          Installing the TasknBoard plugin…
+        </p>
+      )}
       {copied && (
         <p role="status" className="small ok">
           {copied}

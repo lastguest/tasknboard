@@ -179,3 +179,24 @@ test("GitHub settings hide authorization when the server is not configured", asy
   await expect(settings.locator('input[type="password"]')).toHaveCount(0);
   expect(connectCalls).toBe(0);
 });
+
+test("the desktop authorization link uses the native external browser opener", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as any).isTauri = true;
+    (window as any).__TAURI_INTERNALS__ = {
+      invoke: async (command: string, args: object) => {
+        (window as any).externalOpen = { command, args };
+      },
+    };
+  });
+  const settings = await openGitHubSettings(page, disconnected);
+  await page.route("**/api/poll_github_authorization", (route) =>
+    route.fulfill({ json: { pending: true, interval: 1 } }),
+  );
+  await settings.getByRole("link", { name: "Connect GitHub", exact: true }).click();
+  expect(await page.evaluate(() => (window as any).externalOpen)).toEqual({
+    command: "open_external_url",
+    args: { url: verificationUri },
+  });
+  await expect(settings.getByRole("status")).toContainText("Waiting for approval");
+});

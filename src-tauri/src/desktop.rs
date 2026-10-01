@@ -160,7 +160,7 @@ fn open_artifact(app: &AppHandle, url: &tauri::Url) {
 
 pub fn run() {
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![crate::update::app_version, crate::update::check_for_updates])
+        .invoke_handler(tauri::generate_handler![crate::update::app_version, crate::update::check_for_updates, crate::open_external_url])
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {

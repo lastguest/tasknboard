@@ -13,7 +13,7 @@ import { App, clean } from "../dist-cli/app.mjs";
 
 const run = promisify(execFile);
 const task = (patch = {}) => ({
-  id: "TNB-001", title: "Ship it", description: "", acceptance: "", status: "in_review",
+  id: "TNB-1", title: "Ship it", description: "", acceptance: "", status: "in_review",
   priority: "medium", assignee: "", labels: [], version: 4, commentCount: 0, lease: null,
   boardId: "BOARD-1", updatedAt: "2026-09-29T00:00:00.000Z", ...patch,
 });
@@ -35,26 +35,26 @@ const key = (patch = {}) => ({ ctrl: false, meta: false, shift: false, ...patch 
 test("slash commands map to versioned workspace requests", () => {
   assert.deepEqual(planInput("/move review", task()).request, {
     name: "update_task",
-    args: { id: "TNB-001", expectedVersion: 4, patch: { status: "in_review" } },
+    args: { id: "TNB-1", expectedVersion: 4, patch: { status: "in_review" } },
   });
   const review = planInput("/review Done and tested https://ci.example/run/7", task());
   assert.deepEqual(review.request.args, {
-    id: "TNB-001", expectedVersion: 4, summary: "Done and tested", artifactUrl: "https://ci.example/run/7",
+    id: "TNB-1", expectedVersion: 4, summary: "Done and tested", artifactUrl: "https://ci.example/run/7",
   });
   assert.deepEqual(
     planInput("/new  Write docs ", undefined, { boardId: "BOARD-2" }).request.args,
     { boardId: "BOARD-2", title: "Write docs" },
   );
   assert.throws(() => planInput("/new Write docs", undefined), /Select a board first/);
-  assert.deepEqual(planInput("/link blocked_by tnb-002", task()).request, {
+  assert.deepEqual(planInput("/link blocked_by tnb-2", task()).request, {
     name: "link_task",
-    args: { id: "TNB-001", expectedVersion: 4, type: "blocked_by", target: "TNB-002" },
+    args: { id: "TNB-1", expectedVersion: 4, type: "blocked_by", target: "TNB-2" },
   });
-  assert.deepEqual(planInput("/unlink tnb-002", task()).request, {
+  assert.deepEqual(planInput("/unlink tnb-2", task()).request, {
     name: "unlink_task",
-    args: { id: "TNB-001", expectedVersion: 4, target: "TNB-002" },
+    args: { id: "TNB-1", expectedVersion: 4, target: "TNB-2" },
   });
-  assert.throws(() => planInput("/link follows TNB-002", task()), /Choose a link type/);
+  assert.throws(() => planInput("/link follows TNB-2", task()), /Choose a link type/);
   assert.throws(() => planInput("/link blocks", task()), /Usage: \/link/);
   assert.deepEqual(planInput("/board", undefined), { kind: "boards" });
   assert.deepEqual(
@@ -117,7 +117,7 @@ test("the board runs commands, keeps the prompt on a conflict, and refreshes", a
   };
   await settle();
   assert.match(ui.lastFrame(), /Studio · you \(human\) · All boards/);
-  assert.match(ui.lastFrame(), /❯ TNB-001\s+\[BOARD-1\]\s+● Ship it/);
+  assert.match(ui.lastFrame(), /❯ TNB-1\s+\[BOARD-1\]\s+● Ship it/);
 
   await type("/do");
   assert.match(ui.lastFrame(), /❯ \/done\s+Mark the reviewed task Done/);
@@ -127,9 +127,9 @@ test("the board runs commands, keeps the prompt on a conflict, and refreshes", a
 
   const lists = calls.filter(([name]) => name === "list_tasks").length;
   await type("\r");
-  assert.match(ui.lastFrame(), /TNB-001 is Done\./);
+  assert.match(ui.lastFrame(), /TNB-1 is Done\./);
   assert.deepEqual(calls.filter(([name]) => name === "update_task").at(-1)[1], {
-    id: "TNB-001", expectedVersion: 4, patch: { status: "done" },
+    id: "TNB-1", expectedVersion: 4, patch: { status: "done" },
   });
   assert.ok(calls.filter(([name]) => name === "list_tasks").length > lists);
   ui.unmount();
@@ -150,7 +150,7 @@ test("interactive task creation requires and uses the selected board", async (t)
       if (name === "list_boards") return { boards: liveBoards };
       if (name === "list_tasks") return { tasks: [], total: 0 };
       if (name === "create_task")
-        return task({ id: "ENG-001", title: args.title, boardId: args.boardId });
+        return task({ id: "ENG-1", title: args.title, boardId: args.boardId });
       return task();
     },
   };
@@ -219,7 +219,7 @@ test("late board refreshes cannot replace tasks or errors for the selected board
       }
       if (name === "list_tasks" && args.boardId === "BOARD-2")
         return {
-          tasks: [task({ id: "ENG-001", title: "Engineering task", boardId: "BOARD-2" })],
+          tasks: [task({ id: "ENG-1", title: "Engineering task", boardId: "BOARD-2" })],
           total: 1,
         };
       if (name === "list_tasks") return { tasks: [], total: 0 };

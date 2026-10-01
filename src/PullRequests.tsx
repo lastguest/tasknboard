@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { command, errorOf, type ApiError } from "./api";
 import { Icon } from "./Icons";
 import { Markdown } from "./Markdown";
@@ -1674,8 +1675,21 @@ export function GitHubSettings({
                   href={authorization.verificationUri}
                   target="_blank"
                   rel="noopener noreferrer"
-                  onClick={() => {
+                  onClick={(event) => {
                     setMessage(null);
+                    if (isTauri()) {
+                      event.preventDefault();
+                      void invoke("open_external_url", {
+                        url: authorization.verificationUri,
+                      }).then(
+                        () => setPolling(true),
+                        () => setMessage({
+                          ok: false,
+                          text: "Could not open GitHub in your browser. Try again.",
+                        }),
+                      );
+                      return;
+                    }
                     setPolling(true);
                   }}
                 >

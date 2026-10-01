@@ -173,16 +173,18 @@ export function createStore(path, { clock = Date.now } = {}) {
       throw e;
     }
   };
+  // Boards saved before repository folders existed read as having none.
+  const parseBoard = (data) => ({ repository: "", ...JSON.parse(data) });
   const allBoards = () =>
     db
       .prepare("SELECT data FROM boards ORDER BY number")
       .all()
-      .map((row) => JSON.parse(row.data));
+      .map((row) => parseBoard(row.data));
   const getBoard = (id) => {
     const number = Number(id.slice("BOARD-".length));
     const row = db.prepare("SELECT data FROM boards WHERE number=?").get(number);
     if (!row) fail("NOT_FOUND", "Board not found", 404);
-    const board = JSON.parse(row.data);
+    const board = parseBoard(row.data);
     if (board.id !== id) fail("NOT_FOUND", "Board not found", 404);
     return board;
   };
@@ -236,7 +238,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       inProgress: inProgress.get(board.id) ?? 0,
     }));
   };
-  const taskKey = (board, n) => `${board.prefix}-${String(n).padStart(3, "0")}`;
+  const taskKey = (board, n) => `${board.prefix}-${n}`;
   const all = () =>
     db
       .prepare("SELECT data FROM tasks ORDER BY number DESC")
@@ -356,7 +358,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       const match = task.id.match(/^[A-Z][A-Z0-9]{0,9}-(\d+)$/);
       if (!match) fail("INVARIANT", `Invalid task key ${task.id}`);
       const previousId = task.id;
-      const nextId = `${prefix}-${match[1]}`;
+      const nextId = `${prefix}-${Number(match[1])}`;
       if (previousId === nextId) continue;
       task.id = nextId;
       updateTask.run(JSON.stringify(task), row.number);
@@ -366,6 +368,11 @@ export function createStore(path, { clock = Date.now } = {}) {
     for (const [previousId, nextId] of rewrites)
       updateEvent.run(nextId, previousId);
   };
+  transaction(() => {
+    if (db.prepare("SELECT version FROM migrations WHERE version=15").get()) return;
+    for (const board of allBoards()) renameBoardTaskKeys(board, board.prefix);
+    db.prepare("INSERT INTO migrations VALUES(15)").run();
+  });
   /** Status counts of non-archived tasks, per epic. Derived on every read. */
   const withCounts = (epics, tasks = all()) => {
     const counts = new Map(
@@ -565,6 +572,7 @@ export function createStore(path, { clock = Date.now } = {}) {
           name: p.name,
           prefix: p.prefix,
           description: p.description,
+          repository: p.repository,
           version: 1,
           createdAt: now,
           updatedAt: now,
@@ -619,7 +627,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         actors: actorRoster(),
         leaseSeconds: 900,
         boards: boardsFor(identity, allBoards()),
-        schemaVersion: 14,
+        schemaVersion: 15,
       };
     if (command === "update_profile")
       return transaction(() => {
@@ -853,7 +861,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       if (identity.kind !== "human")
         fail("FORBIDDEN", "Human access required", 403);
       return transaction(() => ({
-        schemaVersion: 14,
+        schemaVersion: 15,
         exportedAt: new Date(clock()).toISOString(),
         boards: allBoards(),
         actors: actorRoster(),
@@ -1086,9 +1094,17 @@ export function createStore(path, { clock = Date.now } = {}) {
         if (value) db.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, value);
         else db.prepare("DELETE FROM settings WHERE key=?").run(key);
     });
+  /** Activity written by the service itself, such as an automatic agent start. */
+  const recordEvent = (taskId, actor, kind, body = "") =>
+    transaction(() => {
+      const identity = validActor(actor);
+      addActor(identity);
+      event(get(taskId).id, identity, kind, body);
+    });
   return {
     execute,
     registerActors,
+    recordEvent,
     image,
     setting,
     setSettings,

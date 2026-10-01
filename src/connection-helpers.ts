@@ -57,24 +57,19 @@ export function connectionHelper(
     TASKNBOARD_TOKEN: "",
   };
   const shell = windows ? "PowerShell" : "a POSIX shell (zsh or bash)";
-  if (client === "codex" || client === "claude") {
-    // The name comes before --env: Claude Code parses --env as variadic
-    // and takes any later positional argument as one more variable.
-    const parts = [client, "mcp", "add", "tasknboard"];
-    if (client === "claude")
-      parts.push("--transport", "stdio", "--scope", "user");
-    for (const [key, value] of Object.entries(env))
-      parts.push("--env", quote(`${key}=${value}`));
-    // PowerShell drops a bare -- before it runs the npm .ps1 shims.
-    parts.push(
-      windows ? quote("--") : "--",
-      quote(source.command),
-      ...source.args.map(quote),
-    );
+  if (client === "claude")
     return {
-      text: parts.join(" "),
-      label: "Copy command",
-      instruction: `Run in ${shell}, then restart ${client === "codex" ? "Codex" : "Claude Code"}. Check with ${client} mcp ${client === "codex" ? "get tasknboard" : "list"}.`,
+      text: "",
+      label: "Install Claude plugin",
+      instruction:
+        "Install from the TasknBoard desktop app with the Claude Code CLI available on PATH. Restart Claude Code after installation. This installs a local Claude Code plugin; Claude’s account-wide Customize page uses a separate upload flow.",
+    };
+  if (client === "codex") {
+    return {
+      text: "",
+      label: "Install Codex plugin",
+      instruction:
+        "Install from the TasknBoard desktop app with the Codex CLI on PATH. The plugin connects Codex to this workspace with the selected agent identity. Remove any previous standalone TasknBoard MCP entry with codex mcp remove tasknboard before installation. Restart Codex after installation.",
     };
   }
   if (client === "opencode")

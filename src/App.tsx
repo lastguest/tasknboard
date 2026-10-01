@@ -524,7 +524,9 @@ export default function App() {
       ? (currentEpic?.title ?? "Epic")
       : view === "saved"
         ? (currentSaved?.name ?? viewBase?.name ?? "View")
-        : viewTitles[view];
+        : view === "board"
+          ? currentBoard?.name
+          : viewTitles[view];
   /** People manage epics and archive tasks; the server enforces both. */
   const isHuman = workspaceInfoLoaded && actor.kind === "human";
   const openEpic = (epic: Epic) => {
@@ -1731,29 +1733,41 @@ export default function App() {
             onContextMenu={pageMenu}
           >
             <header className="page-title">
-              <h1 tabIndex={-1} data-focus-fallback="">
-                {currentEpic && (
-                  <span
-                    className="epic-glyph large"
-                    style={epicStyle(currentEpic)}
-                    aria-hidden="true"
+              <div className="page-title-row">
+                <h1 tabIndex={-1} data-focus-fallback="">
+                  {currentEpic && (
+                    <span
+                      className="epic-glyph large"
+                      style={epicStyle(currentEpic)}
+                      aria-hidden="true"
+                    />
+                  )}
+                  {currentSaved && <ViewGlyph view={currentSaved} size={22} />}
+                  {title}
+                  {view === "board" && (
+                    <button
+                      type="button"
+                      className="board-switch"
+                      aria-label={`Switch board, current ${currentBoard?.name ?? "none"}`}
+                      aria-haspopup="menu"
+                      disabled={!boards.length}
+                      onClick={boardSwitchMenu}
+                    >
+                      <Icon name="chevronDown" size={20} />
+                    </button>
+                  )}
+                </h1>
+                {/* Board actions share the title row so the header doesn't spend a line on them. */}
+                {view === "board" && isHuman && (
+                  <BoardControls
+                    canEdit={!!currentBoard}
+                    onCreate={() => setBoardDialog({ board: null })}
+                    onEdit={() =>
+                      currentBoard && setBoardDialog({ board: currentBoard })
+                    }
                   />
                 )}
-                {currentSaved && <ViewGlyph view={currentSaved} size={22} />}
-                {title}
-                {view === "board" && (
-                  <button
-                    type="button"
-                    className="board-switch"
-                    aria-label={`Switch board, current ${currentBoard?.name ?? "none"}`}
-                    aria-haspopup="menu"
-                    disabled={!boards.length}
-                    onClick={boardSwitchMenu}
-                  >
-                    <Icon name="chevronDown" size={20} />
-                  </button>
-                )}
-              </h1>
+              </div>
               {view === "board" ? (
                 currentBoard?.description && <p>{currentBoard.description}</p>
               ) : (
@@ -1875,15 +1889,6 @@ export default function App() {
               />
             ) : (
               <>
-                {view === "board" && isHuman && (
-                  <BoardControls
-                    canEdit={!!currentBoard}
-                    onCreate={() => setBoardDialog({ board: null })}
-                    onEdit={() =>
-                      currentBoard && setBoardDialog({ board: currentBoard })
-                    }
-                  />
-                )}
                 <div className="toolbar">
                   <div className="tabs" role="group" aria-label="Layout">
                     <button

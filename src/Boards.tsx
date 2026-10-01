@@ -218,28 +218,38 @@ export function BoardEditor({
   const nameId = useId();
   const prefixId = useId();
   const descriptionId = useId();
+  const repositoryId = useId();
   const [name, setName] = useState(board?.name ?? "");
   const [description, setDescription] = useState(board?.description ?? "");
   const [prefix, setPrefix] = useState(board?.prefix ?? "");
+  const [repository, setRepository] = useState(board?.repository ?? "");
   const [pending, setPending] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const normalizedName = name.trim();
   const normalizedPrefix = prefix.trim().toUpperCase();
   const normalizedDescription = description.trim();
+  const normalizedRepository = repository.trim();
   const nameError = normalizedName ? "" : "Enter a board name.";
   const prefixError = prefixProblem(normalizedPrefix);
+  const repositoryError =
+    !normalizedRepository ||
+    normalizedRepository.startsWith("/") ||
+    /^[A-Za-z]:[\\/]/.test(normalizedRepository)
+      ? ""
+      : "Enter an absolute folder path, such as /Users/you/projects/app.";
   const changed =
     !board ||
     normalizedName !== board.name ||
     normalizedPrefix !== board.prefix ||
-    normalizedDescription !== board.description;
+    normalizedDescription !== board.description ||
+    normalizedRepository !== (board.repository ?? "");
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (pending) return;
     setAttempted(true);
-    if (nameError || prefixError) return;
+    if (nameError || prefixError || repositoryError) return;
     if (board && !changed) return onClose();
     setPending(true);
     setError(null);
@@ -256,12 +266,16 @@ export function BoardEditor({
               ...(normalizedDescription !== board.description && {
                 description: normalizedDescription,
               }),
+              ...(normalizedRepository !== (board.repository ?? "") && {
+                repository: normalizedRepository,
+              }),
             },
           })
         : await command<BoardRecord>("create_board", {
             name: normalizedName,
             prefix: normalizedPrefix,
             description: normalizedDescription,
+            repository: normalizedRepository,
           });
       onSaved(saved, board);
     } catch (cause) {
@@ -388,6 +402,34 @@ export function BoardEditor({
           <span className="field-hint" id={`${descriptionId}-hint`}>
             Optional. It shows under the board title.
           </span>
+        </label>
+        <label className="field" htmlFor={repositoryId}>
+          <span className="field-label" id={`${repositoryId}-label`}>
+            Repository folder
+          </span>
+          <input
+            id={repositoryId}
+            aria-labelledby={`${repositoryId}-label`}
+            maxLength={1000}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="/Users/you/projects/app"
+            value={repository}
+            aria-invalid={attempted && Boolean(repositoryError)}
+            aria-describedby={`${repositoryId}-hint${attempted && repositoryError ? ` ${repositoryId}-error` : ""}`}
+            onChange={(event) => setRepository(event.target.value)}
+          />
+          <span className="field-hint" id={`${repositoryId}-hint`}>
+            Optional. When you assign a task on this board to a Claude Code or
+            Codex agent installed from Settings, the desktop app starts that
+            agent here without asking for approvals. Leave empty to start
+            agents by hand.
+          </span>
+          {attempted && repositoryError && (
+            <span className="field-hint inline-error" id={`${repositoryId}-error`}>
+              {repositoryError}
+            </span>
+          )}
         </label>
       </form>
     </Dialog>

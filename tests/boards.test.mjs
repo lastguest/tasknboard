@@ -35,8 +35,8 @@ test("boards give tasks independent numbers and scope task lists and epic counts
     human,
   );
 
-  assert.equal(productTask.id, "TNB-001");
-  assert.equal(operationsTask.id, "OPS-001");
+  assert.equal(productTask.id, "TNB-1");
+  assert.equal(operationsTask.id, "OPS-1");
   assert.equal(productTask.boardId, defaultBoard.id);
   assert.equal(operationsTask.boardId, operations.id);
   assert.equal(store.execute("list_tasks", {}, human).total, 2);
@@ -90,22 +90,22 @@ test("renaming a board prefix changes only its tasks and event references", (t) 
   assert.equal(renamedBoard.prefix, "APP");
   assert.equal(renamedBoard.version, 2);
   assert.deepEqual(renamedBoard.formerPrefixes, ["TNB"]);
-  assert.equal(store.execute("get_task", { id: first.id }, human).id, "APP-001");
-  assert.throws(() => store.execute("get_task", { id: "NEVER-001" }, human), {
+  assert.equal(store.execute("get_task", { id: first.id }, human).id, "APP-1");
+  assert.throws(() => store.execute("get_task", { id: "NEVER-1" }, human), {
     code: "NOT_FOUND",
   });
-  const moved = store.execute("get_task", { id: "APP-001" }, human);
+  const moved = store.execute("get_task", { id: "APP-1" }, human);
   assert.equal(moved.boardId, defaultBoard.id);
   assert.equal(moved.events.length, 2);
-  assert.equal(store.execute("get_task", { id: second.id }, human).id, "OPS-001");
+  assert.equal(store.execute("get_task", { id: second.id }, human).id, "OPS-1");
   assert.equal(
     store.execute("create_task", { boardId: defaultBoard.id, title: "Next" }, human).id,
-    "APP-002",
+    "APP-2",
   );
 
   const events = store.execute("export_workspace", {}, human).events;
-  assert.equal(events.some((event) => event.task_id === "TNB-001"), false);
-  assert.equal(events.filter((event) => event.task_id === "APP-001").length, 2);
+  assert.equal(events.some((event) => event.task_id === "TNB-1"), false);
+  assert.equal(events.filter((event) => event.task_id === "APP-1").length, 2);
   assert.ok(events.some((event) => event.task_id === defaultBoard.id && event.kind === "update_board"));
   assert.ok(events.some((event) => event.task_id === operations.id && event.kind === "created"));
 });
@@ -189,7 +189,7 @@ test("former task keys redirect to their own board and never to another", (t) =>
     { boardId: otherBoard.id, title: "Other task" },
     human,
   );
-  assert.equal(otherTask.id, "OPS-001");
+  assert.equal(otherTask.id, "OPS-1");
   const redirected = store.execute(
     "update_task",
     {
@@ -199,10 +199,10 @@ test("former task keys redirect to their own board and never to another", (t) =>
     },
     human,
   );
-  assert.equal(redirected.id, "APP-001");
+  assert.equal(redirected.id, "APP-1");
   assert.equal(redirected.boardId, originalBoard.id);
   assert.equal(store.execute("get_task", { id: otherTask.id }, human).title, "Other task");
-  assert.throws(() => store.execute("get_task", { id: "OPS-002" }, human), {
+  assert.throws(() => store.execute("get_task", { id: "OPS-2" }, human), {
     code: "NOT_FOUND",
   });
 
@@ -217,8 +217,8 @@ test("former task keys redirect to their own board and never to another", (t) =>
     () => store.execute("create_board", { name: "Reuse former", prefix: "APP" }, human),
     { code: "VALIDATION" },
   );
-  const reclaimedTask = store.execute("get_task", { id: "APP-001" }, human);
-  assert.equal(reclaimedTask.id, "TNB-001");
+  const reclaimedTask = store.execute("get_task", { id: "APP-1" }, human);
+  assert.equal(reclaimedTask.id, "TNB-1");
   assert.equal(reclaimedTask.title, "Write through a former key");
   const reboard = store.execute(
     "update_board",
@@ -226,8 +226,8 @@ test("former task keys redirect to their own board and never to another", (t) =>
     human,
   );
   assert.deepEqual(reboard.formerPrefixes, ["APP", "TNB"]);
-  for (const key of ["APP-001", "TNB-001", "WEB-001"])
-    assert.equal(store.execute("get_task", { id: key }, human).id, "WEB-001");
+  for (const key of ["APP-1", "TNB-1", "WEB-1"])
+    assert.equal(store.execute("get_task", { id: key }, human).id, "WEB-1");
   assert.deepEqual(
     store
       .execute("list_boards", {}, human)
@@ -364,14 +364,14 @@ test("the board migration preserves legacy keys and epic references", (t) => {
 
   const db = new DatabaseSync(path);
   const storedTask = JSON.parse(db.prepare("SELECT data FROM tasks WHERE number=1").get().data);
-  storedTask.id = "APP-001";
+  storedTask.id = "APP-1";
   storedTask.epic = "GOAL-1";
   delete storedTask.boardId;
   db.prepare("UPDATE tasks SET data=? WHERE number=1").run(JSON.stringify(storedTask));
   const storedEpic = JSON.parse(db.prepare("SELECT data FROM epics WHERE number=1").get().data);
   storedEpic.id = "GOAL-1";
   db.prepare("UPDATE epics SET data=? WHERE number=1").run(JSON.stringify(storedEpic));
-  db.prepare("UPDATE events SET task_id='APP-001' WHERE task_id=?").run(task.id);
+  db.prepare("UPDATE events SET task_id='APP-1' WHERE task_id=?").run(task.id);
   db.prepare("UPDATE events SET task_id='GOAL-1' WHERE task_id=?").run(epic.id);
   db.exec("CREATE TABLE workspace(id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL)");
   db.prepare("INSERT INTO workspace VALUES(1, ?)").run(
@@ -399,16 +399,17 @@ test("the board migration preserves legacy keys and epic references", (t) => {
     "inSidebar",
     "name",
     "prefix",
+    "repository",
     "updatedAt",
     "version",
   ]);
-  const upgraded = store.execute("get_task", { id: "APP-001" }, human);
+  const upgraded = store.execute("get_task", { id: "APP-1" }, human);
   assert.equal(upgraded.boardId, defaultBoard.id);
   assert.equal(upgraded.epic, "GOAL-1");
   assert.equal(upgraded.events.length, 2);
   assert.equal(store.execute("list_epics", {}, human).epics[0].id, "GOAL-1");
   assert.deepEqual(defaultBoard.formerPrefixes, ["TNB"]);
-  assert.equal(store.execute("get_task", { id: "TNB-001" }, human).id, "APP-001");
+  assert.equal(store.execute("get_task", { id: "TNB-1" }, human).id, "APP-1");
   assert.throws(
     () => store.execute("create_board", { name: "Collision", prefix: "GOAL" }, human),
     { code: "VALIDATION" },
@@ -421,7 +422,7 @@ test("the board migration preserves legacy keys and epic references", (t) => {
     () => store.execute("archive_epic", { id: "GOAL-1", expectedVersion: 1 }, human),
     { code: "EPIC_NOT_EMPTY", message: /Legacy launch.*1 open task/ },
   );
-  store.execute("archive_task", { id: "APP-001", expectedVersion: upgraded.version }, human);
+  store.execute("archive_task", { id: "APP-1", expectedVersion: upgraded.version }, human);
   store.execute("archive_epic", { id: "GOAL-1", expectedVersion: 1 }, human);
   assert.throws(
     () =>
@@ -434,10 +435,10 @@ test("the board migration preserves legacy keys and epic references", (t) => {
   );
   assert.equal(
     store.execute("create_task", { boardId: defaultBoard.id, title: "Next" }, human).id,
-    "APP-002",
+    "APP-2",
   );
   const backup = store.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 14);
+  assert.equal(backup.schemaVersion, 15);
   assert.equal(Object.hasOwn(backup, "workspace"), false);
   assert.equal(backup.tasks[0].boardId, defaultBoard.id);
   // Exports hold stored records; formerPrefixes, inSidebar, and inProgress are derived.
@@ -568,7 +569,7 @@ test("task links upgrade an existing version 13 database without changing boards
   db.close();
   store = createStore(path);
   try {
-    assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 14);
+    assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 15);
     assert.equal(store.execute("list_boards", {}, human).boards[0].description, board.description);
     assert.equal(store.execute("get_task", { id: first.id }, human).version, first.version);
     const linked = store.execute("link_task", {
@@ -578,4 +579,34 @@ test("task links upgrade an existing version 13 database without changing boards
   } finally {
     store.close();
   }
+});
+
+test("task keys lose padding while history, links and versions survive reopening", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "tasknboard-keys-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "workspace.sqlite");
+  let store = createStore(path);
+  const boardId = store.execute("list_boards", {}, human).boards[0].id;
+  const first = store.execute("create_task", { boardId, title: "First" }, human);
+  const second = store.execute("create_task", { boardId, title: "Second" }, human);
+  store.close();
+  const db = new DatabaseSync(path);
+  db.exec("DELETE FROM migrations WHERE version=15");
+  for (const task of [first, second]) {
+    const padded = task.id.replace(/-(\d+)$/, (_, n) => `-${n.padStart(3, "0")}`);
+    db.prepare("UPDATE tasks SET data=json_set(data, '$.id', ?) WHERE json_extract(data, '$.id')=?").run(padded, task.id);
+    db.prepare("UPDATE events SET task_id=? WHERE task_id=?").run(padded, task.id);
+  }
+  db.exec("INSERT INTO task_links VALUES(1, 2, 'relates')");
+  db.close();
+  store = createStore(path);
+  const restored = store.execute("get_task", { id: "TNB-1" }, human);
+  assert.equal(restored.version, first.version);
+  assert.equal(restored.events[0].kind, "created");
+  assert.equal(restored.links[0].id, "TNB-2");
+  assert.equal(store.execute("create_task", { boardId, title: "Third" }, human).id, "TNB-3");
+  store.close();
+  store = createStore(path);
+  assert.equal(store.execute("get_task", { id: "TNB-1" }, human).events.length, 1);
+  store.close();
 });
