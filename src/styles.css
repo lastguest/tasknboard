@@ -341,16 +341,19 @@ textarea::placeholder {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.connection-dot {
-  height: 8px;
-  width: 8px;
-  background: #d9776a;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
+.workspace-status .identity {
+  flex: 1;
 }
-.connection-dot.online {
-  background: var(--accent);
+.workspace-status .avatar {
+  flex-shrink: 0;
+  outline: 2px solid var(--muted);
+  outline-offset: 2px;
+}
+.workspace-status.online .avatar {
+  outline-color: var(--accent);
+}
+.profile-settings {
+  flex-shrink: 0;
 }
 main {
   min-width: 0;

@@ -1736,28 +1736,12 @@ export default function App() {
             </nav>
           </div>
           <div className="sidebar-bottom">
-            <button
-              type="button"
-              className="nav-item"
-              title={collapsed ? "Settings" : undefined}
-              onClick={() => setSettings(true)}
+            <div
+              className={`workspace-status ${sync.connected ? "online" : "offline"}`}
             >
-              <Icon name="settings" />
-              <span>Settings</span>
-            </button>
-            <button
-              type="button"
-              className="nav-item"
-              title={collapsed ? "Shortcuts" : undefined}
-              onClick={() => setHelp(true)}
-            >
-              <Icon name="help" />
-              <span>Shortcuts</span>
-            </button>
-            <div className="workspace-status" role="status">
-              <span
-                className={`connection-dot ${sync.connected ? "online" : ""}`}
-              />
+              <span className="sr-only" role="status">
+                {sync.connected ? "Connected" : "Disconnected"}
+              </span>
               {workspaceInfoLoaded && (
                 <button
                   type="button"
@@ -1770,11 +1754,18 @@ export default function App() {
                   onClick={() => setSettings(true)}
                 >
                   <Avatar name={actor.id} agent={actor.kind === "agent"} />
-                  <span>
-                    {displayName(people, actor.id)} · {actor.kind}
-                  </span>
+                  <span>{displayName(people, actor.id)}</span>
                 </button>
               )}
+              <button
+                type="button"
+                className="profile-settings icon-button"
+                aria-label="Settings"
+                title="Settings"
+                onClick={() => setSettings(true)}
+              >
+                <Icon name="settings" size={18} />
+              </button>
             </div>
             <AppVersion />
           </div>
