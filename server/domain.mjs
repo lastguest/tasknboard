@@ -181,6 +181,15 @@ export const schemas = {
     })
     .strict(),
   get_task: z.object({ id }).strict(),
+  find_similar_tasks: z
+    .object({
+      title: text,
+      context: long.optional(),
+      boardId: boardId.optional(),
+      excludeId: id.optional(),
+      limit: z.number().int().min(1).max(20).default(5),
+    })
+    .strict(),
   create_task: z
     .object({
       boardId,

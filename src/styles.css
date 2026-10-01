@@ -1767,8 +1767,15 @@ footer {
   min-width: 0;
   color: var(--text);
 }
-.task-prs li {
+.task-prs li,
+.similar-tasks li {
   grid-template-columns: minmax(0, 1fr) auto;
+}
+.similar-tasks a {
+  text-decoration: none;
+}
+.similar-tasks a:hover .task-link-title {
+  text-decoration: underline;
 }
 .task-prs a {
   text-decoration: none;

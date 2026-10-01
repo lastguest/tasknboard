@@ -2262,6 +2262,10 @@ export default function App() {
           onSaved={saved}
           onChanged={() => void refresh()}
           onArchived={archived}
+          onOpenTask={(id) => {
+            setEditor(null);
+            void openTaskById(id);
+          }}
         />
       )}
       {boardDialog && (
