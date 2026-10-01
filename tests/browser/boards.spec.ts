@@ -120,13 +120,19 @@ test("boards scope task keys, persist selection, and own task deep links", async
   await expect(page.locator(".task-card").filter({ hasText: original.title })).toBeVisible();
   await expect(page.locator(".task-card").filter({ hasText: taskTitle })).toHaveCount(0);
   expect((await command<any>("get_task", { id: original.id })).boardId).toBe("BOARD-1");
-  // The board menu also starts a new board.
+  // The board menu also starts a new board and edits the open one.
   await boardSwitch.click();
   await page.getByRole("menuitem", { name: "New board" }).click();
   const fromMenu = page.getByRole("dialog", { name: "New board" });
   await expect(fromMenu).toBeVisible();
   await fromMenu.getByRole("button", { name: "Cancel" }).click();
   await expect(fromMenu).toBeHidden();
+  await boardSwitch.click();
+  await page.getByRole("menuitem", { name: "Edit board" }).click();
+  const editFromMenu = page.getByRole("dialog", { name: "Edit board" });
+  await expect(editFromMenu.getByRole("textbox", { name: "Name" })).toHaveValue("Default");
+  await editFromMenu.getByRole("button", { name: "Cancel" }).click();
+  await expect(editFromMenu).toBeHidden();
 
   // A link with the former key opens the renamed task in a tab; the board stays.
   await page.goto(`${baseURL}/#task/${formerKey}`);

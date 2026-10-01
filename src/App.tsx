@@ -755,6 +755,15 @@ export default function App() {
           ? [
               {
                 items: [
+                  ...(currentBoard
+                    ? [
+                        {
+                          label: "Edit board",
+                          icon: <Icon name="mdWrite" size={14} />,
+                          onSelect: () => setBoardDialog({ board: currentBoard }),
+                        },
+                      ]
+                    : []),
                   {
                     label: "New board",
                     icon: <Icon name="plus" size={14} />,
