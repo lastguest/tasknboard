@@ -114,7 +114,8 @@ test("Views save filters and display, favourite into the sidebar, and delete", a
   await edit.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(edit).toBeHidden();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Views");
-  await expect(favorites).toBeHidden();
+  // Other specs may leave favourites in the shared workspace.
+  await expect(favorites.getByRole("button", { name: new RegExp(`^${name}`) })).toHaveCount(0);
   expect((await command("list_views")).views.some((v: { id: string }) => v.id === view.id)).toBe(false);
 });
 
