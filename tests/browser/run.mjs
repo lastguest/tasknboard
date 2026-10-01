@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   rmSync,
 } from "node:fs";
@@ -36,6 +37,10 @@ if (!executable || !existsSync(executable)) {
   process.exitCode = 1;
 } else {
   const databaseDir = mkdtempSync(join(tmpdir(), "tasknboard-ui-db-"));
+  // Playwright empties its output folder when a run starts, so concurrent runs
+  // sharing one would delete each other's traces. Each run gets its own.
+  mkdirSync(join(root, "test-results"), { recursive: true });
+  const outputDir = mkdtempSync(join(root, "test-results", "browser-"));
   const port = await freePort();
   const baseURL = `http://127.0.0.1:${port}`;
   const server = spawn(process.execPath, ["server/http.mjs"], {
@@ -86,7 +91,14 @@ if (!executable || !existsSync(executable)) {
       TASKNBOARD_CHROMIUM_EXECUTABLE_PATH: executable,
     };
     const cli = resolve(root, "node_modules/@playwright/test/cli.js");
-    const args = [cli, "test", "--config", "playwright.config.ts"];
+    const args = [
+      cli,
+      "test",
+      "--config",
+      "playwright.config.ts",
+      "--output",
+      outputDir,
+    ];
     args.push(...forwarded);
     const testRun = spawn(process.execPath, args, {
       cwd: root,
@@ -118,6 +130,9 @@ if (!executable || !existsSync(executable)) {
       }
     });
     rmSync(databaseDir, { recursive: true, force: true });
+    // Keep a failed run's traces for inspection; a passing run leaves nothing.
+    if (status === 0) rmSync(outputDir, { recursive: true, force: true });
+    else console.log(`Test output: ${outputDir}`);
   }
   process.exitCode = status;
 }
