@@ -3780,6 +3780,16 @@ footer {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.pr-row-tasks {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+}
 .pr-row-meta {
   display: flex;
   align-items: center;

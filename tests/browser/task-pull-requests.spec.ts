@@ -319,3 +319,45 @@ test("The task link picker marks tasks that link pull requests", async ({ page }
   await expect(option(target.id).locator(".pr-count")).toHaveAttribute("title", "2 pull requests");
   await expect(option(plain.id).locator(".pr-count")).toHaveCount(0);
 });
+
+test("The Pull requests list shows the tasks that link each pull request", async ({ page }) => {
+  const stamp = Date.now();
+  const first = await command("create_task", { boardId: "BOARD-1", title: `First linker ${stamp}` });
+  const second = await command("create_task", { boardId: "BOARD-1", title: `Second linker ${stamp}` });
+  for (const task of [first, second])
+    await command("link_pull_requests", {
+      id: task.id,
+      expectedVersion: task.version,
+      pullRequests: ["acme/api#1201"],
+    });
+  await page.addInitScript((value) => {
+    sessionStorage.setItem("tasknboard-token", value);
+  }, humanToken);
+  await page.route("**/api/github_status", (route) =>
+    route.fulfill({
+      json: {
+        configured: true,
+        connected: true,
+        source: "settings",
+        account: { login: "ada", name: "", avatarUrl: "" },
+      },
+    }),
+  );
+  await page.route("**/api/list_pull_requests", (route) =>
+    route.fulfill({ json: { total: 2, pullRequests: [pull("acme", "api", 1201), pull("acme", "api", 1299)] } }),
+  );
+  await page.route("**/api/get_pull_request", (route) => {
+    const { owner, repo, number } = route.request().postDataJSON();
+    return route.fulfill({ json: pull(owner, repo, number) });
+  });
+  await page.goto(baseURL);
+  await page.locator(".sidebar").getByRole("button", { name: /^Pull requests/ }).click();
+  const row = (number: number) =>
+    page.locator(".pr-row").filter({ hasText: `acme/api#${number}` });
+  await expect(row(1201).locator(".pr-row-tasks")).toHaveText(`Linked to ${first.id} +1`);
+  await expect(row(1201).locator(".pr-row-tasks")).toHaveAttribute(
+    "title",
+    new RegExp(`${first.id} First linker[\\s\\S]*${second.id} Second linker`),
+  );
+  await expect(row(1299).locator(".pr-row-tasks")).toHaveCount(0);
+});

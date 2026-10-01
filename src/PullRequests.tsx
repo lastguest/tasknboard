@@ -747,6 +747,7 @@ export function PullRequestsPage({
                 {group.items.map((pr) => {
                   const ref = refOf(pr);
                   const selected = sameRef(ref, target);
+                  const linked = linkedTasks(tasks, ref);
                   return (
                     <button
                       key={pr.url}
@@ -763,6 +764,16 @@ export function PullRequestsPage({
                           <span className="pr-row-repo">
                             {pr.repository}#{pr.number}
                           </span>
+                          {linked.length > 0 && (
+                            <span
+                              className="pr-row-tasks"
+                              title={linked.map((t) => `${t.id} ${t.title}`).join("\n")}
+                            >
+                              <span className="sr-only">Linked to </span>
+                              {linked[0].id}
+                              {linked.length > 1 && ` +${linked.length - 1}`}
+                            </span>
+                          )}
                           <span className="pr-row-branch">{pr.headRef}</span>
                         </span>
                       </span>
@@ -1115,7 +1126,7 @@ function PullSummaryView({
               ))
             ) : (
               <span className="muted">
-                Not linked. Add the link to a task's review or context.
+                Not linked. Link it from a task's Pull requests section.
               </span>
             )}
           </dd>
