@@ -78,6 +78,8 @@ test("the read cursor only moves forward and counts unread items", (t) => {
   comment(store, bob, task.id, "First");
   comment(store, bob, task.id, "Second");
   const [newest, oldest] = store.execute("list_inbox", {}, alice).items;
+  // The count covers items beyond the limit.
+  assert.equal(store.execute("list_inbox", { limit: 1 }, alice).unread, 2);
 
   assert.deepEqual(
     store.execute("mark_inbox_read", { upTo: oldest.sequence }, alice),

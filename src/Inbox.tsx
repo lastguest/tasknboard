@@ -1,6 +1,6 @@
 import { Icon } from "./Icons";
 import { Avatar, usePeople, displayName } from "./People";
-import { relativeTime } from "./PullRequests";
+import { relativeTime } from "./formatting";
 import type { Inbox, InboxItem } from "./types";
 
 const action: Record<InboxItem["reason"], string> = {

@@ -230,7 +230,9 @@ export function createStore(path, { clock = Date.now } = {}) {
     }
     if (!db.prepare("SELECT version FROM migrations WHERE version=17").get()) {
       // Each actor's Inbox read position: the last event sequence they marked read.
+      // The Inbox finds each event's task by key, as findTask does.
       db.exec(`CREATE TABLE inbox_cursors(actor TEXT PRIMARY KEY, sequence INTEGER NOT NULL);
+ CREATE INDEX tasks_by_id ON tasks(json_extract(data, '$.id'));
  INSERT INTO migrations VALUES(17);`);
     }
   });
@@ -619,19 +621,17 @@ export function createStore(path, { clock = Date.now } = {}) {
     };
   };
   /**
-   * Comments and review submissions by other actors that concern `identity`,
-   * newest first, on non-archived tasks. Derived from events on every read.
-   * A review reaches the task's creator and assignee; when neither is a known
-   * human, it reaches every human, so no review goes unseen.
+   * The first `limit` items and the unread count of the actor's Inbox: comments
+   * and review submissions by other actors that concern `identity`, newest
+   * first, on non-archived tasks. Derived from events on every read. A review
+   * reaches the task's creator and assignee; when neither is a known human, it
+   * reaches every human, so no review goes unseen. The scan walks events from
+   * the newest and stops once it has `limit` items and reaches read events.
    */
-  const inboxItems = (identity) => {
-    const tasks = new Map(all().filter((t) => !t.archived).map((t) => [t.id, t]));
-    const creators = new Map(
-      db
-        .prepare("SELECT task_id, actor FROM events WHERE kind='created'")
-        .all()
-        .map((row) => [row.task_id, row.actor]),
-    );
+  const inbox = (identity, limit) => {
+    const cursor =
+      db.prepare("SELECT sequence FROM inbox_cursors WHERE actor=?").get(identity.id)
+        ?.sequence ?? 0;
     const humans = new Set(
       db
         .prepare("SELECT id FROM actors WHERE kind='human'")
@@ -643,14 +643,22 @@ export function createStore(path, { clock = Date.now } = {}) {
       return flat.length > 160 ? `${flat.slice(0, 159)}…` : flat;
     };
     const items = [];
+    let unread = 0;
+    // CROSS JOIN keeps events as the outer loop, in sequence order. The unary
+    // + drops the column's affinity, so the tasks_by_id index applies.
     for (const row of db
       .prepare(
-        "SELECT sequence, task_id, actor, kind, body, created_at FROM events WHERE kind IN ('add_comment','submit_review') AND actor<>? ORDER BY sequence DESC",
+        `SELECT e.sequence, e.task_id, e.actor, e.kind, e.body, e.created_at,
+ json_extract(t.data, '$.title') AS title, json_extract(t.data, '$.assignee') AS assignee,
+ (SELECT c.actor FROM events c WHERE c.task_id=e.task_id AND c.kind='created' ORDER BY c.sequence LIMIT 1) AS creator
+ FROM events e CROSS JOIN tasks t ON json_extract(t.data, '$.id')=+e.task_id
+ WHERE e.kind IN ('add_comment','submit_review') AND e.actor<>?
+ AND NOT coalesce(json_extract(t.data, '$.archived'), 0)
+ ORDER BY e.sequence DESC`,
       )
-      .all(identity.id)) {
-      const task = tasks.get(row.task_id);
-      if (!task) continue;
-      const owners = [creators.get(task.id), task.assignee];
+      .iterate(identity.id)) {
+      if (row.sequence <= cursor && items.length >= limit) break;
+      const owners = [row.creator, row.assignee];
       const owns = owners.includes(identity.id);
       let reason = "";
       if (row.kind === "add_comment") {
@@ -662,26 +670,23 @@ export function createStore(path, { clock = Date.now } = {}) {
       )
         reason = "review";
       if (!reason) continue;
-      items.push({
-        sequence: row.sequence,
-        taskId: task.id,
-        taskTitle: task.title,
-        actor: row.actor,
-        kind: row.kind,
-        reason,
-        excerpt: excerpt(
-          row.kind === "submit_review" ? JSON.parse(row.body).summary : row.body,
-        ),
-        createdAt: row.created_at,
-      });
+      if (row.sequence > cursor) unread++;
+      if (items.length < limit)
+        items.push({
+          sequence: row.sequence,
+          taskId: row.task_id,
+          taskTitle: row.title,
+          actor: row.actor,
+          kind: row.kind,
+          reason,
+          excerpt: excerpt(
+            row.kind === "submit_review" ? JSON.parse(row.body).summary : row.body,
+          ),
+          createdAt: row.created_at,
+        });
     }
-    return items;
+    return { items, unread, cursor };
   };
-  const inboxCursor = (identity) =>
-    db.prepare("SELECT sequence FROM inbox_cursors WHERE actor=?").get(identity.id)
-      ?.sequence ?? 0;
-  const unreadCount = (items, cursor) =>
-    items.filter((item) => item.sequence > cursor).length;
   const active = (t) => t.lease && t.lease.expiresAt > clock();
   /**
    * Stores image data embedded in any Markdown text of a command, so tasks,
@@ -909,11 +914,8 @@ export function createStore(path, { clock = Date.now } = {}) {
       }));
     if (command === "list_inbox")
       return readTransaction(() => {
-        const items = inboxItems(identity);
-        return {
-          items: items.slice(0, p.limit),
-          unread: unreadCount(items, inboxCursor(identity)),
-        };
+        const { items, unread } = inbox(identity, p.limit);
+        return { items, unread };
       });
     if (command === "mark_inbox_read")
       return transaction(() => {
@@ -925,8 +927,8 @@ export function createStore(path, { clock = Date.now } = {}) {
         db.prepare(
           "INSERT INTO inbox_cursors(actor, sequence) VALUES(?,?) ON CONFLICT(actor) DO UPDATE SET sequence=MAX(sequence, excluded.sequence)",
         ).run(identity.id, p.upTo);
-        const cursor = inboxCursor(identity);
-        return { sequence: cursor, unread: unreadCount(inboxItems(identity), cursor) };
+        const { cursor, unread } = inbox(identity, 0);
+        return { sequence: cursor, unread };
       });
     if (command === "list_epics")
       return readTransaction(() => {
