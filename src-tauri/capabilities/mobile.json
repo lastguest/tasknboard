@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "Lets the bundled server setup page save the workspace server.",
+  "platforms": ["iOS", "android"],
+  "windows": ["main"],
+  "local": true,
+  "permissions": ["allow-saved-server", "allow-save-server"]
+}

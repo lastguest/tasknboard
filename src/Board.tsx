@@ -14,7 +14,7 @@ import { EpicTag } from "./Epics";
 import { Icon } from "./Icons";
 import { formatUtcTimestamp } from "./formatting";
 import { Avatar, usePersonName } from "./People";
-import { StatusPicker } from "./Dialogs";
+import { EpicPicker, StatusPicker } from "./Dialogs";
 import type { TaskGroup } from "./Views";
 
 export { Avatar };
@@ -210,6 +210,8 @@ type BoardProps = {
   epics?: ReadonlyMap<string, Epic>;
   onOpen: (t: Task) => void;
   onMove?: (t: Task, s: Status) => void;
+  /** Saves a list row's new epic; "" removes it. */
+  onEpic?: (t: Task, epic: string) => Promise<void>;
   onNew?: () => void;
   /** Opens the task's context menu. */
   onMenu?: (e: React.MouseEvent<HTMLElement>, t: Task) => void;
@@ -323,6 +325,7 @@ export function Board({
   epics,
   onOpen,
   onMove,
+  onEpic,
   onNew,
   onMenu,
   pending = new Map(),
@@ -377,7 +380,9 @@ export function Board({
         </td>
         {epics && (
           <td data-label="Epic">
-            {t.epic ? (
+            {onEpic ? (
+              <EpicPicker task={t} epics={epics} onEpic={onEpic} />
+            ) : t.epic ? (
               <EpicTag epic={epics.get(t.epic)} />
             ) : (
               <span className="small">None</span>

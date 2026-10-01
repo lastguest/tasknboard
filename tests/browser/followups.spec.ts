@@ -94,6 +94,29 @@ test("Status menu saves and the server rejects an invalid drag", async ({ page }
   expect((await command("get_task", { id: task.id })).status).toBe("in_review");
 });
 
+test("List epic picker saves on choice and hides archived epics", async ({ page }) => {
+  const epic = await command("create_epic", { title: `List epic ${key()}` });
+  const old = await command("create_epic", { title: `Old epic ${key()}` });
+  await command("archive_epic", { id: old.id, expectedVersion: old.version });
+  const task = await create(`Epic pick ${key()}`);
+  await connect(page);
+  await search(page).fill(task.id);
+  await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "List" }).click();
+  await page.getByRole("button", { name: `Epic of ${task.id}: None. Choose epic` }).click();
+  const picker = page.getByRole("dialog", { name: `Epic of ${task.id}` });
+  await expect(picker.getByText(old.title)).toHaveCount(0);
+  await picker.getByRole("searchbox").fill(epic.title);
+  await picker.getByText(epic.title, { exact: true }).click();
+  await expect(picker).toBeHidden();
+  await expect(page.getByRole("button", { name: `Epic of ${task.id}: ${epic.title}. Choose epic` })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: `Saved ${task.id}` })).toBeVisible();
+  expect((await command("get_task", { id: task.id })).epic).toBe(epic.id);
+  await page.getByRole("button", { name: `Epic of ${task.id}: ${epic.title}. Choose epic` }).click();
+  await page.getByRole("dialog", { name: `Epic of ${task.id}` }).getByText("No epic", { exact: true }).click();
+  await expect(page.getByRole("button", { name: `Epic of ${task.id}: None. Choose epic` })).toBeVisible();
+  expect((await command("get_task", { id: task.id })).epic).toBe("");
+});
+
 test("Task sidebar pickers search, stage changes, and save label arrays", async ({ page }) => {
   const task = await command("create_task", {
     boardId: "BOARD-1",

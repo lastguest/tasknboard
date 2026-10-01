@@ -38,21 +38,33 @@ export function AppUpdates() {
   }
   return (
     <>
-      <p className="small">
-        TasknBoard checks automatically at startup and once a day. Installation
-        requires your confirmation.
-      </p>
-      <button
-        type="button"
-        className="button"
-        disabled={checking}
-        onClick={check}
-      >
-        {checking ? "Checking for updates…" : "Check for updates"}
-      </button>
-      <p className={failed ? "form-error" : "small"} role="status">
-        {result}
-      </p>
+      <div className="settings-row" aria-busy={checking}>
+        <div className="settings-row-text">
+          <span className="settings-row-title">Check for updates</span>
+          <span className="settings-row-hint">
+            TasknBoard checks automatically at startup and once a day.
+            Installation requires your confirmation.
+          </span>
+        </div>
+        <div className="settings-row-control">
+          <button
+            type="button"
+            className="secondary small-button"
+            disabled={checking}
+            onClick={check}
+          >
+            {checking ? "Checking for updates…" : "Check for updates"}
+          </button>
+        </div>
+      </div>
+      {result && (
+        <p
+          className={`settings-row-note ${failed ? "inline-error" : "small"}`}
+          role="status"
+        >
+          {result}
+        </p>
+      )}
     </>
   );
 }

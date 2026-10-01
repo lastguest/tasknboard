@@ -111,7 +111,10 @@ export function AgentSettings({
       env.filter((row) => row.key.trim()).map((row) => [row.key.trim(), row.value]),
     ),
   };
-  const changed = JSON.stringify(draft) !== JSON.stringify(initial) || !saved;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
+  const changed = dirty || !saved;
+  /** Leaving with unsaved changes asks first, as task tabs do. */
+  const [leaving, setLeaving] = useState(false);
   const duplicateKey = env.some(
     (row, i) => row.key.trim() && env.findIndex((r) => r.key.trim() === row.key.trim()) !== i,
   );
@@ -142,6 +145,7 @@ export function AgentSettings({
     try {
       await command("agent-config-save", { identity, config: draft });
       setNotice("Settings saved. They apply to the next run.");
+      setLeaving(false);
       onSaved();
     } catch (e) {
       setError(errorOf(e).message);
@@ -154,7 +158,11 @@ export function AgentSettings({
   return (
     <form className="agent-settings" onSubmit={save} noValidate>
       <div className="agent-settings-head">
-        <button type="button" className="secondary small-button" onClick={onBack}>
+        <button
+          type="button"
+          className="secondary small-button"
+          onClick={() => (dirty ? setLeaving(true) : onBack())}
+        >
           <Icon name="back" size={13} /> Agents
         </button>
         <h2 className="section-title">
@@ -167,6 +175,23 @@ export function AgentSettings({
           {status?.queued.length ? ` · ${status.queued.length} waiting` : ""}
         </span>
       </div>
+      {leaving && (
+        <div className="discard-bar" role="alertdialog" aria-label="Discard changes">
+          <span>Discard your unsaved agent settings?</span>
+          <span className="spacer" />
+          <button
+            type="button"
+            className="secondary"
+            autoFocus
+            onClick={() => setLeaving(false)}
+          >
+            Keep editing
+          </button>
+          <button type="button" className="danger-button" onClick={onBack}>
+            Discard
+          </button>
+        </div>
+      )}
       {!info.autoStart && (
         <p className="small agent-settings-note">
           Agents start automatically only in the TasknBoard desktop app. You can
@@ -399,17 +424,22 @@ export function AgentSettings({
           {notice}
         </p>
       )}
-      <div className="form-actions">
+      {/* Stays in view: the event prompts make the page long. */}
+      <div className={`form-actions agent-settings-actions${changed ? " dirty" : ""}`}>
+        <span className="small">
+          {dirty ? "Unsaved changes" : saved ? "" : "Not saved yet"}
+        </span>
         <span className="spacer" />
         <button
           type="button"
           className="secondary"
-          disabled={pending || !changed || !saved}
+          disabled={pending || !dirty || !saved}
           onClick={() => {
             setConfig(initial);
             setArgs(initial.args.join("\n"));
             setEnv(toRows(initial.env));
             setError("");
+            setLeaving(false);
           }}
         >
           Discard changes

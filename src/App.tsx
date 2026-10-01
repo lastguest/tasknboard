@@ -1030,7 +1030,7 @@ export default function App() {
 
   async function quickEdit(
     task: Task,
-    patch: Partial<Pick<Task, "priority" | "assignee">>,
+    patch: Partial<Pick<Task, "priority" | "assignee" | "epic">>,
     body: string,
   ) {
     try {
@@ -1050,6 +1050,16 @@ export default function App() {
     } finally {
       void refresh();
     }
+  }
+
+  function setEpic(task: Task, epic: string) {
+    return quickEdit(
+      task,
+      { epic },
+      epic
+        ? `Now in ${epicsById.get(epic)?.title ?? "the epic"}.`
+        : "No longer in an epic.",
+    );
   }
 
   async function archiveTask(task: Task) {
@@ -2117,6 +2127,7 @@ export default function App() {
                     epics={view === "epic" ? undefined : epicsById}
                     onOpen={openTask}
                     onMove={move}
+                    onEpic={setEpic}
                     onNew={newTask}
                     onMenu={taskMenu}
                     pending={pending}

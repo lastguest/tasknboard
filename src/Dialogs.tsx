@@ -208,6 +208,89 @@ export function StatusPicker({
   );
 }
 
+/**
+ * Epic choices shared by the task sidebar and the list view. Archived epics
+ * cannot take new tasks; the ones in `keep` stay listed, and only `saved`
+ * stays selectable.
+ */
+export function epicChoices(
+  epics: Iterable<Epic>,
+  saved: string | undefined,
+  keep: string[] = [],
+): ChoiceOption[] {
+  return [
+    { value: "", label: "No epic" },
+    ...[...epics]
+      .filter(
+        (epic) => !epic.archived || epic.id === saved || keep.includes(epic.id),
+      )
+      .map((epic) => ({
+        value: epic.id,
+        label: epic.title,
+        detail: epic.archived ? "Archived" : undefined,
+        disabled: epic.archived && epic.id !== saved,
+        icon: (
+          <span
+            className="epic-glyph"
+            style={epicStyle(epic)}
+            aria-hidden="true"
+          />
+        ),
+      })),
+  ];
+}
+
+/** The list view's epic cell: the sidebar trigger and picker, per row. */
+export function EpicPicker({
+  task,
+  epics,
+  onEpic,
+}: {
+  task: Task;
+  epics: ReadonlyMap<string, Epic>;
+  onEpic: (t: Task, epic: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
+  const epicId = saving ?? task.epic;
+  const epic = epicId ? epics.get(epicId) : undefined;
+  return (
+    <>
+      <button
+        type="button"
+        className="sidebar-picker-trigger epic-picker-trigger"
+        aria-label={`Epic of ${task.id}: ${epicId ? (epic?.title ?? "Unavailable epic") : "None"}. Choose epic`}
+        aria-haspopup="dialog"
+        disabled={saving !== null}
+        onClick={() => setOpen(true)}
+      >
+        {epicId ? (
+          <EpicTag epic={epic} />
+        ) : (
+          <span className="small">None</span>
+        )}
+        {saving !== null && <span className="moving">Saving…</span>}
+      </button>
+      {open && (
+        <SearchableChoiceDialog
+          title={`Epic of ${task.id}`}
+          searchLabel="Search epics"
+          options={epicChoices(epics.values(), task.epic)}
+          selected={[task.epic]}
+          onSelect={(value) => {
+            setOpen(false);
+            if (value === task.epic) return;
+            setSaving(value);
+            void onEpic(task, value).finally(() => setSaving(null));
+          }}
+          onToggle={() => {}}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
 export function SearchableChoiceDialog({
   title,
   searchLabel,
@@ -667,30 +750,7 @@ export function TaskEditor({
   }));
   const epicsById = new Map(epics.map((epic) => [epic.id, epic]));
   const epicTitle = (id: string) => epicsById.get(id)?.title ?? "Unavailable epic";
-  // Archived epics cannot take new tasks; the current one stays listed.
-  const epicOptions: ChoiceOption[] = [
-    { value: "", label: "No epic" },
-    ...epics
-      .filter(
-        (epic) =>
-          !epic.archived ||
-          epic.id === draft.epic ||
-          epic.id === current?.epic,
-      )
-      .map((epic) => ({
-        value: epic.id,
-        label: epic.title,
-        detail: epic.archived ? "Archived" : undefined,
-        disabled: epic.archived && epic.id !== current?.epic,
-        icon: (
-          <span
-            className="epic-glyph"
-                    style={epicStyle(epic)}
-            aria-hidden="true"
-          />
-        ),
-      })),
-  ];
+  const epicOptions = epicChoices(epics, current?.epic, [draft.epic]);
   const labelOptions: ChoiceOption[] = [
     ...new Set([...labels, ...draft.labels]),
   ]
