@@ -48,6 +48,18 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      # Downloaded crates and the Node.js archive change far less often than the build.
+      # desktop-prepare checks the archive against the official checksums before it uses it.
+      - name: Cache downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            .desktop-cache/
+          key: windows-downloads-${{ hashFiles('src-tauri/Cargo.lock', 'scripts/desktop-prepare.mjs') }}
+          restore-keys: windows-downloads-
       - name: Restore Rust build cache
         id: rust-cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -81,6 +93,15 @@ jobs:
           $env:TASKNBOARD_TEST_NODE = Join-Path $PWD 'src-tauri/resources/node.exe'
           $env:TASKNBOARD_TEST_SERVICE = Join-Path $PWD 'src-tauri/resources/server.mjs'
           node --test tests/desktop.test.mjs
+      - name: Find the Playwright version
+        id: playwright
+        shell: bash
+        run: echo "version=$(npx playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/AppData/Local/ms-playwright
+          key: windows-playwright-${{ steps.playwright.outputs.version }}
       - name: Test browser workflows
         run: |
           npx playwright install chromium
@@ -131,6 +152,18 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      # Downloaded crates and the Node.js archive change far less often than the build.
+      # desktop-prepare checks the archive against the official checksums before it uses it.
+      - name: Cache downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            .desktop-cache/
+          key: macos-downloads-${{ hashFiles('src-tauri/Cargo.lock', 'scripts/desktop-prepare.mjs') }}
+          restore-keys: macos-downloads-
       - name: Restore Rust build cache
         id: rust-cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
