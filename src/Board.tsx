@@ -12,6 +12,7 @@ import {
   type Task,
 } from "./types";
 import { EpicTag } from "./Epics";
+import { usePullStates, type PrState } from "./PullRequests";
 import { Icon } from "./Icons";
 import { formatUtcTimestamp } from "./formatting";
 import { Avatar, usePersonName } from "./People";
@@ -336,14 +337,33 @@ export function TaskCard({
   );
 }
 
-/** A pull request mark when a task links any, with a count past one. */
+/** The most active state wins the mark: open, then draft, merged, closed. */
+const pullStateOrder: PrState[] = ["open", "draft", "merged", "closed"];
+
+/**
+ * A pull request mark when a task links any, with a count past one. With
+ * GitHub connected it takes the colour of the most active state.
+ */
 function PullCount({ task }: { task: Task }) {
-  const count = task.pullRequests?.length ?? 0;
+  const prs = task.pullRequests ?? [];
+  const states = usePullStates(prs);
+  const count = prs.length;
   if (!count) return null;
-  const label = `${count} ${count === 1 ? "pull request" : "pull requests"}`;
+  const tally = pullStateOrder
+    .map((state) => [state, states.filter((s) => s === state).length] as const)
+    .filter(([, n]) => n > 0);
+  const state = tally[0]?.[0];
+  const label = `${count} ${count === 1 ? "pull request" : "pull requests"}${
+    tally.length ? `: ${tally.map(([s, n]) => `${n} ${s}`).join(", ")}` : ""
+  }`;
   return (
-    <span className="pr-count" title={label}>
-      <Icon name="pull" size={13} />
+    <span className={`pr-count ${state ?? "unknown"}`} title={label}>
+      <Icon
+        name={
+          state === "merged" ? "merge" : state === "closed" ? "pullClosed" : "pull"
+        }
+        size={13}
+      />
       {count > 1 && <span aria-hidden="true">{count}</span>}
       <span className="sr-only">{label}</span>
     </span>

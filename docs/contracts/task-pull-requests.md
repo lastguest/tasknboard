@@ -38,6 +38,11 @@ MCP, WebMCP and the HTTP API expose both commands. The CLI adds
 `/pr <url…>` and `/unpr <url>`, and lists pull requests in the task detail.
 
 Board cards and list rows show a pull request mark, with the count past one.
+With GitHub connected, the mark takes the colour and icon of the most active
+state among the task's pull requests: open (green), then draft (grey), merged
+(purple), closed (red). Its tooltip counts each state. The board reads every
+visible pull request in one `get_pull_request_states` call and again after a
+minute. Without a connection the mark stays grey.
 The task details panel lists them under **Pull requests**; the **+** button
 takes one or more pasted links. Each row opens the pull request in the
 **Pull requests** section (`#pulls/<owner>/<repo>/<number>`). With GitHub

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { command, errorOf, type ApiError } from "./api";
 import { Icon } from "./Icons";
@@ -19,7 +26,7 @@ type GitHubDeviceAuthorization = {
 type GitHubAuthorizationPoll =
   { pending: true; interval: number } | GitHubStatus;
 type Person = { login: string; avatarUrl: string };
-type PrState = "open" | "draft" | "merged" | "closed";
+export type PrState = "open" | "draft" | "merged" | "closed";
 export type PullSummary = {
   repository: string;
   number: number;
@@ -231,6 +238,74 @@ function pullSummary(pr: TaskPullRequest) {
   );
   summaryCache.set(key, { at: Date.now(), value });
   return value;
+}
+
+/**
+ * Pull request states for task cards. Cards ask for what they show; requests
+ * made in the same render go to GitHub as one `get_pull_request_states` call,
+ * and each state is read again after a minute. Without a GitHub connection
+ * every state stays unknown.
+ */
+const pullStates = new Map<string, { at: number; state: PrState | null }>();
+const stateListeners = new Set<() => void>();
+let stateVersion = 0;
+let wanted = new Map<string, TaskPullRequest>();
+let flushQueued = false;
+const stateKey = (pr: { repository: string; number: number }) =>
+  `${pr.repository.toLowerCase()}#${pr.number}`;
+function wantStates(prs: TaskPullRequest[]) {
+  for (const pr of prs) {
+    const key = stateKey(pr);
+    const entry = pullStates.get(key);
+    if (entry && Date.now() - entry.at < 60_000) continue;
+    // The last state stays on the card while it is read again.
+    pullStates.set(key, { at: Date.now(), state: entry?.state ?? null });
+    wanted.set(key, pr);
+  }
+  if (!wanted.size || flushQueued) return;
+  flushQueued = true;
+  queueMicrotask(() => void flushStates());
+}
+async function flushStates() {
+  flushQueued = false;
+  const batch = [...wanted.values()];
+  wanted = new Map();
+  if (!(await githubConnected())) return;
+  for (let i = 0; i < batch.length; i += 100) {
+    const chunk = batch.slice(i, i + 100);
+    try {
+      const { pullRequests } = await command<{
+        pullRequests: { repository: string; number: number; state: PrState }[];
+      }>("get_pull_request_states", {
+        pullRequests: chunk.map((pr) => {
+          const [owner, repo] = pr.repository.split("/");
+          return { owner, repo, number: pr.number };
+        }),
+      });
+      const found = new Map(pullRequests.map((pr) => [stateKey(pr), pr.state]));
+      for (const pr of chunk)
+        pullStates.set(stateKey(pr), {
+          at: Date.now(),
+          state: found.get(stateKey(pr)) ?? null,
+        });
+    } catch {
+      // The cards keep a neutral mark; the next read tries again.
+    }
+  }
+  stateVersion++;
+  for (const listener of stateListeners) listener();
+}
+const subscribeStates = (listener: () => void) => {
+  stateListeners.add(listener);
+  return () => {
+    stateListeners.delete(listener);
+  };
+};
+/** Each pull request's state, or null while unknown. */
+export function usePullStates(prs: TaskPullRequest[]) {
+  useSyncExternalStore(subscribeStates, () => stateVersion);
+  useEffect(() => wantStates(prs));
+  return prs.map((pr) => pullStates.get(stateKey(pr))?.state ?? null);
 }
 
 function TaskPullRequestRow({

@@ -1072,9 +1072,18 @@ footer {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  color: #bca0f4;
+  color: var(--subtle);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+}
+.pr-count.open {
+  color: var(--accent);
+}
+.pr-count.merged {
+  color: #bca0f4;
+}
+.pr-count.closed {
+  color: var(--danger);
 }
 .card-bottom .status-select {
   width: auto;

@@ -49,6 +49,10 @@ available over HTTP. MCP, WebMCP and the CLI do not expose them.
 - `get_pull_request({ owner, repo, number })` returns a summary plus `body`,
   `checks`, `reviewers`, `commentCount`, `commitCount`, and the last 60
   timeline events as `activity`.
+- `get_pull_request_states({ pullRequests: { owner, repo, number }[] })`
+  reads up to 100 pull requests in one GraphQL query and returns
+  `{ pullRequests: { repository, number, title, state }[] }`. Pull requests
+  the token can't see are left out instead of failing the call.
 - `get_pull_request_files({ owner, repo, number })` returns up to 300 files
   with GitHub's unified `patch`. `patch` is `null` for binary or very large
   files.

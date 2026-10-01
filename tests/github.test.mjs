@@ -120,6 +120,19 @@ function fakeGitHub() {
         return send(200, {
           data: { search: { issueCount: 1, nodes: [pr, {}] } },
         });
+      // Batched states: p0, p1… aliases; only number 7 exists.
+      if (query.includes("p0: repository"))
+        return send(200, {
+          data: Object.fromEntries(
+            Object.keys(variables)
+              .filter((k) => k.startsWith("n"))
+              .map((k) => [
+                `p${k.slice(1)}`,
+                variables[k] === 7 ? { pullRequest: pr } : null,
+              ]),
+          ),
+          errors: [{ type: "NOT_FOUND", message: "Could not resolve" }],
+        });
       if (variables.number !== 7)
         return send(200, {
           data: { repository: null },
@@ -605,6 +618,31 @@ test("GitHub integration keeps the token on the server and proxies pull requests
     400,
   );
   assert.equal((await post("list_pull_requests", {}, agent)).status, 403);
+
+  // One query reads many states; pull requests GitHub can't find are left out.
+  const states = await post("get_pull_request_states", {
+    pullRequests: [
+      { owner: "acme", repo: "resolver", number: 7 },
+      { owner: "acme", repo: "resolver", number: 8 },
+    ],
+  });
+  assert.equal(states.status, 200);
+  assert.deepEqual(states.body.pullRequests, [
+    {
+      repository: "acme/resolver",
+      number: 7,
+      title: "Add ingredient merging switch",
+      state: "merged",
+    },
+  ]);
+  assert.match(
+    JSON.parse(github.seen.findLast((r) => r.path === "/graphql").body).query,
+    /p1: repository\(owner: \$o1, name: \$r1\)/,
+  );
+  assert.equal(
+    (await post("get_pull_request_states", { pullRequests: [] })).status,
+    400,
+  );
 
   const files = await post("get_pull_request_files", {
     owner: "acme",

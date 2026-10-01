@@ -38,6 +38,9 @@ export const githubSchemas = {
     .strict(),
   get_pull_request: pull,
   get_pull_request_files: pull,
+  get_pull_request_states: z
+    .object({ pullRequests: z.array(pull).min(1).max(100) })
+    .strict(),
 };
 
 async function request(token, path, init = {}) {
@@ -468,6 +471,48 @@ export function createGitHub(store) {
       return {
         total: data.search.issueCount,
         pullRequests: data.search.nodes.filter((n) => n?.number).map(summary),
+      };
+    },
+    /**
+     * Title and state of many pull requests in one query, for task cards.
+     * Pull requests the token can't see are left out instead of failing all.
+     */
+    async get_pull_request_states({ pullRequests }) {
+      const variables = {};
+      const fields = pullRequests.map((pr, i) => {
+        Object.assign(variables, {
+          [`o${i}`]: pr.owner,
+          [`r${i}`]: pr.repo,
+          [`n${i}`]: pr.number,
+        });
+        return `p${i}: repository(owner: $o${i}, name: $r${i}) { pullRequest(number: $n${i}) { number title state isDraft merged repository { nameWithOwner } } }`;
+      });
+      const params = pullRequests
+        .map((_, i) => `$o${i}: String!, $r${i}: String!, $n${i}: Int!`)
+        .join(", ");
+      const body = await request(required(), "/graphql", {
+        method: "POST",
+        body: JSON.stringify({
+          query: `query(${params}) { ${fields.join(" ")} }`,
+          variables,
+        }),
+      });
+      if (!body?.data)
+        fail("GITHUB_ERROR", body?.errors?.[0]?.message || "GitHub query failed.", 502);
+      return {
+        pullRequests: pullRequests.flatMap((_, i) => {
+          const pr = body.data[`p${i}`]?.pullRequest;
+          return pr
+            ? [
+                {
+                  repository: pr.repository.nameWithOwner,
+                  number: pr.number,
+                  title: pr.title,
+                  state: stateOf(pr),
+                },
+              ]
+            : [];
+        }),
       };
     },
     async get_pull_request({ owner, repo, number }) {

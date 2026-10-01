@@ -126,3 +126,57 @@ test("My tasks marks tasks that link pull requests", async ({ page }) => {
   const row = page.getByRole("row").filter({ hasText: task.id });
   await expect(row.locator(".pr-count")).toHaveAttribute("title", "2 pull requests");
 });
+
+test("card marks take the colour of their pull requests' state", async ({ page }) => {
+  const stamp = Date.now();
+  const mixed = await command("create_task", { boardId: "BOARD-1", title: `Mixed ${stamp}` });
+  const merged = await command("create_task", { boardId: "BOARD-1", title: `Merged ${stamp}` });
+  await command("link_pull_requests", {
+    id: mixed.id,
+    expectedVersion: mixed.version,
+    pullRequests: ["acme/api#600", "acme/api#601"],
+  });
+  await command("link_pull_requests", {
+    id: merged.id,
+    expectedVersion: merged.version,
+    pullRequests: ["acme/api#601"],
+  });
+  await page.addInitScript((value) => {
+    sessionStorage.setItem("tasknboard-token", value);
+  }, humanToken);
+  await page.route("**/api/github_status", (route) =>
+    route.fulfill({
+      json: {
+        configured: true,
+        connected: true,
+        source: "settings",
+        account: { login: "ada", name: "", avatarUrl: "" },
+      },
+    }),
+  );
+  const batches: { number: number }[][] = [];
+  await page.route("**/api/get_pull_request_states", (route) => {
+    const { pullRequests } = route.request().postDataJSON();
+    batches.push(pullRequests);
+    return route.fulfill({
+      json: {
+        pullRequests: pullRequests.map((pr: { owner: string; repo: string; number: number }) => ({
+          repository: `${pr.owner}/${pr.repo}`,
+          number: pr.number,
+          title: "",
+          state: pr.number === 601 ? "merged" : "open",
+        })),
+      },
+    });
+  });
+
+  await page.goto(baseURL);
+  const mark = (id: string) =>
+    page.getByRole("article", { name: new RegExp(`^${id}:`) }).locator(".pr-count");
+  await expect(mark(mixed.id)).toHaveClass(/\bopen\b/);
+  await expect(mark(mixed.id)).toHaveAttribute("title", "2 pull requests: 1 open, 1 merged");
+  await expect(mark(merged.id)).toHaveClass(/\bmerged\b/);
+  await expect(mark(merged.id)).toHaveAttribute("title", "1 pull request: 1 merged");
+  // Every card on the board is read in one request, each pull request once.
+  expect(batches[0].map((pr) => pr.number).filter((n) => n >= 600).sort()).toEqual([600, 601]);
+});
