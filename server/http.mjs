@@ -8,6 +8,13 @@ import { createCliHelper } from "./cli-helper.mjs";
 import { createClaudePlugin } from "./claude-plugin.mjs";
 import { createCodexPlugin } from "./codex-plugin.mjs";
 import { createAgentLauncher } from "./agent-launcher.mjs";
+import {
+  agentClients,
+  agentEvents,
+  defaultConfig,
+  listConfigs,
+  writeConfig,
+} from "./agent-config.mjs";
 import { createGitHub } from "./github.mjs";
 import { imageDataUrlLimit } from "./domain.mjs";
 import { dbPath, localActor, tokensFromEnvironment } from "./config.mjs";
@@ -42,6 +49,64 @@ const launcher = createAgentLauncher({
 store.registerActors(
   Object.keys(tokens).length ? Object.values(tokens) : [localActor],
 );
+const httpError = (code, message, status) =>
+  Object.assign(new Error(message), { code, status });
+/** Agent settings live on this machine, like the plugins that use them. */
+function agentCommand(name, args, actor) {
+  if (actor.kind !== "human")
+    throw httpError("FORBIDDEN", "Only a person can manage agent settings.", 403);
+  const shared = Object.keys(tokens).length > 0;
+  if (!args || typeof args !== "object" || Array.isArray(args))
+    throw httpError("VALIDATION", "Send a JSON object.", 400);
+  const roster = () =>
+    store
+      .execute("workspace_info", {}, actor)
+      .actors.filter((a) => a.kind === "agent")
+      .map((a) => a.id);
+  if (name === "agent-configs") {
+    const agents = shared ? {} : listConfigs(store);
+    return {
+      mode: shared ? "shared" : "local",
+      autoStart: launcher.enabled,
+      clients: Object.entries(agentClients).map(([id, c]) => ({
+        id,
+        name: c.name,
+        executable: c.executable,
+        model: c.model,
+        profile: { label: c.profile.label, flag: c.profile.flag, hint: c.profile.hint },
+      })),
+      events: agentEvents.map(({ id, label, description, placeholders, prompt }) => ({
+        id,
+        label,
+        description,
+        placeholders,
+        hasPrompt: prompt !== null,
+      })),
+      defaults: defaultConfig(),
+      agents: Object.fromEntries(
+        Object.entries(agents).map(([id, config]) => [
+          id,
+          { config, ...launcher.status(id) },
+        ]),
+      ),
+    };
+  }
+  if (shared)
+    throw httpError(
+      "AGENTS_UNSUPPORTED",
+      "Configure agents from the local TasknBoard desktop app.",
+      400,
+    );
+  if (name === "agent-config-save") {
+    if (Object.keys(args).some((key) => !["identity", "config"].includes(key)))
+      throw httpError("VALIDATION", "Provide only identity and config.", 400);
+    return { identity: args.identity, config: writeConfig(store, args.identity, args.config) };
+  }
+  if (args.event !== "standup" || Object.keys(args).length !== 1)
+    throw httpError("VALIDATION", "event: Only standup can be sent.", 400);
+  const identities = new Set([...roster(), ...Object.keys(listConfigs(store))]);
+  return { started: launcher.standup([...identities]) };
+}
 const json = (res, status, value) => {
   res.writeHead(status, {
     "Content-Type": "application/json",
@@ -228,16 +293,24 @@ const server = createServer(async (req, res) => {
         }
         return;
       }
+      if (["agent-configs", "agent-config-save", "agent-event"].includes(name)) {
+        json(res, 200, agentCommand(name, args, actor));
+        return;
+      }
       // GitHub commands call out to GitHub, so they run outside the store.
       const result = await github.execute(name, args, actor);
+      // Agent events compare the task with how it was before a person's edit.
+      const before =
+        actor.kind === "human" && name === "update_task" && !result
+          ? store.execute("get_task", { id: args.id }, actor)
+          : null;
       const output = result ?? store.execute(name, args, actor);
-      // A person's assignment starts the agent; agents cannot reassign tasks.
-      if (
-        actor.kind === "human" &&
-        (name === "create_task" ||
-          (name === "update_task" && args.patch?.assignee !== undefined))
-      )
-        launcher.assigned(output);
+      // A person's edits start agents; agents cannot reassign tasks.
+      if (actor.kind === "human") {
+        if (name === "create_task") launcher.assigned(output);
+        if (name === "update_task") launcher.changed(before, output);
+        if (name === "add_comment") launcher.commented(output, actor, args.body);
+      }
       json(res, 200, output);
       return;
     }

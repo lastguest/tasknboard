@@ -78,6 +78,17 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
       body: JSON.stringify(args),
     });
   assert.equal((await post("list_tasks", {}, "bad")).status, 401);
+  // Agent settings stay on the local desktop app, and only people see them.
+  assert.equal((await post("agent-configs", {}, agentToken)).status, 403);
+  const sharedAgents = await (await post("agent-configs")).json();
+  assert.equal(sharedAgents.mode, "shared");
+  assert.deepEqual(sharedAgents.agents, {});
+  const sharedSave = await post("agent-config-save", {
+    identity: "remote-agent",
+    config: sharedAgents.defaults,
+  });
+  assert.equal(sharedSave.status, 400);
+  assert.equal((await sharedSave.json()).code, "AGENTS_UNSUPPORTED");
   assert.equal((await post("claude-plugin", { identity: "claude" }, agentToken)).status, 403);
   assert.equal((await post("claude-plugin", { identity: "claude" })).status, 400);
   assert.equal((await post("codex-plugin", { identity: "codex" }, agentToken)).status, 403);
@@ -205,4 +216,57 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   ]);
   assert.ok(!databaseBytes.includes(token));
   assert.ok(!databaseBytes.includes(agentToken));
+});
+
+test("a local workspace saves agent settings and rejects invalid ones", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "tasknboard-agents-"));
+  const service = spawn(process.execPath, ["server/http.mjs"], {
+    env: { ...process.env, PORT: "14329", TASKNBOARD_DB: join(dir, "db.sqlite") },
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  t.after(async () => {
+    service.kill();
+    await new Promise((r) =>
+      service.exitCode !== null ? r() : service.once("exit", r),
+    );
+    rmSync(dir, { recursive: true, force: true });
+  });
+  await new Promise((resolve, reject) => {
+    service.stderr.on("data", (c) => {
+      if (c.toString().includes("listening")) resolve();
+    });
+    service.once("exit", () => reject(new Error("Server exited")));
+  });
+  const post = async (cmd, args) => {
+    const response = await fetch(`http://127.0.0.1:14329/api/${cmd}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  const { body: info } = await post("agent-configs", {});
+  assert.equal(info.mode, "local");
+  assert.equal(info.autoStart, false);
+  assert.deepEqual(info.clients.map((c) => c.id), ["claude", "codex", "opencode", "pi"]);
+  assert.deepEqual(
+    info.events.map((e) => e.id),
+    ["task_assigned", "task_unassigned", "changes_requested", "mention", "standup"],
+  );
+  const config = { ...info.defaults, client: "opencode", model: "anthropic/x", env: { KEY: "v" } };
+  const saved = await post("agent-config-save", { identity: "builder", config });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.config.client, "opencode");
+  const { body: after } = await post("agent-configs", {});
+  assert.deepEqual(after.agents.builder.config, saved.body.config);
+  assert.deepEqual(after.agents.builder.queued, []);
+  const bad = await post("agent-config-save", {
+    identity: "builder",
+    config: { ...config, command: "relative/opencode" },
+  });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.message, /^command: /);
+  assert.equal((await post("agent-config-save", { identity: "-bad", config })).status, 400);
+  assert.equal((await post("agent-event", { event: "deploy" })).status, 400);
+  assert.deepEqual((await post("agent-event", { event: "standup" })).body, { started: [] });
 });

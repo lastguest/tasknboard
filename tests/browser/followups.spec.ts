@@ -192,7 +192,8 @@ test("Tasks open in tabs that keep drafts and ask before a draft is discarded", 
   await expect(header).toBeInViewport();
   await details.getByLabel("Title", { exact: true }).fill("Unsaved tab draft");
   await expect(details.getByRole("button", { name: "Save changes" })).toBeVisible();
-  await strip.getByRole("button", { name: "Board" }).click();
+  // The first tab returns to the page and carries its title, the board name.
+  await strip.getByRole("button", { name: "Default", exact: true }).click();
   await expect(details).toBeHidden();
   await card(page, second.id).click();
   await expect(details).toContainText(second.id);

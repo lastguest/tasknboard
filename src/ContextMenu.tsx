@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "./Icons";
 
 export type MenuItem = {
@@ -22,6 +22,44 @@ export type MenuState = {
 };
 
 const focusable = "button:not(:disabled),a[href],[tabindex]";
+
+/**
+ * Shift+F10 and the Menu key open the focused item's menu. Chrome on macOS
+ * sends no contextmenu event for them, so the key itself sends one. Where the
+ * browser would also send its own, that later event is dropped.
+ */
+export function useKeyboardContextMenu() {
+  useEffect(() => {
+    let sentAt = -Infinity;
+    function onKey(e: KeyboardEvent) {
+      const menuKey =
+        (e.key === "F10" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) ||
+        e.key === "ContextMenu";
+      const target = document.activeElement;
+      if (!menuKey || e.defaultPrevented || !(target instanceof HTMLElement)) return;
+      if (target.closest('input,textarea,select,[contenteditable="true"]')) return;
+      e.preventDefault();
+      sentAt = performance.now();
+      target.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, view: window }),
+      );
+    }
+    function onNative(e: MouseEvent) {
+      // A keyboard contextmenu has no pointer position.
+      if (e.isTrusted && e.clientX === 0 && e.clientY === 0 && performance.now() - sentAt < 1000) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        sentAt = -Infinity;
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("contextmenu", onNative, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("contextmenu", onNative, true);
+    };
+  }, []);
+}
 
 /**
  * Menu state for a right click, a long press, or the keyboard menu key.

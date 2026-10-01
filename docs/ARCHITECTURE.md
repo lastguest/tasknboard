@@ -48,6 +48,14 @@ also blocked by another actor's active lease, except the narrowly scoped human
 `set_standup_notes` command, which annotates without changing execution ownership. Expired leases can be reclaimed.
 Heartbeat is a task write: use the returned version in your next command.
 
+## Agent settings
+
+The [agent settings contract](contracts/agent-settings.md) describes how the
+desktop app starts agent CLIs. `server/agent-config.mjs` owns the supported
+CLIs, the events, and validation. `server/agent-launcher.mjs` queues one run per
+agent. Settings live in the internal `settings` table, so exports never include
+them. Shared servers return no settings and start no agents.
+
 ## Scope and follow-up
 
 Implemented: task CRUD (archive rather than delete), filters, board/list,

@@ -6,7 +6,14 @@ import {
   type LocalConnection,
 } from "./connection-helpers";
 
-export function ConnectionHelpers({ runtime }: { runtime: LocalConnection }) {
+export function ConnectionHelpers({
+  runtime,
+  onInstalled,
+}: {
+  runtime: LocalConnection;
+  /** Called after a plugin install records the agent's settings. */
+  onInstalled?: () => void;
+}) {
   const [client, setClient] = useState<AgentClient>("codex");
   const [identity, setIdentity] = useState("codex");
   const [copied, setCopied] = useState("");
@@ -34,8 +41,9 @@ export function ConnectionHelpers({ runtime }: { runtime: LocalConnection }) {
     setInstalling(true);
     try {
       await command(`${client}-plugin`, { identity }, undefined, 60000);
+      onInstalled?.();
       setCopied(
-        `TasknBoard plugin installed. Restart ${client === "claude" ? "Claude Code" : "Codex"} to use it. Tasks you assign to ${identity} on a board with a repository folder now start it automatically.`,
+        `TasknBoard plugin installed. Restart ${client === "claude" ? "Claude Code" : "Codex"} to use it. Tasks you assign to ${identity} on a board with a repository folder now start it automatically. Change how it starts under Settings on its row above.`,
       );
     } catch (error) {
       setCopyError(errorOf(error).message);

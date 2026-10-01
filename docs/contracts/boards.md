@@ -42,7 +42,7 @@ The sidebar lists each board with its Board, Epics, and Views pages. Every perso
 
 ## Tasks and keys
 
-`create_task` requires a valid `boardId`. Each task stores that board ID. New task numbers start at `001` on each board and increase within that board. `list_tasks` accepts an optional `boardId`; without it, the server returns tasks from every board.
+`create_task` requires a valid `boardId`. Each task stores that board ID. New task numbers start at `1` on each board and increase within that board. `list_tasks` accepts an optional `boardId`; without it, the server returns tasks from every board.
 
 Changing a board prefix rewrites only task keys on that board and their event task references. The update and all key rewrites commit together. The server reserves every prefix to its original board, so another board cannot reuse it. Its owner can reclaim it. Prefix reservations appear in workspace exports.
 

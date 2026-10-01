@@ -1088,6 +1088,12 @@ export function createStore(path, { clock = Date.now } = {}) {
   /** Integration settings live outside commands, so no client can read them. */
   const setting = (key) =>
     db.prepare("SELECT value FROM settings WHERE key=?").get(key)?.value ?? "";
+  /** Setting keys that start with a prefix, such as every agent configuration. */
+  const settingKeys = (prefix) =>
+    db
+      .prepare("SELECT key FROM settings WHERE substr(key, 1, ?) = ? ORDER BY key")
+      .all(prefix.length, prefix)
+      .map((row) => row.key);
   const setSettings = (values) =>
     transaction(() => {
       for (const [key, value] of Object.entries(values))
@@ -1107,6 +1113,7 @@ export function createStore(path, { clock = Date.now } = {}) {
     recordEvent,
     image,
     setting,
+    settingKeys,
     setSettings,
     close: () => db.close(),
   };

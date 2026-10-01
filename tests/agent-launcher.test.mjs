@@ -6,6 +6,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStore } from "../server/store.mjs";
 import { createAgentLauncher, failureReason } from "../server/agent-launcher.mjs";
+import {
+  defaultConfig,
+  listConfigs,
+  mentionedIdentities,
+  parseConfig,
+  readConfig,
+  writeConfig,
+} from "../server/agent-config.mjs";
 
 const human = { id: "you", kind: "human" };
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
@@ -213,4 +221,226 @@ test("a failed run reports the CLI's error line, not trailing noise", () => {
   );
   assert.equal(failureReason("booting\nNot logged in · Please run /login\n"), "Not logged in · Please run /login");
   assert.equal(failureReason(""), "");
+});
+
+const configure = (store, patch, identity = "bot") => {
+  const config = readConfig(store, identity);
+  return writeConfig(store, identity, {
+    ...config,
+    ...patch,
+    events: { ...config.events, ...patch.events },
+  });
+};
+
+test("a plugin install implies a default configuration, and saving replaces it", async (t) => {
+  const { store } = await fixture(t, { client: "codex" });
+  store.setSettings({ "agent_launcher.old": "claude" });
+  assert.equal(readConfig(store, "old").client, "claude");
+  assert.deepEqual(Object.keys(listConfigs(store)), ["bot", "old"]);
+  writeConfig(store, "old", defaultConfig("pi"));
+  assert.equal(store.setting("agent_launcher.old"), "");
+  assert.equal(readConfig(store, "old").client, "pi");
+  assert.equal(readConfig(store, "bot").client, "codex");
+  assert.equal(readConfig(store, "nobody"), null);
+});
+
+test("configurations reject unsafe or malformed values", () => {
+  const base = defaultConfig("claude");
+  assert.throws(() => parseConfig({ ...base, client: "vim" }), /client/);
+  assert.throws(() => parseConfig({ ...base, command: "bin/claude" }), /absolute path/);
+  assert.throws(() => parseConfig({ ...base, env: { HOME: "/tmp" } }), /set by the app/);
+  assert.throws(
+    () => parseConfig({ ...base, env: { TASKNBOARD_AGENT_ID: "you" } }),
+    /set by the app/,
+  );
+  assert.throws(() => parseConfig({ ...base, env: { "BAD-NAME": "x" } }), /env/);
+  assert.throws(() => parseConfig({ ...base, model: "two words" }), /spaces/);
+  assert.throws(() => parseConfig({ ...base, extra: true }), /config|Unrecognized/);
+  const { mention, ...events } = base.events;
+  assert.throws(() => parseConfig({ ...base, events }), /events\.mention/);
+  assert.equal(parseConfig({ ...base, model: " opus " }).model, "opus");
+});
+
+test("each CLI gets its model, profile, extra arguments, and environment", async (t) => {
+  const expected = {
+    claude: (prompt) => [
+      "-p", prompt, "--dangerously-skip-permissions",
+      "--model", "m1", "--agent", "p1", "--verbose",
+    ],
+    codex: (prompt, folder) => [
+      "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check",
+      "-C", folder, "--model", "m1", "--profile", "p1", "--verbose", prompt,
+    ],
+    opencode: (prompt, folder) => [
+      "run", "--auto", "--dir", folder, "--model", "m1", "--agent", "p1", "--verbose", prompt,
+    ],
+    pi: (prompt) => [
+      "--print", "--approve", "--model", "m1", "--provider", "p1", "--verbose", prompt,
+    ],
+  };
+  for (const [client, args] of Object.entries(expected)) {
+    const { store, launcher, calls, repository, board, home } = await fixture(t, { client });
+    await writeFile(join(home, "bin", client), "", { mode: 0o755 });
+    configure(store, { model: "m1", profile: "p1", args: ["--verbose"], env: { API_KEY: "k" } });
+    const task = store.execute(
+      "create_task",
+      { boardId: board.id, title: "Go", assignee: "bot" },
+      human,
+    );
+    launcher.assigned(task);
+    await settle();
+    assert.equal(calls.length, 1, client);
+    const prompt = client === "claude" ? calls[0].args[1] : calls[0].args.at(-1);
+    assert.match(prompt, /TNB-1/);
+    assert.match(prompt, client === "pi" ? /tasknboard skill/ : /MCP tools/);
+    assert.deepEqual(calls[0].args, args(prompt, repository), client);
+    assert.match(calls[0].command, new RegExp(`${client}(\\.exe)?$`));
+    assert.equal(calls[0].options.env.API_KEY, "k");
+    assert.equal(calls[0].options.env.HOME, home);
+  }
+});
+
+test("a custom command path and prompt are used, and disabled agents or events never start", async (t) => {
+  const { store, launcher, calls, board, home } = await fixture(t);
+  const custom = join(home, "custom-claude");
+  await writeFile(custom, "", { mode: 0o755 });
+  configure(store, {
+    command: custom,
+    events: { task_assigned: { enabled: true, prompt: "Work on {{task}} ({{title}}) for {{agent}} on {{board}}." } },
+  });
+  const make = (title) =>
+    store.execute("create_task", { boardId: board.id, title, assignee: "bot" }, human);
+  const first = make("Custom");
+  launcher.assigned(first);
+  await settle();
+  assert.equal(calls[0].command, custom);
+  assert.match(calls[0].args[1], /Work on TNB-1 \(Custom\) for bot on /);
+  assert.match(calls[0].args[1], /project data/);
+  calls[0].child.emit("exit", 0);
+  await settle();
+
+  configure(store, { events: { task_assigned: { enabled: false } } });
+  launcher.assigned(make("Off event"));
+  configure(store, { enabled: false, events: { task_assigned: { enabled: true } } });
+  launcher.assigned(make("Off agent"));
+  await settle();
+  assert.equal(calls.length, 1);
+
+  configure(store, { enabled: true, command: join(home, "missing") });
+  const missing = make("Missing");
+  launcher.assigned(missing);
+  await settle();
+  assert.equal(calls.length, 1);
+  const note = store
+    .execute("get_task", { id: missing.id }, human)
+    .events.find((e) => e.kind === "agent_not_started");
+  assert.match(note.body, /is not an executable file/);
+});
+
+test("unassigning stops the run on that task and drops it from the queue", async (t) => {
+  const { store, launcher, calls, board } = await fixture(t);
+  const make = (title) =>
+    store.execute("create_task", { boardId: board.id, title, assignee: "bot" }, human);
+  const first = make("One");
+  const second = make("Two");
+  const third = make("Three");
+  for (const task of [first, second, third]) launcher.assigned(task);
+  await settle();
+  assert.equal(calls.length, 1);
+  const reassign = (task) => {
+    const after = store.execute(
+      "update_task",
+      { id: task.id, expectedVersion: task.version, patch: { assignee: "you" } },
+      human,
+    );
+    launcher.changed(task, after);
+  };
+  reassign(second);
+  reassign(first);
+  assert.ok(calls[0].child.killed);
+  calls[0].child.emit("exit", null);
+  await settle();
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].args[1], /TNB-3/);
+  const stopped = store
+    .execute("get_task", { id: first.id }, human)
+    .events.filter((e) => e.kind === "agent_stopped");
+  assert.equal(stopped.length, 1);
+  assert.match(stopped[0].body, /assigned to someone else/);
+});
+
+test("Needs changes starts the agent with the changes prompt", async (t) => {
+  const { store, launcher, calls, board } = await fixture(t);
+  const bot = { id: "bot", kind: "agent" };
+  let task = store.execute(
+    "create_task",
+    { boardId: board.id, title: "Review me", assignee: "bot" },
+    human,
+  );
+  task = store.execute("claim_task", { id: task.id, expectedVersion: task.version }, bot);
+  task = store.execute(
+    "submit_review",
+    { id: task.id, expectedVersion: task.version, summary: "Done" },
+    bot,
+  );
+  const after = store.execute(
+    "update_task",
+    { id: task.id, expectedVersion: task.version, patch: { status: "in_progress" } },
+    human,
+  );
+  launcher.changed(task, after);
+  await settle();
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].args[1], /asked for changes/);
+  const started = store
+    .execute("get_task", { id: task.id }, human)
+    .events.findLast((e) => e.kind === "agent_started");
+  assert.match(started.body, /\(changes requested\)/);
+});
+
+test("a mention starts a bound agent with the comment, once per comment", async (t) => {
+  const { store, launcher, calls, board } = await fixture(t);
+  const task = store.execute(
+    "create_task",
+    { boardId: board.id, title: "Question", assignee: "you" },
+    human,
+  );
+  launcher.commented(task, human, "@bot what do you think?");
+  await settle();
+  assert.equal(calls.length, 0, "mentions are off by default");
+  configure(store, { events: { mention: { enabled: true } } });
+  launcher.commented(task, human, "Hey @bot, what do you think? cc @someone.");
+  launcher.commented(task, human, "@bot also this");
+  await settle();
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].args[1], /you mentioned you in a comment on task TNB-1/);
+  assert.match(calls[0].args[1], /what do you think\?/);
+  calls[0].child.emit("exit", 0);
+  await settle();
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].args[1], /also this/);
+  assert.deepEqual(mentionedIdentities("a@b.c @x.y. (@z) @@w"), ["x.y", "z"]);
+});
+
+test("the stand-up starts bound agents that have open tasks", async (t) => {
+  const { store, launcher, calls, board } = await fixture(t);
+  const bot = { id: "bot", kind: "agent" };
+  let task = store.execute(
+    "create_task",
+    { boardId: board.id, title: "Ongoing", assignee: "bot" },
+    human,
+  );
+  task = store.execute("claim_task", { id: task.id, expectedVersion: task.version }, bot);
+  store.execute(
+    "create_task",
+    { boardId: board.id, title: "Later", assignee: "bot" },
+    human,
+  );
+  assert.deepEqual(launcher.standup(["bot"]), [], "stand-up is off by default");
+  configure(store, { events: { standup: { enabled: true } } });
+  assert.deepEqual(launcher.standup(["bot", "idle"]), ["bot"]);
+  await settle();
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].args[1], /stand-up just started\. Your open tasks: TNB-1 \(in progress\)\./);
+  assert.deepEqual(launcher.status("bot").running, { event: "standup", taskId: "TNB-1" });
 });

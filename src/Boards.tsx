@@ -420,10 +420,10 @@ export function BoardEditor({
             onChange={(event) => setRepository(event.target.value)}
           />
           <span className="field-hint" id={`${repositoryId}-hint`}>
-            Optional. When you assign a task on this board to a Claude Code or
-            Codex agent installed from Settings, the desktop app starts that
-            agent here without asking for approvals. Leave empty to start
-            agents by hand.
+            Optional. When you assign a task on this board to an agent
+            configured on the Agents page, the desktop app starts that agent
+            here without asking for approvals. Leave empty to start agents by
+            hand.
           </span>
           {attempted && repositoryError && (
             <span className="field-hint inline-error" id={`${repositoryId}-error`}>

@@ -95,13 +95,14 @@ test("boards scope task keys, persist selection, and own task deep links", async
   await expect(page.locator(".page-title p")).toHaveText("Runbooks and incidents.");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(renamedBoard);
 
+  const formerKey = task.id.replace(/^[^-]+/, prefix);
   const oldKey = await fetch(`${baseURL}/api/get_task`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${humanToken}`,
     },
-    body: JSON.stringify({ id: `${prefix}-001` }),
+    body: JSON.stringify({ id: formerKey }),
   });
   expect(oldKey.status).toBe(200);
   expect((await oldKey.json()).id).toBe(task.id);
@@ -121,7 +122,7 @@ test("boards scope task keys, persist selection, and own task deep links", async
   expect((await command<any>("get_task", { id: original.id })).boardId).toBe("BOARD-1");
 
   // A link with the former key opens the renamed task in a tab; the board stays.
-  await page.goto(`${baseURL}/#task/${prefix}-001`);
+  await page.goto(`${baseURL}/#task/${formerKey}`);
   await expect(page.getByRole("region", { name: /Task details/ })).toContainText(task.id);
   await expect(page.getByRole("navigation", { name: "Open tasks" })).toContainText(task.id);
   await page.getByRole("navigation", { name: "Open tasks" }).getByRole("button", { name: "Default", exact: true }).click();

@@ -1,9 +1,19 @@
 import { AppVersion } from "./AppUpdates";
 import { ConnectionHelpers } from "./ConnectionHelpers";
+import {
+  AgentSettings,
+  useAgentSettings,
+  type AgentSettingsInfo,
+} from "./AgentSettings";
 import { isMcpStatus, type McpStatus } from "./connection-helpers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Assignee, Board, StatusIcon } from "./Board";
-import { ContextMenu, menuAt, type MenuState } from "./ContextMenu";
+import {
+  ContextMenu,
+  menuAt,
+  useKeyboardContextMenu,
+  type MenuState,
+} from "./ContextMenu";
 import {
   Settings,
   ShortcutHelp,
@@ -160,6 +170,7 @@ export default function App() {
   const [settingsClosed, setSettingsClosed] = useState(0);
   const [help, setHelp] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
+  useKeyboardContextMenu();
   const [standup, setStandup] = useState(false);
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -1332,6 +1343,8 @@ export default function App() {
   const openStandup = () => {
     setEditor(null);
     setStandup(true);
+    // Agents bound to the stand-up start in the desktop app; elsewhere nothing happens.
+    if (isHuman) void command("agent-event", { event: "standup" }).catch(() => {});
   };
   const connectionLabel = sync.connected
     ? `Connected · updated ${sync.lastSync}`
@@ -2221,6 +2234,14 @@ export default function App() {
   );
 }
 
+/** The CLI and auto-start state shown on an agent's Settings button. */
+function autoStartLabel(info: AgentSettingsInfo, identity: string) {
+  const config = info.agents[identity]?.config;
+  if (!config) return "Not configured. Assigned tasks do not start it.";
+  const client = info.clients.find((c) => c.id === config.client)?.name;
+  return `${client} · ${config.enabled ? "starts automatically" : "auto-start off"}`;
+}
+
 function AgentsPage({
   tasks,
   agents,
@@ -2233,7 +2254,13 @@ function AgentsPage({
   onMenu: (e: React.MouseEvent<HTMLElement>, name: string) => void;
 }) {
   const people = usePeople();
-  const roster = [...agents].sort((a, b) =>
+  const settings = useAgentSettings();
+  const [selected, setSelected] = useState("");
+  const local = settings.info?.mode === "local";
+  // Configured identities appear before their CLI first connects.
+  const roster = [
+    ...new Set([...agents, ...Object.keys(settings.info?.agents ?? {})]),
+  ].sort((a, b) =>
     displayName(people, a).localeCompare(displayName(people, b)),
   );
   const [mcpStatus, setMcpStatus] = useState<McpStatus | null>(null);
@@ -2290,6 +2317,17 @@ function AgentsPage({
       });
     return () => controller.abort();
   }, []);
+  if (selected && settings.info && local)
+    return (
+      <div className="agents-page">
+        <AgentSettings
+          identity={selected}
+          info={settings.info}
+          onBack={() => setSelected("")}
+          onSaved={settings.reload}
+        />
+      </div>
+    );
   return (
     <div className="agents-page">
       <section aria-labelledby="roster-title">
@@ -2316,6 +2354,18 @@ function AgentsPage({
                     in progress
                   </span>
                   <span>{claims.length} active claims</span>
+                  <span className="agent-row-actions">
+                  {local && (
+                    <button
+                      type="button"
+                      className="secondary small-button"
+                      onClick={() => setSelected(name)}
+                      aria-label={`Settings for ${displayName(people, name)}`}
+                      title={autoStartLabel(settings.info!, name)}
+                    >
+                      <Icon name="settings" size={13} /> Settings
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="secondary small-button"
@@ -2324,6 +2374,7 @@ function AgentsPage({
                   >
                     View tasks <Icon name="arrow" size={13} />
                   </button>
+                  </span>
                 </li>
               );
             })}
@@ -2346,7 +2397,10 @@ function AgentsPage({
           </p>
         )}
         {mcpStatus?.mode === "local" && (
-          <ConnectionHelpers runtime={mcpStatus} />
+          <ConnectionHelpers
+            runtime={mcpStatus}
+            onInstalled={settings.reload}
+          />
         )}
         {!mcpStatus && !mcpError && (
           <p className="small" role="status">
@@ -2356,6 +2410,11 @@ function AgentsPage({
         {mcpError && (
           <p className="small" role="alert">
             {mcpError}
+          </p>
+        )}
+        {settings.error && (
+          <p className="small" role="alert">
+            {settings.error}
           </p>
         )}
       </section>
