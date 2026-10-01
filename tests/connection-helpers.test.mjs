@@ -18,7 +18,7 @@ test("Codex uses a direct plugin install instead of a standalone MCP command", (
   const helper = connectionHelper("codex", runtime, "codex");
   assert.equal(helper.label, "Install Codex plugin");
   assert.equal(helper.text, "");
-  assert.match(helper.instruction, /desktop app/);
+  assert.match(helper.steps.join(" "), /desktop app/);
 });
 
 test("OpenCode gets its native configuration and Pi gets an agent CLI skill", () => {
@@ -48,7 +48,7 @@ test("Windows commands use PowerShell literal strings and invocation", () => {
   const pi = connectionHelper("pi", windows, "pi");
   assert.ok(pi.text.includes("$env:TASKNBOARD_AGENT_ID = 'pi';"));
   assert.ok(pi.text.includes("& '/Apps/Stefano''s $(false)/node'"));
-  assert.match(pi.instruction, /PowerShell 7\.3 or later/);
+  assert.match(pi.steps.join(" "), /PowerShell 7\.3 or later/);
   assert.match(pi.text, /PowerShell 7\.3 or later/);
 });
 

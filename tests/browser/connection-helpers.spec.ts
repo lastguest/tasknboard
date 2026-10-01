@@ -45,6 +45,13 @@ test("client helpers switch formats, copy current identity, and report clipboard
     name: "Connect a coding agent",
     exact: true,
   });
+  // Each CLI is a tile; Claude Code is chosen first.
+  const clients = section.getByRole("group", { name: "Client" });
+  await expect(clients.getByRole("radio")).toHaveCount(4);
+  await expect(clients.getByRole("radio", { name: /Claude Code/ })).toBeChecked();
+  await clients.getByRole("radio", { name: /Codex/ }).check();
+  await expect(section.getByRole("heading", { name: "Connect Codex" })).toBeVisible();
+  await expect(section.getByRole("listitem").first()).toContainText("codex");
   await expect(section.getByLabel("codex connection helper")).toHaveCount(0);
   await section.getByLabel("Agent identity").fill("codex-2");
   let identity = "";
@@ -73,7 +80,7 @@ test("client helpers switch formats, copy current identity, and report clipboard
   await expect(
     section.getByRole("button", { name: "Install Codex plugin", exact: true }),
   ).toBeDisabled();
-  await section.getByLabel("Client", { exact: true }).selectOption("claude");
+  await clients.getByRole("radio", { name: /^Claude Code/ }).check();
   await expect(section.getByRole("status")).toHaveCount(0);
   await expect(section.getByLabel("Agent identity")).toHaveValue("claude");
   await expect(section.getByLabel("claude connection helper")).toHaveCount(0);
@@ -101,7 +108,7 @@ test("client helpers switch formats, copy current identity, and report clipboard
   await expect(section.getByRole("alert")).toContainText(
     "Install the Claude Code CLI",
   );
-  await section.getByLabel("Client", { exact: true }).selectOption("opencode");
+  await clients.getByRole("radio", { name: /^OpenCode/ }).check();
   await section.getByRole("button", { name: "Copy configuration" }).click();
   const config = JSON.parse(
     await page.evaluate(() => (window as any).copiedHelper),
@@ -109,7 +116,7 @@ test("client helpers switch formats, copy current identity, and report clipboard
   expect(config.mcp.tasknboard.environment.TASKNBOARD_AGENT_ID).toBe(
     "opencode",
   );
-  await section.getByLabel("Client", { exact: true }).selectOption("pi");
+  await clients.getByRole("radio", { name: /^Pi/ }).check();
   await expect(section.getByLabel("pi connection helper")).toContainText(
     "/Applications/TasknBoard/cli.mjs",
   );

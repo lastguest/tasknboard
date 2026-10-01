@@ -4846,3 +4846,165 @@ footer {
 .agent-logs-body {
   padding: 16px 22px 20px;
 }
+
+/* Connect a coding agent: one tile per CLI, then its setup. */
+.connection-helper {
+  container-type: inline-size;
+}
+/* Four tiles in a row, or two by two: never three and one left over. */
+.client-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.client-tile {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.client-tile:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+/* The radio stays focusable and readable; the tile shows its state. */
+.client-tile input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.client-tile:has(input:checked) {
+  background: var(--surface-2);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.client-tile:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.client-grid:disabled .client-tile {
+  cursor: default;
+  opacity: 0.6;
+}
+.client-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  color: var(--text-strong);
+}
+.client-logo.small {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+/* Brand colors, each used only for its own mark. */
+.client-claude .client-logo,
+.client-logo.client-claude {
+  color: #d97757;
+  background: #2b211d;
+}
+.client-codex .client-logo,
+.client-logo.client-codex {
+  color: #111214;
+  background: #f5f6f7;
+}
+.client-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.client-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.client-method {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.client-badge {
+  align-self: start;
+  max-width: 96px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #1c2f27;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.client-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.client-setup-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.client-setup #agent-identity-help {
+  margin-top: -6px;
+}
+.client-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 22px;
+  list-style: decimal;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.client-steps li {
+  padding-left: 2px;
+}
+.client-steps li::marker {
+  color: var(--subtle);
+  font-variant-numeric: tabular-nums;
+}
+.client-steps code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  font-size: 12px;
+}
+@container (max-width: 840px) {
+  .client-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (max-width: 400px) {
+  .client-grid {
+    grid-template-columns: 1fr;
+  }
+}
