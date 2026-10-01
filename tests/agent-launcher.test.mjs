@@ -21,8 +21,10 @@ import {
 
 const human = { id: "you", kind: "human" };
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
-// Waits for a run that starts asynchronously; slow CI runners can need more than one settle.
+// Settles at least once, then keeps waiting while a run that starts asynchronously
+// has not started yet; slow CI runners can need more than one settle.
 const waitFor = async (condition, message) => {
+  await settle();
   for (let attempt = 0; attempt < 60 && !condition(); attempt++) await settle();
   assert.ok(condition(), message);
 };
@@ -87,7 +89,7 @@ test("assigning a task to an installed agent starts its CLI in the board folder"
     human,
   );
   launcher.assigned(task);
-  await settle();
+  await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
   const [call] = calls;
   assert.match(call.command, /claude(\.exe)?$/);
@@ -116,12 +118,12 @@ test("a busy agent queues the next assignment and starts it when the run ends", 
   launcher.assigned(first);
   launcher.assigned(second);
   launcher.assigned(second);
-  await settle();
+  await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].args[0], "exec");
   assert.ok(calls[0].args.includes("--dangerously-bypass-approvals-and-sandbox"));
   calls[0].child.emit("exit", 0);
-  await settle();
+  await waitFor(() => calls.length >= 2);
   assert.equal(calls.length, 2);
   assert.match(calls[1].args.at(-1), /TNB-2/);
   const started = store
@@ -301,7 +303,7 @@ test("each CLI gets its model, profile, extra arguments, and environment", async
       human,
     );
     launcher.assigned(task);
-    await settle();
+    await waitFor(() => calls.length >= 1);
     assert.equal(calls.length, 1, client);
     const prompt = client === "claude" ? calls[0].args[1] : calls[0].args.at(-1);
     assert.match(prompt, /TNB-1/);
@@ -336,13 +338,13 @@ test("a custom command path and prompt are used, and disabled agents or events n
   launcher.assigned(make("Off event"));
   configure(store, { enabled: false, events: { task_assigned: { enabled: true } } });
   launcher.assigned(make("Off agent"));
-  await settle();
+  await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
 
   configure(store, { enabled: true, command: join(home, "missing") });
   const missing = make("Missing");
   launcher.assigned(missing);
-  await settle();
+  await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
   const note = store
     .execute("get_task", { id: missing.id }, human)
@@ -358,7 +360,7 @@ test("unassigning stops the run on that task and drops it from the queue", async
   const second = make("Two");
   const third = make("Three");
   for (const task of [first, second, third]) launcher.assigned(task);
-  await settle();
+  await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
   const reassign = (task) => {
     const after = store.execute(
@@ -372,7 +374,7 @@ test("unassigning stops the run on that task and drops it from the queue", async
   reassign(first);
   assert.ok(calls[0].child.killed);
   calls[0].child.emit("exit", null);
-  await settle();
+  await waitFor(() => calls.length >= 2);
   assert.equal(calls.length, 2);
   assert.match(calls[1].args[1], /TNB-3/);
   const stopped = store
@@ -402,7 +404,7 @@ test("Needs changes starts the agent with the changes prompt", async (t) => {
     human,
   );
   launcher.changed(task, after);
-  await settle();
+  await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
   assert.match(calls[0].args[1], /asked for changes/);
   const started = store
@@ -424,12 +426,12 @@ test("a mention starts a bound agent with the comment, once per comment", async 
   configure(store, { events: { mention: { enabled: true } } });
   launcher.commented(task, human, "Hey @bot, what do you think? cc @someone.");
   launcher.commented(task, human, "@bot also this");
-  await settle();
+  await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
   assert.match(calls[0].args[1], /you mentioned you in a comment on task TNB-1/);
   assert.match(calls[0].args[1], /what do you think\?/);
   calls[0].child.emit("exit", 0);
-  await settle();
+  await waitFor(() => calls.length >= 2);
   assert.equal(calls.length, 2);
   assert.match(calls[1].args[1], /also this/);
   assert.deepEqual(mentionedIdentities("a@b.c @x.y. (@z) @@w"), ["x.y", "z"]);
@@ -452,7 +454,7 @@ test("the stand-up starts bound agents that have open tasks", async (t) => {
   assert.deepEqual(launcher.standup(["bot"]), [], "stand-up is off by default");
   configure(store, { events: { standup: { enabled: true } } });
   assert.deepEqual(launcher.standup(["bot", "idle"]), ["bot"]);
-  await settle();
+  await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
   assert.match(calls[0].args[1], /stand-up just started\. Your open tasks: TNB-1 \(in progress\)\./);
   assert.deepEqual(launcher.status("bot").running, { event: "standup", taskId: "TNB-1" });
@@ -599,11 +601,11 @@ test("a task reassigned while another run starts still waits its turn", async (t
     human,
   );
   launcher.changed(away, back);
-  await settle();
+  await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
   assert.deepEqual(launcher.status("bot").queued, [{ event: "task_assigned", taskId: second.id }]);
   calls[0].child.emit("exit", 0);
-  await settle();
+  await waitFor(() => calls.length >= 2);
   assert.equal(calls.length, 2);
   assert.match(calls[1].args[1], new RegExp(second.id));
 });
