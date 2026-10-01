@@ -24,8 +24,7 @@ import { Assignee, Label, StatusIcon } from "./Board";
 import { Icon } from "./Icons";
 import { ContextMenu, type MenuState } from "./ContextMenu";
 import { CliHelper } from "./CliHelper";
-import { MarkdownEditor } from "./Markdown";
-import { useMentions } from "./Mentions";
+import { Markdown, MarkdownEditor } from "./Markdown";
 import { EpicTag } from "./Epics";
 import {
   GitHubSettings,
@@ -580,11 +579,41 @@ function Activity({
                 {formatUtcTimestamp(e.createdAt)}
               </time>
             </div>
-            {detail && <p className="event-body">{detail}</p>}
+            {detail &&
+              (markdownEvents.has(e.kind) ? (
+                <MarkdownEventBody source={detail} />
+              ) : (
+                <p className="event-body">{detail}</p>
+              ))}
           </li>
         );
       })}
     </ol>
+  );
+}
+
+/** Comments and review summaries are Markdown written by people and agents. */
+const markdownEvents = new Set(["add_comment", "submit_review"]);
+
+function MarkdownEventBody({ source }: { source: string }) {
+  const [raw, setRaw] = useState(false);
+  return (
+    <div className={`event-body event-markdown${raw ? " is-source" : ""}`}>
+      <button
+        type="button"
+        className="icon-button event-source-toggle"
+        title={raw ? "Show rendered" : "Show Markdown source"}
+        aria-label={raw ? "Show rendered" : "Show Markdown source"}
+        onClick={() => setRaw(!raw)}
+      >
+        <Icon name={raw ? "mdPreview" : "mdCode"} size={14} />
+      </button>
+      {raw ? (
+        <pre className="event-source">{source}</pre>
+      ) : (
+        <Markdown source={source} />
+      )}
+    </div>
   );
 }
 
@@ -706,8 +735,6 @@ export function TaskEditor({
     conflicts: (keyof Draft)[];
   }>(null);
   const [comment, setComment] = useState("");
-  const commentArea = useRef<HTMLTextAreaElement>(null);
-  const commentMentions = useMentions(commentArea);
   const [commentError, setCommentError] = useState<ApiError | null>(null);
   const [reviewError, setReviewError] = useState<ApiError | null>(null);
   const [archiveStep, setArchiveStep] = useState(false);
@@ -1621,30 +1648,25 @@ export function TaskEditor({
             <h3>Activity</h3>
             <Activity events={current.events ?? []} epicTitle={epicTitle} />
             <form className="comment-form" onSubmit={postComment}>
-              <label className="field">
-                <span className="field-label">Add a comment</span>
-                <span className="mention-anchor">
-                  <textarea
-                    ref={commentArea}
-                    aria-label="Add a comment"
+              <div
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    postComment();
+                  }
+                }}
+              >
+                <Field label="Add a comment">
+                  <MarkdownEditor
                     rows={3}
                     maxLength={10000}
                     placeholder="Progress, questions, or review notes… Type @ to mention someone."
+                    mentions
                     value={comment}
-                    {...commentMentions.textareaProps}
-                    onChange={(e) => {
-                      setComment(e.target.value);
-                      commentMentions.track(e.target);
-                    }}
-                    onKeyDown={(e) => {
-                      if (commentMentions.onKeyDown(e)) return;
-                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey))
-                        postComment();
-                    }}
+                    onChange={setComment}
                   />
-                  {commentMentions.menu}
-                </span>
-              </label>
+                </Field>
+              </div>
               {commentError && (
                 <ErrorNote
                   error={commentError}

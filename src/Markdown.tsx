@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { command, errorOf, type ApiError } from "./api";
 import { Icon } from "./Icons";
 import { useMentions } from "./Mentions";
@@ -662,6 +662,10 @@ export function MarkdownEditor({
   const [preview, setPreview] = useState(
     startInPreview && Boolean(value.trim()),
   );
+  // An emptied editor, such as a comment box after posting, is ready to write.
+  useEffect(() => {
+    if (!value) setPreview(false);
+  }, [value]);
   const [uploads, setUploads] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);

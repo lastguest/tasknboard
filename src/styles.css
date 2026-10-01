@@ -1884,8 +1884,45 @@ footer {
   border-radius: 6px;
   padding: 8px 10px;
 }
+.event-markdown {
+  position: relative;
+  white-space: normal;
+}
+.event-source-toggle {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 5px;
+  color: var(--muted);
+  opacity: 0;
+}
+.event-markdown:is(:hover, :focus-within) .event-source-toggle,
+.event-markdown.is-source .event-source-toggle {
+  opacity: 1;
+}
+@media (hover: none) {
+  .event-source-toggle {
+    opacity: 1;
+  }
+}
+.event-markdown .markdown,
+.event-source {
+  padding-right: 24px;
+}
+.event-source {
+  margin: 0;
+  font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .comment-form .field {
   margin-bottom: 8px;
+}
+.comment-form .md-editor textarea,
+.comment-form .md-preview {
+  min-height: 80px;
 }
 .comment-actions {
   display: flex;

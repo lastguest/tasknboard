@@ -751,7 +751,9 @@ test("Markdown descriptions format, upload pasted images, and render safely", as
   await connect(page);
   await card(page, task.id).click();
   const dialog = page.getByRole("region", { name: /Task details/ });
-  const preview = dialog.locator(".md-preview");
+  // The comment box has its own editor; these steps use the Context one.
+  const context = dialog.locator(".md-editor").first();
+  const preview = context.locator(".md-preview");
   // Existing descriptions open rendered; raw HTML and script URLs stay inert text.
   await expect(preview).toContainText("<img src=x onerror=alert(1)>");
   await expect(preview.locator("img, a[href^='javascript']")).toHaveCount(0);
@@ -760,12 +762,12 @@ test("Markdown descriptions format, upload pasted images, and render safely", as
   await expect(preview.locator("p").last()).toHaveText("Drag tasks");
   await preview.getByRole("checkbox", { name: "Mark item done" }).check();
 
-  await dialog.getByRole("button", { name: "Write", exact: true }).click();
+  await context.getByRole("button", { name: "Write", exact: true }).click();
   const editor = dialog.getByLabel("Context", { exact: true });
   await expect(editor).toHaveValue(/^- \[x\] First step/);
   await editor.fill("Ship it");
   await editor.selectText();
-  await dialog.getByRole("button", { name: "Bold" }).click();
+  await context.getByRole("button", { name: "Bold" }).click();
   await expect(editor).toHaveValue("**Ship it**");
   await editor.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(el.value.length, el.value.length));
   await editor.press("Enter");
@@ -780,7 +782,7 @@ test("Markdown descriptions format, upload pasted images, and render safely", as
   }, png);
   await expect(editor).toHaveValue(/!\[shot\]\(\/files\/[0-9a-f]{32}\)$/);
 
-  await dialog.getByRole("button", { name: "Preview" }).click();
+  await context.getByRole("button", { name: "Preview" }).click();
   await expect(preview.locator("strong")).toHaveText("Ship it");
   const image = preview.getByRole("img", { name: "shot" });
   await expect(image).toHaveJSProperty("naturalWidth", 1);
@@ -802,11 +804,13 @@ test("Images embedded as data are stored as uploads and render", async ({ page }
   await connect(page);
   await card(page, task.id).click();
   const dialog = page.getByRole("region", { name: /Task details/ });
-  const preview = dialog.locator(".md-preview");
+  // The comment box has its own editor; these steps use the Context one.
+  const context = dialog.locator(".md-editor").first();
+  const preview = context.locator(".md-preview");
   await expect(preview.getByRole("img", { name: "chart" })).toHaveJSProperty("naturalWidth", 1);
 
   // Pasted HTML with an embedded picture keeps its text and uploads the picture.
-  await dialog.getByRole("button", { name: "Write", exact: true }).click();
+  await context.getByRole("button", { name: "Write", exact: true }).click();
   const editor = dialog.getByLabel("Context", { exact: true });
   await editor.fill("");
   await editor.evaluate((el, data) => {
@@ -816,7 +820,7 @@ test("Images embedded as data are stored as uploads and render", async ({ page }
     el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: clip, bubbles: true, cancelable: true }));
   }, png);
   await expect(editor).toHaveValue(/^Copied note\n!\[diagram\]\(\/files\/[0-9a-f]{32}\)$/);
-  await dialog.getByRole("button", { name: "Preview" }).click();
+  await context.getByRole("button", { name: "Preview" }).click();
   await expect(preview.getByRole("img", { name: "diagram" })).toHaveJSProperty("naturalWidth", 1);
   await dialog.getByRole("button", { name: "Save changes" }).click();
   await expect(saveButton(dialog)).toBeHidden();

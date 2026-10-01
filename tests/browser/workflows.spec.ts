@@ -152,6 +152,23 @@ test("Settings, task workflow, agent review, archive, and export", async ({ page
   await commentBox.press("Backspace");
   await expect(commentBox).toHaveValue("Over to @browser-agent and ");
   await commentBox.fill("");
+  // Comments are Markdown: preview while writing, rendered once posted, source on request.
+  const form = details.locator(".comment-form");
+  await expect(form.getByLabel("Add a comment")).toHaveValue("");
+  await form.getByLabel("Add a comment").fill(`**Bold ${key}**\n\n- listed ${key}`);
+  await form.getByRole("button", { name: "Preview" }).click();
+  await expect(form.locator(".md-preview strong")).toHaveText(`Bold ${key}`);
+  await form.getByRole("button", { name: "Post comment" }).click();
+  await expect(form.getByLabel("Add a comment")).toBeVisible();
+  await expect(form.getByLabel("Add a comment")).toHaveValue("");
+  const posted = details.locator(".event.kind-add_comment").last();
+  await expect(posted.locator(".markdown strong")).toHaveText(`Bold ${key}`);
+  await expect(posted.locator(".markdown li")).toHaveText(`listed ${key}`);
+  await posted.getByRole("button", { name: "Show Markdown source" }).click();
+  await expect(posted.locator(".event-source")).toHaveText(`**Bold ${key}**\n\n- listed ${key}`);
+  await expect(posted.locator(".markdown strong")).toHaveCount(0);
+  await posted.getByRole("button", { name: "Show rendered" }).click();
+  await expect(posted.locator(".markdown strong")).toHaveText(`Bold ${key}`);
 
   const latest = await command<any>("get_task", { id: taskId });
   const claimed = await command<any>("claim_task", {
