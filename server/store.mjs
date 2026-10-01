@@ -12,6 +12,7 @@ import {
 } from "./domain.mjs";
 import { taskMatchesView } from "./views.mjs";
 import { similarityScorer, similarityThreshold } from "./similarity.mjs";
+import { mentionedIdentities } from "./agent-config.mjs";
 
 // Decoded bytes must match the declared type; the data URL prefix alone is not trusted.
 const imageSignatures = {
@@ -226,6 +227,11 @@ export function createStore(path, { clock = Date.now } = {}) {
         }
       }
       db.prepare("INSERT INTO migrations VALUES(16)").run();
+    }
+    if (!db.prepare("SELECT version FROM migrations WHERE version=17").get()) {
+      // Each actor's Inbox read position: the last event sequence they marked read.
+      db.exec(`CREATE TABLE inbox_cursors(actor TEXT PRIMARY KEY, sequence INTEGER NOT NULL);
+ INSERT INTO migrations VALUES(17);`);
     }
   });
   const readTransaction = (fn) => {
@@ -612,6 +618,70 @@ export function createStore(path, { clock = Date.now } = {}) {
       events,
     };
   };
+  /**
+   * Comments and review submissions by other actors that concern `identity`,
+   * newest first, on non-archived tasks. Derived from events on every read.
+   * A review reaches the task's creator and assignee; when neither is a known
+   * human, it reaches every human, so no review goes unseen.
+   */
+  const inboxItems = (identity) => {
+    const tasks = new Map(all().filter((t) => !t.archived).map((t) => [t.id, t]));
+    const creators = new Map(
+      db
+        .prepare("SELECT task_id, actor FROM events WHERE kind='created'")
+        .all()
+        .map((row) => [row.task_id, row.actor]),
+    );
+    const humans = new Set(
+      db
+        .prepare("SELECT id FROM actors WHERE kind='human'")
+        .all()
+        .map((row) => row.id),
+    );
+    const excerpt = (text) => {
+      const flat = text.replace(/\s+/g, " ").trim();
+      return flat.length > 160 ? `${flat.slice(0, 159)}…` : flat;
+    };
+    const items = [];
+    for (const row of db
+      .prepare(
+        "SELECT sequence, task_id, actor, kind, body, created_at FROM events WHERE kind IN ('add_comment','submit_review') AND actor<>? ORDER BY sequence DESC",
+      )
+      .all(identity.id)) {
+      const task = tasks.get(row.task_id);
+      if (!task) continue;
+      const owners = [creators.get(task.id), task.assignee];
+      const owns = owners.includes(identity.id);
+      let reason = "";
+      if (row.kind === "add_comment") {
+        if (mentionedIdentities(row.body).includes(identity.id)) reason = "mention";
+        else if (owns) reason = "comment";
+      } else if (
+        owns ||
+        (humans.has(identity.id) && !owners.some((id) => humans.has(id)))
+      )
+        reason = "review";
+      if (!reason) continue;
+      items.push({
+        sequence: row.sequence,
+        taskId: task.id,
+        taskTitle: task.title,
+        actor: row.actor,
+        kind: row.kind,
+        reason,
+        excerpt: excerpt(
+          row.kind === "submit_review" ? JSON.parse(row.body).summary : row.body,
+        ),
+        createdAt: row.created_at,
+      });
+    }
+    return items;
+  };
+  const inboxCursor = (identity) =>
+    db.prepare("SELECT sequence FROM inbox_cursors WHERE actor=?").get(identity.id)
+      ?.sequence ?? 0;
+  const unreadCount = (items, cursor) =>
+    items.filter((item) => item.sequence > cursor).length;
   const active = (t) => t.lease && t.lease.expiresAt > clock();
   /**
    * Stores image data embedded in any Markdown text of a command, so tasks,
@@ -837,6 +907,27 @@ export function createStore(path, { clock = Date.now } = {}) {
             : [];
         }),
       }));
+    if (command === "list_inbox")
+      return readTransaction(() => {
+        const items = inboxItems(identity);
+        return {
+          items: items.slice(0, p.limit),
+          unread: unreadCount(items, inboxCursor(identity)),
+        };
+      });
+    if (command === "mark_inbox_read")
+      return transaction(() => {
+        // A personal read position: no task version and no event.
+        const latest =
+          db.prepare("SELECT MAX(sequence) AS sequence FROM events").get().sequence ?? 0;
+        if (p.upTo > latest)
+          fail("VALIDATION", `upTo: Latest event is ${latest}`, 400);
+        db.prepare(
+          "INSERT INTO inbox_cursors(actor, sequence) VALUES(?,?) ON CONFLICT(actor) DO UPDATE SET sequence=MAX(sequence, excluded.sequence)",
+        ).run(identity.id, p.upTo);
+        const cursor = inboxCursor(identity);
+        return { sequence: cursor, unread: unreadCount(inboxItems(identity), cursor) };
+      });
     if (command === "list_epics")
       return readTransaction(() => {
         if (p.boardId) getBoard(p.boardId);

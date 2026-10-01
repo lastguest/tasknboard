@@ -62,8 +62,8 @@ Implemented: task CRUD (archive rather than delete), filters, board/list,
 keyboard shortcuts, persisted comments/events, MCP tools, lease coordination,
 version conflicts, minimal actor tokens, live updates, backup export.
 Not implemented: organization membership UI, OAuth/SSO, remote Streamable HTTP
-MCP endpoint, granular per-project roles, offline replica sync, notification
-service, general attachments (only description images are stored), enforced
+MCP endpoint, granular per-project roles, offline replica sync, external
+notifications (email, push), general attachments (only description images are stored), enforced
 dependencies (task links do not block status changes), custom workflows.
 Remote MCP currently means a local stdio bridge to the shared authenticated API.
 For public deployment, terminate HTTPS and configure tokens. Token rotation is
@@ -142,6 +142,13 @@ One change feed per server reads the SQLite data version, so writes from
 local MCP and CLI processes count too. The stream carries no data: the
 client reads again with the normal commands. The stream closes while the
 document is hidden and reopens with an immediate refresh.
+
+## Inbox
+
+The [inbox contract](contracts/inbox.md) lists comments, mentions and review
+submissions by others that concern the reader. Items derive from `events`
+when read; nothing is copied. Each actor has one read cursor in
+`inbox_cursors`. Marking read is not a task write, and exports omit cursors.
 
 ## GitHub pull requests
 

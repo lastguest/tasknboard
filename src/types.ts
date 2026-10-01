@@ -139,6 +139,19 @@ export type BoardRecord = {
   createdAt: string;
   updatedAt: string;
 };
+/** An event by another actor that concerns the reader. See docs/contracts/inbox.md. */
+export type InboxItem = {
+  sequence: number;
+  taskId: string;
+  taskTitle: string;
+  actor: string;
+  kind: "add_comment" | "submit_review";
+  reason: "mention" | "review" | "comment";
+  excerpt: string;
+  createdAt: string;
+};
+/** Newest first; the first `unread` items are the unread ones. */
+export type Inbox = { items: InboxItem[]; unread: number };
 export type WorkspaceInfo = {
   name: string;
   actor: Actor;

@@ -41,6 +41,7 @@ import {
   EpicSummary,
 } from "./Epics";
 import { type Toast, Toasts } from "./Toasts";
+import { InboxPage } from "./Inbox";
 import { PullRequestsPage, parsePullRef, pullHash, type PullRef } from "./PullRequests";
 import type { SettingsPage } from "./Dialogs";
 import {
@@ -83,6 +84,7 @@ import {
   type Actor,
   type BoardRecord,
   type Epic,
+  type Inbox,
   type SavedView,
   type Status,
   type Task,
@@ -92,7 +94,16 @@ import {
   type WorkspaceInfo,
 } from "./types";
 
-type View = "board" | "mine" | "agents" | "epics" | "epic" | "views" | "saved" | "pulls";
+type View =
+  | "board"
+  | "mine"
+  | "inbox"
+  | "agents"
+  | "epics"
+  | "epic"
+  | "views"
+  | "saved"
+  | "pulls";
 /** The new-task dialog. Existing tasks open in tabs. */
 type Editor = null | { boardId: string; epic?: string };
 /** An open task tab. A new closeRequest value asks its editor to close. */
@@ -106,13 +117,14 @@ type BoardDialog = null | { board: BoardRecord | null };
 const viewTitles: Record<Exclude<View, "epic" | "saved">, string> = {
   board: "Board",
   mine: "My tasks",
+  inbox: "Inbox",
   agents: "Agents",
   epics: "Epics",
   views: "Views",
   pulls: "Pull requests",
 };
 /** Pages without a task board. */
-const overviews: View[] = ["agents", "epics", "views", "pulls"];
+const overviews: View[] = ["inbox", "agents", "epics", "views", "pulls"];
 const SELECTED_BOARD_KEY = "tasknboard.selectedBoardId";
 const readSelectedBoardId = () => {
   try {
@@ -157,6 +169,8 @@ export default function App() {
   const [epicId, setEpicId] = useState("");
   const [epicDialog, setEpicDialog] = useState<EpicDialog>(null);
   const [views, setViews] = useState<SavedView[]>([]);
+  const [inbox, setInbox] = useState<Inbox>({ items: [], unread: 0 });
+  const [markingRead, setMarkingRead] = useState(false);
   const [viewId, setViewId] = useState("");
   /** The open view as it was loaded or last saved; the working copy is below. */
   const [viewBase, setViewBase] = useState<SavedView | null>(null);
@@ -240,9 +254,10 @@ export default function App() {
     const generation = boardDataGeneration.current;
     let scopedBoardId = requestedBoardId;
     try {
-      const [info, viewList] = await Promise.all([
+      const [info, viewList, inboxList] = await Promise.all([
         command<WorkspaceInfo>("workspace_info"),
         command<{ views: SavedView[] }>("list_views"),
+        command<Inbox>("list_inbox"),
       ]);
       if (
         selectedBoardRef.current !== requestedBoardId ||
@@ -251,6 +266,7 @@ export default function App() {
         return { ok: true };
       setBoards(info.boards);
       setViews(viewList.views);
+      setInbox(inboxList);
       setActor(info.actor);
       setActors(info.actors);
       setWorkspace(info.name);
@@ -947,6 +963,29 @@ export default function App() {
     }
   }
 
+  /** Marks everything listed as read; newer items stay unread. */
+  async function markInboxRead() {
+    const newest = inbox.items[0];
+    if (!newest) return;
+    setMarkingRead(true);
+    try {
+      const { unread } = await command<{ sequence: number; unread: number }>(
+        "mark_inbox_read",
+        { upTo: newest.sequence },
+      );
+      setInbox((current) => ({ ...current, unread }));
+      void refresh();
+    } catch (e) {
+      notify({
+        tone: "error",
+        title: "Couldn't mark the inbox read",
+        body: errorOf(e).message,
+      });
+    } finally {
+      setMarkingRead(false);
+    }
+  }
+
   async function openTask(task: Task) {
     return openTaskById(task.id);
   }
@@ -1531,6 +1570,7 @@ export default function App() {
               [
                 ["board", "board"],
                 ["mine", "user"],
+                ["inbox", "inbox"],
                 ["agents", "cursor"],
                 ["epics", "folder"],
                 ["views", "layers"],
@@ -1551,6 +1591,14 @@ export default function App() {
               >
                 <Icon name={icon} />
                 <span>{viewTitles[id]}</span>
+                {id === "inbox" && inbox.unread > 0 && (
+                  <small
+                    className="nav-badge"
+                    aria-label={`${inbox.unread} unread`}
+                  >
+                    {inbox.unread}
+                  </small>
+                )}
                 {id === "mine" && workspaceInfoLoaded && (
                   <small
                     aria-label={`${tasks.filter((t) => t.assignee === actor.id).length} tasks`}
@@ -1936,6 +1984,8 @@ export default function App() {
                     ? "This view was deleted or is no longer shared with you."
                     : view === "views"
                     ? `Saved filters and display settings. Counts reflect ${currentBoard?.name ?? "the selected board"}. Star a view to keep it in the sidebar.`
+                    : view === "inbox"
+                    ? "Comments, mentions and reviews from others on your tasks. Opening an item does not mark it read."
                     : view === "pulls"
                     ? "GitHub pull requests that involve you. Paste any pull request link to open it."
                     : view === "epics"
@@ -2009,6 +2059,13 @@ export default function App() {
                   })
                 }
                 onFavorite={(saved) => void toggleFavorite(saved)}
+              />
+            ) : view === "inbox" ? (
+              <InboxPage
+                inbox={inbox}
+                marking={markingRead}
+                onOpen={(id) => void openTaskById(id)}
+                onMarkRead={() => void markInboxRead()}
               />
             ) : view === "pulls" ? (
               <PullRequestsPage
