@@ -176,8 +176,12 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # Each platform is optional: the release publishes whichever builds succeeded,
+  # so one broken platform does not hold back updates for the other.
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      (needs.windows.result == 'success' || needs.macos.result == 'success')
     needs: [windows, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -191,26 +195,40 @@ jobs:
       - name: Download builds
         run: gh run download "$GITHUB_RUN_ID" --dir builds
       # Fixed names keep the releases/latest/download/<name> links stable.
+      # A platform that failed keeps its previous files on the release and is left
+      # out of the feed, so its installed apps are not offered this version.
       - name: Name release files
+        env:
+          WINDOWS_RESULT: ${{ needs.windows.result }}
+          MACOS_RESULT: ${{ needs.macos.result }}
         run: |
           mkdir release
-          installers=$(find builds/TasknBoard-windows-x64 -name '*-setup.exe')
-          [ "$(echo "$installers" | wc -l)" -eq 1 ] || { echo "::error::Expected one installer: $installers"; exit 1; }
-          cp "$installers" release/TasknBoard-windows-x64-setup.exe
-          cp builds/TasknBoard-macos-arm64/TasknBoard-macos-arm64.zip release/
-          cp builds/TasknBoard-macos-arm64/TasknBoard-macos-arm64.app.tar.gz release/
-          ls -l release
           base="https://github.com/$GH_REPO/releases/download/latest"
+          platforms='{}'
+          if [ "$WINDOWS_RESULT" = success ]; then
+            installers=$(find builds/TasknBoard-windows-x64 -name '*-setup.exe')
+            [ "$(echo "$installers" | wc -l)" -eq 1 ] || { echo "::error::Expected one installer: $installers"; exit 1; }
+            cp "$installers" release/TasknBoard-windows-x64-setup.exe
+            platforms=$(jq --arg signature "$(cat "$installers.sig")" --arg url "$base/TasknBoard-windows-x64-setup.exe" \
+              '. + {"windows-x86_64": {signature: $signature, url: $url}}' <<< "$platforms")
+          else
+            echo "::warning::The Windows build did not succeed ($WINDOWS_RESULT). Publishing without it."
+          fi
+          if [ "$MACOS_RESULT" = success ]; then
+            cp builds/TasknBoard-macos-arm64/TasknBoard-macos-arm64.zip release/
+            cp builds/TasknBoard-macos-arm64/TasknBoard-macos-arm64.app.tar.gz release/
+            platforms=$(jq --arg signature "$(cat builds/TasknBoard-macos-arm64/TasknBoard-macos-arm64.app.tar.gz.sig)" \
+              --arg url "$base/TasknBoard-macos-arm64.app.tar.gz" \
+              '. + {"darwin-aarch64": {signature: $signature, url: $url}}' <<< "$platforms")
+          else
+            echo "::warning::The macOS build did not succeed ($MACOS_RESULT). Publishing without it."
+          fi
+          ls -l release
           jq -n --arg version "$TASKNBOARD_VERSION" \
             --arg notes "Built from $GITHUB_SHA on main." \
             --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg mac_signature "$(cat builds/TasknBoard-macos-arm64/TasknBoard-macos-arm64.app.tar.gz.sig)" \
-            --arg windows_signature "$(cat "$installers.sig")" \
-            --arg base "$base" \
-            '{version: $version, notes: $notes, pub_date: $date, platforms: {
-              "darwin-aarch64": {signature: $mac_signature, url: "\($base)/TasknBoard-macos-arm64.app.tar.gz"},
-              "windows-x86_64": {signature: $windows_signature, url: "\($base)/TasknBoard-windows-x64-setup.exe"}
-            }}' > latest.json
+            --argjson platforms "$platforms" \
+            '{version: $version, notes: $notes, pub_date: $date, platforms: $platforms}' > latest.json
           cat latest.json
       - name: Publish the latest release
         run: |
