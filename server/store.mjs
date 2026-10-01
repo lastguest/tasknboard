@@ -11,6 +11,7 @@ import {
   pullRequestLimit,
 } from "./domain.mjs";
 import { taskMatchesView } from "./views.mjs";
+import { similarityScorer, similarityThreshold } from "./similarity.mjs";
 
 // Decoded bytes must match the declared type; the data URL prefix alone is not trusted.
 const imageSignatures = {
@@ -806,6 +807,26 @@ export function createStore(path, { clock = Date.now } = {}) {
     }
     if (command === "get_task")
       return readTransaction(() => detail(get(p.id)));
+    if (command === "find_similar_tasks")
+      return readTransaction(() => {
+        if (p.boardId) getBoard(p.boardId);
+        const excluded = p.excludeId && get(p.excludeId).id;
+        const score = similarityScorer(p.title, p.context);
+        const tasks = all()
+          .filter(
+            (t) =>
+              !t.archived &&
+              t.id !== excluded &&
+              (!p.boardId || t.boardId === p.boardId),
+          )
+          .map((t) => ({ id: t.id, title: t.title, status: t.status, score: score(t) }))
+          .filter((t) => t.score > similarityThreshold)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, p.limit);
+        return {
+          tasks: tasks.map((t) => ({ ...t, score: Math.round(t.score * 1000) / 1000 })),
+        };
+      });
     if (command === "list_epics")
       return readTransaction(() => {
         if (p.boardId) getBoard(p.boardId);

@@ -107,6 +107,14 @@ The [task links contract](contracts/task-links.md) relates two tasks:
 relates, blocks, or duplicates. A link is a versioned write on one task.
 Links inform; the server does not block status changes because of them.
 
+## Similar tasks
+
+The [similar tasks contract](contracts/similar-tasks.md) warns about possible
+duplicates before a task is created. `server/similarity.mjs` holds the pure
+trigram and Jaccard scoring. The store scans non-archived tasks in memory, with
+no index. `find_similar_tasks` is a read. MCP agents call it before
+`create_task`. The New task dialog lists matches but never blocks a create.
+
 ## Views
 
 The [views contract](contracts/views.md) saves task filters and display

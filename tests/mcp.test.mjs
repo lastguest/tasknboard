@@ -25,7 +25,14 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
   });
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 22);
+  assert.equal(tools.tools.length, 23);
+  const similarTool = tools.tools.find((tool) => tool.name === "find_similar_tasks");
+  assert.equal(similarTool.annotations.readOnlyHint, true);
+  assert.ok(similarTool.inputSchema.properties.excludeId);
+  assert.match(
+    tools.tools.find((tool) => tool.name === "create_task").description,
+    /find_similar_tasks first.*duplicates/,
+  );
   const profileTool = tools.tools.find((tool) => tool.name === "update_profile");
   assert.ok(profileTool);
   assert.match(profileTool.description, /useGravatar.*gravatarEmail/);
@@ -71,6 +78,12 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
   const { boards } = await call("list_boards", {});
   let task = await call("create_task", { title: "Real protocol test", boardId: boards[0].id });
   assert.equal(task.commentCount, 0);
+  assert.deepEqual(
+    (await call("find_similar_tasks", { title: "Real protocol tests" })).tasks.map(
+      (similar) => similar.id,
+    ),
+    [task.id],
+  );
   task = await call("claim_task", {
     id: task.id,
     expectedVersion: task.version,
