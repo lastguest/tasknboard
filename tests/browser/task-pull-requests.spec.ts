@@ -248,3 +248,29 @@ test("Epic pages mark tasks that link pull requests", async ({ page }) => {
   const row = page.getByRole("row").filter({ hasText: task.id });
   await expect(row.locator(".pr-count")).toHaveAttribute("title", "2 pull requests");
 });
+
+test("Saved views mark tasks that link pull requests", async ({ page }) => {
+  const stamp = `PR view ${Date.now()}`;
+  const task = await command("create_task", { boardId: "BOARD-1", title: `${stamp} task` });
+  await command("link_pull_requests", {
+    id: task.id,
+    expectedVersion: task.version,
+    pullRequests: ["acme/api#901", "acme/api#902"],
+  });
+  const view = await command("create_view", {
+    name: stamp,
+    filters: { query: stamp, conditions: [] },
+  });
+  await command("favorite_view", { id: view.id, favorite: true });
+  await page.addInitScript((value) => {
+    sessionStorage.setItem("tasknboard-token", value);
+  }, humanToken);
+  await page.goto(baseURL);
+  await page.locator(".sidebar").getByRole("button", { name: new RegExp(`^${stamp}`) }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(stamp);
+  const card = page.getByRole("article", { name: new RegExp(`^${task.id}:`) });
+  await expect(card.locator(".pr-count")).toHaveAttribute("title", "2 pull requests");
+  await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "List" }).click();
+  const row = page.getByRole("row").filter({ hasText: task.id });
+  await expect(row.locator(".pr-count")).toHaveAttribute("title", "2 pull requests");
+});
