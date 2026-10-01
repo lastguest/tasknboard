@@ -8,6 +8,7 @@
   "permissions": [
     "allow-app-version",
     "allow-check-for-updates",
-    "allow-open-external-url"
+    "allow-open-external-url",
+    "allow-pick-folder"
   ]
 }

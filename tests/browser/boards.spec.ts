@@ -237,3 +237,60 @@ test("taking another board's former prefix asks for confirmation and ends the re
   });
   expect(old.status).toBe(404);
 });
+
+test("the desktop app fills the repository folder from the OS folder picker", async ({ page }) => {
+  await page.addInitScript((token) => {
+    sessionStorage.setItem("tasknboard-token", token);
+    const state = window as unknown as { pickCalls: unknown[] };
+    state.pickCalls = [];
+    Object.assign(window, {
+      isTauri: true,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: { start: string | null }) => {
+          if (command === "app_version") return "1.0.0";
+          if (command === "pick_folder") {
+            state.pickCalls.push(args.start);
+            if (state.pickCalls.length === 1) return "/Users/you/projects/picked";
+            if (state.pickCalls.length === 2) return null;
+            throw "Dialog unavailable";
+          }
+          throw `Unexpected command: ${command}`;
+        },
+      },
+    });
+  }, humanToken);
+  await page.goto(baseURL);
+  await page
+    .getByRole("group", { name: "Board actions" })
+    .getByRole("button", { name: "New board" })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "New board" });
+  const folder = dialog.getByRole("textbox", { name: "Repository folder" });
+  const choose = dialog.getByRole("button", { name: "Choose…" });
+  await choose.click();
+  await expect(folder).toHaveValue("/Users/you/projects/picked");
+  // Cancelling keeps the folder, and the picker opens where it points.
+  await choose.click();
+  await expect(choose).toBeEnabled();
+  await expect(folder).toHaveValue("/Users/you/projects/picked");
+  expect(await page.evaluate(() => (window as any).pickCalls)).toEqual([
+    null,
+    "/Users/you/projects/picked",
+  ]);
+  await choose.click();
+  await expect(dialog.getByRole("alert")).toContainText(
+    "Could not open the folder picker: Dialog unavailable",
+  );
+  await expect(folder).toHaveValue("/Users/you/projects/picked");
+});
+
+test("the browser has no folder picker button", async ({ page }) => {
+  await connect(page);
+  await page
+    .getByRole("group", { name: "Board actions" })
+    .getByRole("button", { name: "New board" })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "New board" });
+  await expect(dialog.getByRole("textbox", { name: "Repository folder" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Choose…" })).toHaveCount(0);
+});

@@ -156,6 +156,18 @@ pub(crate) fn show_error(message: &str) {
         .show();
 }
 
+/// Lets the board editor fill its repository folder from the native picker.
+/// Resolves to None when the person cancels.
+#[tauri::command]
+async fn pick_folder(start: Option<String>) -> Option<String> {
+    let mut dialog = rfd::AsyncFileDialog::new().set_title("Choose the repository folder");
+    if let Some(start) = start.map(PathBuf::from).filter(|path| path.is_dir()) {
+        dialog = dialog.set_directory(start);
+    }
+    let folder = dialog.pick_folder().await?;
+    Some(dunce::simplified(folder.path()).to_string_lossy().into_owned())
+}
+
 pub(crate) fn stop_service(app: &AppHandle) {
     if let Some(service) = app.try_state::<Service>() {
         service.stop();
@@ -170,7 +182,7 @@ fn open_artifact(app: &AppHandle, url: &tauri::Url) {
 
 pub fn run() {
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![crate::update::app_version, crate::update::check_for_updates, crate::open_external_url])
+        .invoke_handler(tauri::generate_handler![crate::update::app_version, crate::update::check_for_updates, crate::open_external_url, pick_folder])
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {

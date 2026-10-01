@@ -7,6 +7,7 @@ fn main() {
             "app_version",
             "check_for_updates",
             "open_external_url",
+            "pick_folder",
             "saved_server",
             "save_server",
         ]),

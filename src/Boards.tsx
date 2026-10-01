@@ -1,5 +1,7 @@
 import { useEffect, useId, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { ApiError, command, errorOf } from "./api";
+import { desktopApp } from "./AppUpdates";
 import { Dialog } from "./Dialogs";
 import { Icon } from "./Icons";
 import type { BoardRecord } from "./types";
@@ -227,6 +229,8 @@ export function BoardEditor({
   const [prefix, setPrefix] = useState(board?.prefix ?? "");
   const [repository, setRepository] = useState(board?.repository ?? "");
   const [pending, setPending] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [pickError, setPickError] = useState("");
   const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -253,6 +257,21 @@ export function BoardEditor({
     normalizedPrefix !== board.prefix ||
     normalizedDescription !== board.description ||
     normalizedRepository !== (board.repository ?? "");
+
+  async function pickFolder() {
+    setPicking(true);
+    setPickError("");
+    try {
+      const folder = await invoke<string | null>("pick_folder", {
+        start: normalizedRepository || null,
+      });
+      if (folder) setRepository(folder);
+    } catch (cause) {
+      setPickError(`Could not open the folder picker: ${String(cause)}`);
+    } finally {
+      setPicking(false);
+    }
+  }
 
   /** `confirmed` is true after the person accepts a retired prefix. */
   async function save(event?: React.FormEvent, confirmed = false) {
@@ -451,22 +470,39 @@ export function BoardEditor({
             Optional. It shows under the board title.
           </span>
         </label>
-        <label className="field" htmlFor={repositoryId}>
-          <span className="field-label" id={`${repositoryId}-label`}>
+        {/* A div, not a label: the picker button may not sit inside one. */}
+        <div className="field">
+          <label
+            className="field-label"
+            id={`${repositoryId}-label`}
+            htmlFor={repositoryId}
+          >
             Repository folder
-          </span>
-          <input
-            id={repositoryId}
-            aria-labelledby={`${repositoryId}-label`}
-            maxLength={1000}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="/Users/you/projects/app"
-            value={repository}
-            aria-invalid={attempted && Boolean(repositoryError)}
-            aria-describedby={`${repositoryId}-hint${attempted && repositoryError ? ` ${repositoryId}-error` : ""}`}
-            onChange={(event) => setRepository(event.target.value)}
-          />
+          </label>
+          <div className="field-with-action">
+            <input
+              id={repositoryId}
+              aria-labelledby={`${repositoryId}-label`}
+              maxLength={1000}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="/Users/you/projects/app"
+              value={repository}
+              aria-invalid={attempted && Boolean(repositoryError)}
+              aria-describedby={`${repositoryId}-hint${attempted && repositoryError ? ` ${repositoryId}-error` : ""}`}
+              onChange={(event) => setRepository(event.target.value)}
+            />
+            {desktopApp() && (
+              <button
+                type="button"
+                className="secondary"
+                disabled={picking || pending}
+                onClick={() => void pickFolder()}
+              >
+                <Icon name="folder" size={15} /> Choose…
+              </button>
+            )}
+          </div>
           <span className="field-hint" id={`${repositoryId}-hint`}>
             Optional. When you assign a task on this board to an agent
             configured on the Agents page, the desktop app starts that agent
@@ -478,7 +514,12 @@ export function BoardEditor({
               {repositoryError}
             </span>
           )}
-        </label>
+          {pickError && (
+            <span className="field-hint inline-error" role="alert">
+              {pickError}
+            </span>
+          )}
+        </div>
       </form>
     </Dialog>
   );

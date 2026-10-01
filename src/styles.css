@@ -1561,6 +1561,14 @@ footer {
   color: var(--subtle);
   margin-top: -3px;
 }
+.field-with-action {
+  display: flex;
+  gap: 8px;
+}
+.field-with-action > input {
+  flex: 1;
+  min-width: 0;
+}
 .title-input {
   font-size: 19px !important;
   font-weight: 500;
