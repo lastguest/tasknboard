@@ -6,6 +6,7 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
+        "compression": "zlib",
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico"
       }
