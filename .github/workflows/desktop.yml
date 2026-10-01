@@ -8,10 +8,11 @@ on:
     branches: [main, 'codex/windows-build']
     paths-ignore: ['**/*.md']
 
-# A newer push replaces an older run, so `latest` never goes back in time.
+# A running build always finishes, and only the newest waiting push runs after it.
+# Runs finish in push order, so `latest` never goes back in time.
 concurrency:
   group: desktop-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
