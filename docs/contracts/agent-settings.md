@@ -43,7 +43,7 @@ TasknBoard skill lives.
 | `task_assigned` | A person creates or assigns a task for the agent. | On |
 | `task_unassigned` | A person reassigns the agent's task. The run on that task stops and its queued work is dropped. It has no prompt. | On |
 | `changes_requested` | A person moves the agent's task from In review back to In progress or Backlog. | On |
-| `mention` | A person writes `@identity` in a comment. Agents need a claim to comment, so replying makes the agent the assignee. | Off |
+| `mention` | A person writes `@identity` in a comment. The agent replies with a comment; comments need no claim, so replying leaves the assignee as it is. | Off |
 | `standup` | A person opens the stand-up and the agent has tasks in progress or in review. | Off |
 
 Task events start only when the task is still assigned to the agent, is in

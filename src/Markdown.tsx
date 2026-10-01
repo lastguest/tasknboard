@@ -1,6 +1,7 @@
 import { Fragment, useRef, useState, type ReactNode } from "react";
 import { command, errorOf, type ApiError } from "./api";
 import { Icon } from "./Icons";
+import { useMentions } from "./Mentions";
 
 /*
  * Task descriptions are Markdown written by people and agents, so they are
@@ -642,6 +643,7 @@ export function MarkdownEditor({
   placeholder,
   startInPreview = false,
   disabled = false,
+  mentions = false,
 }: {
   id?: string;
   "aria-describedby"?: string;
@@ -652,8 +654,11 @@ export function MarkdownEditor({
   placeholder?: string;
   startInPreview?: boolean;
   disabled?: boolean;
+  /** Suggest people from the roster after "@". */
+  mentions?: boolean;
 }) {
   const area = useRef<HTMLTextAreaElement>(null);
+  const mention = useMentions(area, mentions && !disabled);
   const [preview, setPreview] = useState(
     startInPreview && Boolean(value.trim()),
   );
@@ -729,6 +734,7 @@ export function MarkdownEditor({
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (mention.onKeyDown(e)) return;
     if (
       e.key === "Enter" &&
       !e.shiftKey &&
@@ -848,7 +854,11 @@ export function MarkdownEditor({
         placeholder={placeholder}
         disabled={disabled}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        {...mention.textareaProps}
+        onChange={(e) => {
+          onChange(e.target.value);
+          mention.track(e.target);
+        }}
         onKeyDown={onKeyDown}
         onPaste={(e) => {
           const files = [...e.clipboardData.files].filter((f) =>
@@ -870,6 +880,7 @@ export function MarkdownEditor({
           void upload(embedded);
         }}
       />
+      {!preview && mention.menu}
       {preview && (
         <div
           className="md-preview"

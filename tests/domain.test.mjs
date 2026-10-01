@@ -90,6 +90,28 @@ test("claim exclusion, agent ownership, heartbeat and review lifecycle", (t) => 
   assert.equal(task.status, "done");
   assert.equal(task.events.length, 5);
 });
+test("anyone can comment on a task claimed by someone else", (t) => {
+  const s = fixture(t);
+  let task = s.make();
+  task = s.execute("claim_task", { id: task.id, expectedVersion: 1 }, a);
+  task = s.execute(
+    "add_comment",
+    { id: task.id, expectedVersion: task.version, body: "Human reply" },
+    human,
+  );
+  task = s.execute(
+    "add_comment",
+    { id: task.id, expectedVersion: task.version, body: "Agent reply" },
+    b,
+  );
+  assert.equal(task.lease.actor, a.id);
+  assert.equal(task.assignee, a.id);
+  assert.equal(task.status, "in_progress");
+  assert.deepEqual(
+    task.events.filter((e) => e.kind === "add_comment").map((e) => e.actor),
+    [human.id, b.id],
+  );
+});
 test("expired leases deny old agent writes and allow takeover", (t) => {
   const s = fixture(t);
   let task = s.make();
@@ -749,7 +771,6 @@ test("image data embedded in Markdown is stored as an uploaded image", (t) => {
 test("a migration moves embedded image data out of saved tasks, epics and history", async (t) => {
   const { DatabaseSync } = await import("node:sqlite");
   const dir = mkdtempSync(join(tmpdir(), "tasknboard-images-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "workspace.sqlite");
   let store = createStore(path);
   const task = store.execute(
@@ -773,7 +794,11 @@ test("a migration moves embedded image data out of saved tasks, epics and histor
   db.exec("DELETE FROM migrations WHERE version=16");
   db.close();
   store = createStore(path);
-  t.after(() => store.close());
+  // Windows cannot remove the folder while the database is open.
+  t.after(() => {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
   const upgraded = store.execute("get_task", { id: task.id }, human);
   const [id] = fileLinks(upgraded.description);
   assert.equal(upgraded.description, `![old](/files/${id}) ${invalid}`);

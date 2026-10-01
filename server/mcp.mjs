@@ -31,7 +31,7 @@ const descriptions = {
     "Extend your owned lease by 15 minutes. Returns a NEW task version; use it in subsequent writes.",
   release_task: "Release your active claim without changing the task status.",
   add_comment:
-    "Append progress or a question to your claimed task. Requires current expectedVersion.",
+    "Append progress, a question, or a reply to any task, claimed or not. Requires current expectedVersion.",
   set_standup_notes:
     "Set highlight and blocker notes for stand-up (500 chars each). Empty strings clear notes. Agents require their own active claim; humans may annotate without changing a claim. Returns a new task version.",
   link_task:

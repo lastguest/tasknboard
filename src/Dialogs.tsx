@@ -25,6 +25,7 @@ import { Icon } from "./Icons";
 import { ContextMenu, type MenuState } from "./ContextMenu";
 import { CliHelper } from "./CliHelper";
 import { MarkdownEditor } from "./Markdown";
+import { useMentions } from "./Mentions";
 import { EpicTag } from "./Epics";
 import { GitHubSettings, parsePullRef, pullHash } from "./PullRequests";
 import {
@@ -690,6 +691,8 @@ export function TaskEditor({
     conflicts: (keyof Draft)[];
   }>(null);
   const [comment, setComment] = useState("");
+  const commentArea = useRef<HTMLTextAreaElement>(null);
+  const commentMentions = useMentions(commentArea);
   const [commentError, setCommentError] = useState<ApiError | null>(null);
   const [reviewError, setReviewError] = useState<ApiError | null>(null);
   const [archiveStep, setArchiveStep] = useState(false);
@@ -1408,9 +1411,9 @@ export function TaskEditor({
                   </p>
                   {foreignLease && (
                     <p className="small warn">
-                      While this claim is active, the server rejects edits,
-                      comments and archiving from anyone else. Stand-up notes
-                      remain editable.
+                      While this claim is active, the server rejects edits and
+                      archiving from anyone else. Comments and stand-up notes
+                      remain open.
                     </p>
                   )}
                 </>
@@ -1564,18 +1567,27 @@ export function TaskEditor({
             <form className="comment-form" onSubmit={postComment}>
               <label className="field">
                 <span className="field-label">Add a comment</span>
-                <textarea
-                  aria-label="Add a comment"
-                  rows={3}
-                  maxLength={10000}
-                  placeholder="Progress, questions, or review notes…"
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey))
-                      postComment();
-                  }}
-                />
+                <span className="mention-anchor">
+                  <textarea
+                    ref={commentArea}
+                    aria-label="Add a comment"
+                    rows={3}
+                    maxLength={10000}
+                    placeholder="Progress, questions, or review notes… Type @ to mention someone."
+                    value={comment}
+                    {...commentMentions.textareaProps}
+                    onChange={(e) => {
+                      setComment(e.target.value);
+                      commentMentions.track(e.target);
+                    }}
+                    onKeyDown={(e) => {
+                      if (commentMentions.onKeyDown(e)) return;
+                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey))
+                        postComment();
+                    }}
+                  />
+                  {commentMentions.menu}
+                </span>
               </label>
               {commentError && (
                 <ErrorNote

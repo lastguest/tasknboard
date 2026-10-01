@@ -2553,6 +2553,7 @@ footer {
 
 /* Markdown editor */
 .md-editor {
+  position: relative;
   display: flex;
   flex-direction: column;
   border: 1px solid #34373d;
@@ -2631,6 +2632,62 @@ footer {
 }
 .md-error {
   color: var(--danger);
+}
+/* @-mention suggestions, anchored under the caret */
+.mention-anchor {
+  position: relative;
+  display: block;
+}
+.mention-menu {
+  position: absolute;
+  z-index: 30;
+  width: 280px;
+  max-width: calc(100% - 8px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  box-shadow: 0 16px 48px #0009, 0 2px 6px #0006;
+}
+.mention-menu.above {
+  transform: translateY(-100%);
+}
+.mention-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.mention-option[aria-selected="true"] {
+  background: var(--surface-3);
+  color: var(--text-strong);
+}
+.mention-name,
+.mention-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mention-id {
+  flex: 1 1 auto;
+  color: var(--subtle);
+  font-size: 12px;
+}
+.mention-kind {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
 }
 
 /* Rendered Markdown. Untrusted text, rendered as React elements. */

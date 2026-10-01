@@ -287,7 +287,8 @@ test("each CLI gets its model, profile, extra arguments, and environment", async
   };
   for (const [client, args] of Object.entries(expected)) {
     const { store, launcher, calls, repository, board, home } = await fixture(t, { client });
-    await writeFile(join(home, "bin", client), "", { mode: 0o755 });
+    const executable = process.platform === "win32" ? `${client}.exe` : client;
+    await writeFile(join(home, "bin", executable), "", { mode: 0o755 });
     configure(store, { model: "m1", profile: "p1", args: ["--verbose"], env: { API_KEY: "k" } });
     const task = store.execute(
       "create_task",
