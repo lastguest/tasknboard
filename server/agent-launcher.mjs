@@ -363,7 +363,10 @@ export function createAgentLauncher({
     } finally {
       busy.delete(identity);
     }
-    if (!queue.length) queues.delete(identity);
+    // Delete only this queue: events while it started may have replaced it.
+    if (!queue.length) {
+      if (queues.get(identity) === queue) queues.delete(identity);
+    }
     // A run that ended while this loop held the queue hands it on here.
     else if (!running.has(identity)) void next(identity);
   }
@@ -386,12 +389,11 @@ export function createAgentLauncher({
     if (!enabled) return;
     const config = readConfig(store, identity);
     if (!config?.enabled || !config.events.task_unassigned.enabled) return;
+    // Filter in place: a starting run holds this array and may add to it.
     const queue = queues.get(identity);
     if (queue)
-      queues.set(
-        identity,
-        queue.filter((job) => !(taskWork.has(job.event) && job.taskId === task.id)),
-      );
+      for (let i = queue.length - 1; i >= 0; i--)
+        if (taskWork.has(queue[i].event) && queue[i].taskId === task.id) queue.splice(i, 1);
     const run = running.get(identity);
     if (run && taskWork.has(run.job.event) && run.job.taskId === task.id) {
       run.cancelled = true;

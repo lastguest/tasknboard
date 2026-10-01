@@ -574,3 +574,32 @@ test("quitting records the stopped run, releases its claim, and starts it again 
   assert.match(reopened[1].args[1], new RegExp(second.id));
   next.stop();
 });
+
+test("a task reassigned while another run starts still waits its turn", async (t) => {
+  const { store, launcher, calls, board } = await fixture(t);
+  const make = (title) =>
+    store.execute("create_task", { boardId: board.id, title, assignee: "bot" }, human);
+  const first = make("Starting");
+  const second = make("Reassigned");
+  // The first run is still starting when the second task is unassigned and assigned again.
+  launcher.assigned(first);
+  const away = store.execute(
+    "update_task",
+    { id: second.id, expectedVersion: second.version, patch: { assignee: "" } },
+    human,
+  );
+  launcher.changed(second, away);
+  const back = store.execute(
+    "update_task",
+    { id: second.id, expectedVersion: away.version, patch: { assignee: "bot" } },
+    human,
+  );
+  launcher.changed(away, back);
+  await settle();
+  assert.equal(calls.length, 1);
+  assert.deepEqual(launcher.status("bot").queued, [{ event: "task_assigned", taskId: second.id }]);
+  calls[0].child.emit("exit", 0);
+  await settle();
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].args[1], new RegExp(second.id));
+});
