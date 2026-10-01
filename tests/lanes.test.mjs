@@ -258,7 +258,7 @@ test("the lane upgrade moves tasks, history and views from statuses to lanes", (
   view.filters.conditions = [{ field: "status", op: "is", values: ["backlog", "in_review"] }];
   view.display.groupBy = "status";
   db.prepare("UPDATE views SET data=?").run(JSON.stringify(view));
-  db.exec("DROP TABLE lanes; DELETE FROM migrations WHERE version=17");
+  db.exec("DROP TABLE lanes; DELETE FROM migrations WHERE version=18");
   db.close();
 
   store = createStore(path);
@@ -285,7 +285,7 @@ test("the lane upgrade moves tasks, history and views from statuses to lanes", (
   ]);
   assert.equal(migratedView.display.groupBy, "lane");
   assert.equal(migratedView.version, view.version);
-  assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 17);
+  assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 18);
   const backup = store.execute("export_workspace", {}, human);
   assert.deepEqual(
     backup.boards[1].lanes,

@@ -17,6 +17,7 @@ import {
   writeConfig,
 } from "./agent-config.mjs";
 import { createGitHub } from "./github.mjs";
+import { createChangeFeed } from "./changes.mjs";
 import { imageDataUrlLimit } from "./domain.mjs";
 import { dbPath, localActor, tokensFromEnvironment } from "./config.mjs";
 const host = process.env.HOST || "127.0.0.1",
@@ -39,6 +40,7 @@ const cliEntry =
     ? resolve(process.env.TASKNBOARD_RESOURCES, "cli.mjs")
     : fileURLToPath(new URL("../dist-cli/tasknboard.mjs", import.meta.url));
 const github = createGitHub(store);
+const changes = createChangeFeed(store);
 const cliHelper = createCliHelper();
 const codexPlugin = createCodexPlugin({ mcpEntry });
 const claudePlugin = createClaudePlugin({ mcpEntry, database: dbPath });
@@ -206,6 +208,28 @@ const server = createServer(async (req, res) => {
         }
         return;
       }
+      if (url.pathname === "/api/stream") {
+        if (req.method !== "GET") {
+          json(res, 405, { message: "Use GET" });
+          return;
+        }
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "X-Accel-Buffering": "no",
+        });
+        // The first bytes let clients and proxies treat the stream as open.
+        res.write(": connected\n\n");
+        const unsubscribe = changes.subscribe(() =>
+          res.write("event: change\ndata: {}\n\n"),
+        );
+        const ping = setInterval(() => res.write(": ping\n\n"), 25000);
+        res.once("close", () => {
+          clearInterval(ping);
+          unsubscribe();
+        });
+        return;
+      }
       if (url.pathname === "/api/mcp-config") {
         if (req.method !== "GET") {
           json(res, 405, { message: "Use GET" });
@@ -347,6 +371,8 @@ const server = createServer(async (req, res) => {
         if (name === "add_comment") launcher.commented(output, actor, args.body);
       }
       json(res, 200, output);
+      // data_version does not change for this connection's own writes.
+      changes.check();
       return;
     }
     if (!["GET", "HEAD"].includes(req.method)) {
@@ -416,6 +442,7 @@ function stop() {
   if (stopping) return;
   stopping = true;
   launcher.stop();
+  changes.stop();
   server.close(() => {
     store.close();
     process.exit(0);

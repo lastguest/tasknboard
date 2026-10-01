@@ -24,7 +24,15 @@ import {
 } from "./Dialogs";
 import { Icon } from "./Icons";
 import { AssigneeFilter, UNASSIGNED } from "./AssigneeFilter";
-import { ApiError, command, errorOf, loadTasks, taskNumber, token } from "./api";
+import {
+  ApiError,
+  command,
+  errorOf,
+  loadTasks,
+  subscribeChanges,
+  taskNumber,
+  token,
+} from "./api";
 import { Standup } from "./Standup";
 import { BoardControls, BoardEditor, type BoardPage, SidebarBoards } from "./Boards";
 import {
@@ -33,6 +41,7 @@ import {
   EpicSummary,
 } from "./Epics";
 import { type Toast, Toasts } from "./Toasts";
+import { InboxPage } from "./Inbox";
 import { PullRequestsPage, parsePullRef, pullHash, type PullRef } from "./PullRequests";
 import type { SettingsPage } from "./Dialogs";
 import {
@@ -60,6 +69,11 @@ import type { ModelContext } from "./webmcp";
 import { formatUtcTimestamp } from "./formatting";
 import { Avatar, displayName, PeopleContext, usePeople } from "./People";
 import {
+  refreshTaskReferences,
+  TaskReferenceContext,
+} from "./TaskReferences";
+import { referencePrefixes } from "./task-references";
+import {
   activeLease,
   doneLocked,
   epicPalette,
@@ -69,6 +83,7 @@ import {
   type Actor,
   type BoardRecord,
   type Epic,
+  type Inbox,
   type SavedView,
   type Task,
   type ViewCondition,
@@ -77,7 +92,16 @@ import {
   type WorkspaceInfo,
 } from "./types";
 
-type View = "board" | "mine" | "agents" | "epics" | "epic" | "views" | "saved" | "pulls";
+type View =
+  | "board"
+  | "mine"
+  | "inbox"
+  | "agents"
+  | "epics"
+  | "epic"
+  | "views"
+  | "saved"
+  | "pulls";
 /** The new-task dialog. Existing tasks open in tabs. */
 type Editor = null | { boardId: string; epic?: string; lane?: string };
 /** An open task tab. A new closeRequest value asks its editor to close. */
@@ -91,13 +115,14 @@ type BoardDialog = null | { board: BoardRecord | null };
 const viewTitles: Record<Exclude<View, "epic" | "saved">, string> = {
   board: "Board",
   mine: "My tasks",
+  inbox: "Inbox",
   agents: "Agents",
   epics: "Epics",
   views: "Views",
   pulls: "Pull requests",
 };
 /** Pages without a task board. */
-const overviews: View[] = ["agents", "epics", "views", "pulls"];
+const overviews: View[] = ["inbox", "agents", "epics", "views", "pulls"];
 const SELECTED_BOARD_KEY = "tasknboard.selectedBoardId";
 const readSelectedBoardId = () => {
   try {
@@ -142,6 +167,8 @@ export default function App() {
   const [epicId, setEpicId] = useState("");
   const [epicDialog, setEpicDialog] = useState<EpicDialog>(null);
   const [views, setViews] = useState<SavedView[]>([]);
+  const [inbox, setInbox] = useState<Inbox>({ items: [], unread: 0 });
+  const [markingRead, setMarkingRead] = useState(false);
   const [viewId, setViewId] = useState("");
   /** The open view as it was loaded or last saved; the working copy is below. */
   const [viewBase, setViewBase] = useState<SavedView | null>(null);
@@ -226,9 +253,10 @@ export default function App() {
     const generation = boardDataGeneration.current;
     let scopedBoardId = requestedBoardId;
     try {
-      const [info, viewList] = await Promise.all([
+      const [info, viewList, inboxList] = await Promise.all([
         command<WorkspaceInfo>("workspace_info"),
         command<{ views: SavedView[] }>("list_views"),
+        command<Inbox>("list_inbox"),
       ]);
       if (
         selectedBoardRef.current !== requestedBoardId ||
@@ -237,6 +265,7 @@ export default function App() {
         return { ok: true };
       setBoards(info.boards);
       setViews(viewList.views);
+      setInbox(inboxList);
       setActor(info.actor);
       setActors(info.actors);
       setWorkspace(info.name);
@@ -269,6 +298,7 @@ export default function App() {
         return { ok: true };
       setTasks(next);
       setEpics(epicList.epics);
+      refreshTaskReferences();
       setSync({
         loaded: true,
         connected: true,
@@ -368,30 +398,59 @@ export default function App() {
     return () => controller.abort();
   }, [refresh]);
 
+  // The server pushes change events; the stream is closed while the tab is hidden.
+  const [streamEpoch, setStreamEpoch] = useState(0);
   useEffect(() => {
-    let timer: number | undefined;
-    const startPolling = () => {
+    let stream: AbortController | null = null;
+    let debounce: number | undefined;
+    const changed = () => {
+      window.clearTimeout(debounce);
+      debounce = window.setTimeout(() => void refresh(), 150);
+    };
+    const open = () => {
       void refresh();
-      timer = window.setInterval(() => {
-        if (!document.hidden) void refresh();
-      }, 5000);
+      stream = new AbortController();
+      void subscribeChanges(changed, stream.signal);
+    };
+    const close = () => {
+      stream?.abort();
+      stream = null;
+      window.clearTimeout(debounce);
     };
     const onVisibilityChange = () => {
-      if (document.hidden) {
-        if (timer !== undefined) window.clearInterval(timer);
-        timer = undefined;
-      } else if (timer === undefined) {
-        startPolling();
-      }
+      if (document.hidden) close();
+      else if (!stream) open();
     };
 
-    if (!document.hidden) startPolling();
+    if (!document.hidden) open();
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
-      if (timer !== undefined) window.clearInterval(timer);
+      close();
     };
+  }, [refresh, streamEpoch]);
+  /** A new token needs a new stream; the old one may be waiting to retry. */
+  const reconnect = useCallback(() => {
+    setStreamEpoch((n) => n + 1);
+    return refresh();
   }, [refresh]);
+
+  // Leases expire without a database change, so render again at the next expiry.
+  const [leaseClock, setLeaseClock] = useState(0);
+  useEffect(() => {
+    const now = Date.now();
+    const next = Math.min(
+      ...tasks.map((t) =>
+        t.lease && t.lease.expiresAt > now ? t.lease.expiresAt : Infinity,
+      ),
+    );
+    if (next === Infinity) return;
+    const timer = window.setTimeout(
+      () => setLeaseClock((n) => n + 1),
+      next - now + 50,
+    );
+    return () => window.clearTimeout(timer);
+  }, [tasks, leaseClock]);
 
   const toastSeq = useRef(0);
   const notify = useCallback((next: Omit<Toast, "id">) => {
@@ -908,9 +967,48 @@ export default function App() {
     }
   }
 
+  /** Marks everything listed as read; newer items stay unread. */
+  async function markInboxRead() {
+    const newest = inbox.items[0];
+    if (!newest) return;
+    setMarkingRead(true);
+    try {
+      const { unread } = await command<{ sequence: number; unread: number }>(
+        "mark_inbox_read",
+        { upTo: newest.sequence },
+      );
+      setInbox((current) => ({ ...current, unread }));
+      void refresh();
+    } catch (e) {
+      notify({
+        tone: "error",
+        title: "Couldn't mark the inbox read",
+        body: errorOf(e).message,
+      });
+    } finally {
+      setMarkingRead(false);
+    }
+  }
+
   async function openTask(task: Task) {
     return openTaskById(task.id);
   }
+
+  // Chips read the latest opener; the context changes only with the boards.
+  const openReference = useRef(openTaskById);
+  openReference.current = openTaskById;
+  const taskReferences = useMemo(
+    () => ({
+      prefixes: referencePrefixes(boards),
+      laneNames: new Map(boards.flatMap((b) => b.lanes.map((l) => [l.id, l.name]))),
+      open: (id: string) => {
+        // A chip in the stand-up opens the task in the ordinary application.
+        setStandup(false);
+        void openReference.current(id);
+      },
+    }),
+    [boards],
+  );
 
   function closeTab(id: string) {
     const list = tabsRef.current;
@@ -1433,6 +1531,7 @@ export default function App() {
 
   return (
     <PeopleContext.Provider value={people}>
+      <TaskReferenceContext.Provider value={taskReferences}>
       <div className="app-shell" hidden={standup} inert={standup}>
         <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
           <div className="brand-row">
@@ -1488,6 +1587,7 @@ export default function App() {
               [
                 ["board", "board"],
                 ["mine", "user"],
+                ["inbox", "inbox"],
                 ["agents", "cursor"],
                 ["epics", "folder"],
                 ["views", "layers"],
@@ -1508,6 +1608,14 @@ export default function App() {
               >
                 <Icon name={icon} />
                 <span>{viewTitles[id]}</span>
+                {id === "inbox" && inbox.unread > 0 && (
+                  <small
+                    className="nav-badge"
+                    aria-label={`${inbox.unread} unread`}
+                  >
+                    {inbox.unread}
+                  </small>
+                )}
                 {id === "mine" && workspaceInfoLoaded && (
                   <small
                     aria-label={`${tasks.filter((t) => t.assignee === actor.id).length} tasks`}
@@ -1894,6 +2002,8 @@ export default function App() {
                     ? "This view was deleted or is no longer shared with you."
                     : view === "views"
                     ? `Saved filters and display settings. Counts reflect ${currentBoard?.name ?? "the selected board"}. Star a view to keep it in the sidebar.`
+                    : view === "inbox"
+                    ? "Comments, mentions and reviews from others on your tasks. Opening an item does not mark it read."
                     : view === "pulls"
                     ? "GitHub pull requests that involve you. Paste any pull request link to open it."
                     : view === "epics"
@@ -1967,6 +2077,13 @@ export default function App() {
                   })
                 }
                 onFavorite={(saved) => void toggleFavorite(saved)}
+              />
+            ) : view === "inbox" ? (
+              <InboxPage
+                inbox={inbox}
+                marking={markingRead}
+                onOpen={(id) => void openTaskById(id)}
+                onMarkRead={() => void markInboxRead()}
               />
             ) : view === "pulls" ? (
               <PullRequestsPage
@@ -2283,6 +2400,10 @@ export default function App() {
           onSaved={saved}
           onChanged={() => void refresh()}
           onArchived={archived}
+          onOpenTask={(id) => {
+            setEditor(null);
+            void openTaskById(id);
+          }}
         />
       )}
       {boardDialog && (
@@ -2305,7 +2426,7 @@ export default function App() {
             setSettingsPage(undefined);
             setSettingsClosed((n) => n + 1);
           }}
-          onReconnect={refresh}
+          onReconnect={reconnect}
         />
       )}
       {epicDialog && (
@@ -2340,6 +2461,7 @@ export default function App() {
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
       {logTask && <AgentLogs taskId={logTask} onClose={() => setLogTask("")} />}
       {!standup && <Toasts toasts={toasts} onDismiss={dismissToast} />}
+      </TaskReferenceContext.Provider>
     </PeopleContext.Provider>
   );
 }

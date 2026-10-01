@@ -149,7 +149,7 @@ test("the board runs commands, keeps the prompt on a conflict, and refreshes", a
     close() {},
     async execute(name, args) {
       calls.push([name, args]);
-      if (name === "workspace_info") return { name: "Studio", actor: { id: "you", kind: "human" }, actors: [], boards, schemaVersion: 17 };
+      if (name === "workspace_info") return { name: "Studio", actor: { id: "you", kind: "human" }, actors: [], boards, schemaVersion: 18 };
       if (name === "list_boards") return { boards };
       if (name === "list_tasks") return { tasks: [task(), task({ id: "ENG-1", title: "Plan it", boardId: "BOARD-2", lane: "LANE-21", role: "todo" })], total: 2 };
       if (name === "update_task" && conflict) {

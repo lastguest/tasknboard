@@ -722,6 +722,8 @@ type Pending =
   | "link"
   | "pulls";
 
+type SimilarTask = { id: string; title: string; lane: string; role: LaneRole; score: number };
+
 export function TaskEditor({
   task,
   boardName,
@@ -798,8 +800,12 @@ export function TaskEditor({
   const [linkMenu, setLinkMenu] = useState<MenuState | null>(null);
   const [linkError, setLinkError] = useState<ApiError | null>(null);
   const [pullError, setPullError] = useState<ApiError | null>(null);
-  /** What the discard confirmation leads to: closing, or a revert to the saved task. */
-  const [discard, setDiscard] = useState<false | "close" | "revert">(false);
+  /** What the discard confirmation leads to: closing, a revert, or opening another task. */
+  const [discard, setDiscard] = useState<
+    false | "close" | "revert" | { open: string }
+  >(false);
+  /** Create only: existing tasks whose title is close to the draft title. */
+  const [similar, setSimilar] = useState<SimilarTask[]>([]);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [notice, setNotice] = useState("");
   const [picker, setPicker] = useState<
@@ -904,6 +910,30 @@ export function TaskEditor({
     setNotice("");
     setDiscard(false);
   }
+
+  // A warning only: a failed lookup shows nothing and never blocks creation.
+  const similarTitle = current ? "" : draft.title.trim();
+  useEffect(() => {
+    if (similarTitle.length < 4) {
+      setSimilar([]);
+      return;
+    }
+    const request = new AbortController();
+    const timer = setTimeout(() => {
+      command<{ tasks: SimilarTask[] }>(
+        "find_similar_tasks",
+        { title: similarTitle, boardId },
+        request.signal,
+      ).then(
+        (result) => setSimilar(result.tasks),
+        () => !request.signal.aborted && setSimilar([]),
+      );
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      request.abort();
+    };
+  }, [similarTitle, boardId]);
 
   // An existing task opens in a tab: focus its heading, and close on request.
   useEffect(() => {
@@ -1134,7 +1164,13 @@ export function TaskEditor({
       <button
         type="button"
         className="danger-button"
-        onClick={discard === "revert" ? revert : onClose}
+        onClick={
+          discard === "revert"
+            ? revert
+            : typeof discard === "object"
+              ? () => onOpenTask?.(discard.open)
+              : onClose
+        }
       >
         Discard
       </button>
@@ -1255,6 +1291,31 @@ export function TaskEditor({
               onChange={(e) => set("title")(e.target.value)}
             />
           </Field>
+          {!current && similar.length > 0 && (
+            <section className="field similar-tasks" aria-label="Possible duplicates">
+              <span className="field-label">Possible duplicates</span>
+              <ul className="task-links">
+                {similar.map((task) => (
+                  <li key={task.id}>
+                    <a
+                      href={`#task/${task.id}`}
+                      title={`${task.id} ${task.title}`}
+                      onClick={(e) => {
+                        if (!onOpenTask) return;
+                        e.preventDefault();
+                        // The draft is never dropped without the discard confirmation.
+                        setDiscard({ open: task.id });
+                      }}
+                    >
+                      <span className="task-id">{task.id}</span>
+                      <span className="task-link-title">{task.title}</span>
+                    </a>
+                    <span className="small">{laneName(task.lane)}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <Field
             label="Context"
             hint="Scope, repository paths, constraints."

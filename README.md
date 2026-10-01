@@ -460,7 +460,7 @@ No direct remote Streamable HTTP MCP endpoint is included yet. The bridge requir
 - Transactions keep each task mutation and its activity event together.
 - Optimistic task versions reject stale updates.
 - Claims serialize across independent SQLite connections.
-- Polling refreshes the visible board every five seconds and pauses in hidden tabs. Returning to the tab refreshes immediately. An open editor retains its draft and version.
+- The server pushes change events, including writes from local MCP and CLI processes, and the visible board refreshes at once. Hidden tabs close the stream. Returning to the tab refreshes immediately. An open editor retains its draft and version.
 - No offline mutation queue. Disconnected edits fail visibly.
 - Archive hides a task from normal lists without deleting it. No restore UI yet.
 - Settings exports all tasks and activity as JSON. JSON import is not implemented. For full recovery, stop the service and MCP clients and copy the SQLite file, or use SQLite's online backup mechanism. Never copy only a live `.sqlite` file while WAL writes are active.

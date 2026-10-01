@@ -439,23 +439,31 @@ test("WebMCP writes refresh after a read already in flight", async ({ page }) =>
   await expect(page.getByRole("button", { name: new RegExp(title) })).toBeVisible();
 });
 
-test("Hidden tabs pause polling and visible tabs refresh immediately", async ({ page }) => {
+test("Hidden tabs close the change stream and visible tabs refresh immediately", async ({ page }) => {
+  // The page reads on load and again when the change stream opens.
+  let loaded = 0;
+  page.on("response", (response) => { if (response.url().endsWith("/api/list_tasks")) loaded++; });
   await connect(page);
+  await expect.poll(() => loaded).toBe(2);
   await page.clock.install();
   let reads = 0;
   page.on("request", (request) => { if (request.url().endsWith("/api/list_tasks")) reads++; });
+  const streamClosed = page.waitForEvent("requestfailed", (request) => request.url().endsWith("/api/stream"));
   await page.evaluate(() => {
     Object.defineProperty(document, "hidden", { configurable: true, value: true });
     document.dispatchEvent(new Event("visibilitychange"));
   });
+  await streamClosed;
   await page.clock.runFor(15_001);
   expect(reads).toBe(0);
+  const stream = page.waitForRequest((request) => request.url().endsWith("/api/stream"));
   const response = page.waitForResponse((response) => response.url().endsWith("/api/list_tasks"));
   await page.evaluate(() => {
     Object.defineProperty(document, "hidden", { configurable: true, value: false });
     document.dispatchEvent(new Event("visibilitychange"));
   });
   await response;
+  await stream;
   expect(reads).toBe(1);
 });
 

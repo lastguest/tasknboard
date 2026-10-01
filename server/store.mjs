@@ -13,6 +13,8 @@ import {
   laneLimit,
 } from "./domain.mjs";
 import { taskMatchesView } from "./views.mjs";
+import { similarityScorer, similarityThreshold } from "./similarity.mjs";
+import { mentionedIdentities } from "./agent-config.mjs";
 
 // Decoded bytes must match the declared type; the data URL prefix alone is not trusted.
 const imageSignatures = {
@@ -248,6 +250,13 @@ export function createStore(path, { clock = Date.now } = {}) {
       db.prepare("INSERT INTO migrations VALUES(16)").run();
     }
     if (!db.prepare("SELECT version FROM migrations WHERE version=17").get()) {
+      // Each actor's Inbox read position: the last event sequence they marked read.
+      // The Inbox finds each event's task by key, as findTask does.
+      db.exec(`CREATE TABLE inbox_cursors(actor TEXT PRIMARY KEY, sequence INTEGER NOT NULL);
+ CREATE INDEX tasks_by_id ON tasks(json_extract(data, '$.id'));
+ INSERT INTO migrations VALUES(17);`);
+    }
+    if (!db.prepare("SELECT version FROM migrations WHERE version=18").get()) {
       // Board lanes replace the four fixed task statuses. Each board gets one
       // lane per former status. Tasks, their history and views name lanes.
       db.exec(`CREATE TABLE lanes(number INTEGER PRIMARY KEY AUTOINCREMENT, board_id TEXT NOT NULL, position INTEGER NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('todo','in_progress','in_review','done')));
@@ -295,7 +304,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         if (view.display.groupBy === "status") view.display.groupBy = "lane";
         updateView.run(JSON.stringify(view), row.number);
       }
-      db.prepare("INSERT INTO migrations VALUES(17)").run();
+      db.prepare("INSERT INTO migrations VALUES(18)").run();
     }
   });
   const readTransaction = (fn) => {
@@ -736,6 +745,73 @@ export function createStore(path, { clock = Date.now } = {}) {
       events,
     };
   };
+  /**
+   * The first `limit` items and the unread count of the actor's Inbox: comments
+   * and review submissions by other actors that concern `identity`, newest
+   * first, on non-archived tasks. Derived from events on every read. A review
+   * reaches the task's creator and assignee; when neither is a known human, it
+   * reaches every human, so no review goes unseen. The scan walks events from
+   * the newest and stops once it has `limit` items and reaches read events.
+   */
+  const inbox = (identity, limit) => {
+    const cursor =
+      db.prepare("SELECT sequence FROM inbox_cursors WHERE actor=?").get(identity.id)
+        ?.sequence ?? 0;
+    const humans = new Set(
+      db
+        .prepare("SELECT id FROM actors WHERE kind='human'")
+        .all()
+        .map((row) => row.id),
+    );
+    const excerpt = (text) => {
+      const flat = text.replace(/\s+/g, " ").trim();
+      return flat.length > 160 ? `${flat.slice(0, 159)}…` : flat;
+    };
+    const items = [];
+    let unread = 0;
+    // CROSS JOIN keeps events as the outer loop, in sequence order. The unary
+    // + drops the column's affinity, so the tasks_by_id index applies.
+    for (const row of db
+      .prepare(
+        `SELECT e.sequence, e.task_id, e.actor, e.kind, e.body, e.created_at,
+ json_extract(t.data, '$.title') AS title, json_extract(t.data, '$.assignee') AS assignee,
+ (SELECT c.actor FROM events c WHERE c.task_id=e.task_id AND c.kind='created' ORDER BY c.sequence LIMIT 1) AS creator
+ FROM events e CROSS JOIN tasks t ON json_extract(t.data, '$.id')=+e.task_id
+ WHERE e.kind IN ('add_comment','submit_review') AND e.actor<>?
+ AND NOT coalesce(json_extract(t.data, '$.archived'), 0)
+ ORDER BY e.sequence DESC`,
+      )
+      .iterate(identity.id)) {
+      if (row.sequence <= cursor && items.length >= limit) break;
+      const owners = [row.creator, row.assignee];
+      const owns = owners.includes(identity.id);
+      let reason = "";
+      if (row.kind === "add_comment") {
+        if (mentionedIdentities(row.body).includes(identity.id)) reason = "mention";
+        else if (owns) reason = "comment";
+      } else if (
+        owns ||
+        (humans.has(identity.id) && !owners.some((id) => humans.has(id)))
+      )
+        reason = "review";
+      if (!reason) continue;
+      if (row.sequence > cursor) unread++;
+      if (items.length < limit)
+        items.push({
+          sequence: row.sequence,
+          taskId: row.task_id,
+          taskTitle: row.title,
+          actor: row.actor,
+          kind: row.kind,
+          reason,
+          excerpt: excerpt(
+            row.kind === "submit_review" ? JSON.parse(row.body).summary : row.body,
+          ),
+          createdAt: row.created_at,
+        });
+    }
+    return { items, unread, cursor };
+  };
   const active = (t) => t.lease && t.lease.expiresAt > clock();
   /**
    * Stores image data embedded in any Markdown text of a command, so tasks,
@@ -942,7 +1018,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         actors: actorRoster(),
         leaseSeconds: 900,
         boards: boardsFor(identity, allBoards()),
-        schemaVersion: 17,
+        schemaVersion: 18,
       };
     if (command === "update_profile")
       return transaction(() => {
@@ -1019,6 +1095,72 @@ export function createStore(path, { clock = Date.now } = {}) {
     }
     if (command === "get_task")
       return readTransaction(() => detail(get(p.id)));
+    if (command === "find_similar_tasks")
+      return readTransaction(() => {
+        if (p.boardId) getBoard(p.boardId);
+        const excluded = p.excludeId && get(p.excludeId).id;
+        const score = similarityScorer(p.title, p.context);
+        const roles = laneRoleMap();
+        const tasks = all()
+          .filter(
+            (t) =>
+              !t.archived &&
+              t.id !== excluded &&
+              (!p.boardId || t.boardId === p.boardId),
+          )
+          .map((t) => ({
+            id: t.id,
+            title: t.title,
+            lane: t.lane,
+            role: roles.get(t.lane),
+            score: score(t),
+          }))
+          .filter((t) => t.score > similarityThreshold)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, p.limit);
+        return {
+          tasks: tasks.map((t) => ({ ...t, score: Math.round(t.score * 1000) / 1000 })),
+        };
+      });
+    // Task references in Markdown read many tasks at once; missing IDs are left out.
+    if (command === "get_tasks")
+      return readTransaction(() => {
+        const roles = laneRoleMap();
+        return {
+          tasks: p.ids.flatMap((id) => {
+            const t = findTask(id) ?? findTask(renamedTaskKey(id));
+            return t
+              ? [
+                  {
+                    id: t.id,
+                    title: t.title,
+                    lane: t.lane,
+                    role: roles.get(t.lane),
+                    archived: Boolean(t.archived),
+                  },
+                ]
+              : [];
+          }),
+        };
+      });
+    if (command === "list_inbox")
+      return readTransaction(() => {
+        const { items, unread } = inbox(identity, p.limit);
+        return { items, unread };
+      });
+    if (command === "mark_inbox_read")
+      return transaction(() => {
+        // A personal read position: no task version and no event.
+        const latest =
+          db.prepare("SELECT MAX(sequence) AS sequence FROM events").get().sequence ?? 0;
+        if (p.upTo > latest)
+          fail("VALIDATION", `upTo: Latest event is ${latest}`, 400);
+        db.prepare(
+          "INSERT INTO inbox_cursors(actor, sequence) VALUES(?,?) ON CONFLICT(actor) DO UPDATE SET sequence=MAX(sequence, excluded.sequence)",
+        ).run(identity.id, p.upTo);
+        const { cursor, unread } = inbox(identity, 0);
+        return { sequence: cursor, unread };
+      });
     if (command === "list_epics")
       return readTransaction(() => {
         if (p.boardId) getBoard(p.boardId);
@@ -1225,7 +1367,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       if (identity.kind !== "human")
         fail("FORBIDDEN", "Human access required", 403);
       return transaction(() => ({
-        schemaVersion: 17,
+        schemaVersion: 18,
         exportedAt: new Date(clock()).toISOString(),
         boards: allBoards().map((board) => ({ ...board, lanes: lanesOf(board.id) })),
         actors: actorRoster(),
@@ -1506,6 +1648,17 @@ export function createStore(path, { clock = Date.now } = {}) {
         if (value) db.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, value);
         else db.prepare("DELETE FROM settings WHERE key=?").run(key);
     });
+  const versionQuery = db.prepare(
+    "SELECT (SELECT data_version FROM pragma_data_version) AS other, total_changes() AS own",
+  );
+  /**
+   * Changes when any connection commits to the database file. data_version
+   * covers other connections; total_changes covers this one.
+   */
+  const dataVersion = () => {
+    const { other, own } = versionQuery.get();
+    return `${other}:${own}`;
+  };
   /** Activity written by the service itself, such as an automatic agent start. */
   const recordEvent = (taskId, actor, kind, body = "") =>
     transaction(() => {
@@ -1521,6 +1674,7 @@ export function createStore(path, { clock = Date.now } = {}) {
     setting,
     settingKeys,
     setSettings,
+    dataVersion,
     close: () => db.close(),
   };
 }

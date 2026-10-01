@@ -216,7 +216,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
     { id: "TasknBoard Agent", kind: "human", token: "must-not-be-kept" },
   ]);
   const info = s.execute("workspace_info", {}, human);
-  assert.equal(info.schemaVersion, 17);
+  assert.equal(info.schemaVersion, 18);
   assert.equal(info.boards[0].id, "BOARD-1");
   assert.equal(Object.hasOwn(info, "settings"), false);
   assert.deepEqual(info.actor, {
@@ -247,7 +247,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
   );
   assert.equal(s.execute("list_tasks", {}, human).total, 0);
   const backup = s.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 17);
+  assert.equal(backup.schemaVersion, 18);
   assert.equal(backup.boards[0].id, "BOARD-1");
   assert.deepEqual(backup.actors, info.actors);
 });

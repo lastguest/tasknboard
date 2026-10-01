@@ -190,6 +190,16 @@ export const schemas = {
     })
     .strict(),
   get_task: z.object({ id }).strict(),
+  find_similar_tasks: z
+    .object({
+      title: text,
+      context: long.optional(),
+      boardId: boardId.optional(),
+      excludeId: id.optional(),
+      limit: z.number().int().min(1).max(20).default(5),
+    })
+    .strict(),
+  get_tasks: z.object({ ids: z.array(id).min(1).max(100) }).strict(),
   create_task: z
     .object({
       boardId,
@@ -413,6 +423,10 @@ export const schemas = {
     .object({ from: label, to: z.union([z.literal(""), label]) })
     .strict()
     .refine((v) => v.from !== v.to, "to: Choose a different label"),
+  list_inbox: z
+    .object({ limit: z.number().int().min(1).max(100).default(50) })
+    .strict(),
+  mark_inbox_read: z.object({ upTo: z.number().int().min(0) }).strict(),
   workspace_info: z.object({}).strict(),
   export_workspace: z.object({}).strict(),
 };

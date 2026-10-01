@@ -62,10 +62,10 @@ them. Shared servers return no settings and start no agents.
 
 Implemented: task CRUD (archive rather than delete), filters, board/list,
 keyboard shortcuts, persisted comments/events, MCP tools, lease coordination,
-version conflicts, minimal actor tokens, server polling, backup export.
+version conflicts, minimal actor tokens, live updates, backup export.
 Not implemented: organization membership UI, OAuth/SSO, remote Streamable HTTP
-MCP endpoint, granular per-project roles, offline replica sync, notification
-service, general attachments (only description images are stored), enforced
+MCP endpoint, granular per-project roles, offline replica sync, external
+notifications (email, push), general attachments (only description images are stored), enforced
 dependencies (task links do not block lane changes), lane transitions beyond the four roles.
 Remote MCP currently means a local stdio bridge to the shared authenticated API.
 For public deployment, terminate HTTPS and configure tokens. Token rotation is
@@ -109,6 +109,21 @@ The [task links contract](contracts/task-links.md) relates two tasks:
 relates, blocks, or duplicates. A link is a versioned write on one task.
 Links inform; the server does not block lane changes because of them.
 
+## Similar tasks
+
+The [similar tasks contract](contracts/similar-tasks.md) warns about possible
+duplicates before a task is created. `server/similarity.mjs` holds the pure
+trigram and Jaccard scoring. The store scans non-archived tasks in memory, with
+no index. `find_similar_tasks` is a read. MCP agents call it before
+`create_task`. The New task dialog lists matches but never blocks a create.
+
+## Task references
+
+The [task references contract](contracts/task-references.md) turns a task key
+in rendered Markdown into a chip with the current status of the task. A pure
+function recognizes keys with known board prefixes. The `get_tasks` command
+reads the cited tasks in one batch. The application refresh reads them again.
+
 ## Views
 
 The [views contract](contracts/views.md) saves task filters and display
@@ -119,8 +134,23 @@ Personal views exist only for their owner. Stars are per person and are not
 versioned.
 
 The UI loads WebMCP validation only when the browser exposes
-`document.modelContext`. Ordinary browsers do not download that chunk. Polling
-pauses while the document is hidden and resumes with an immediate refresh.
+`document.modelContext`. Ordinary browsers do not download that chunk.
+
+## Live updates
+
+The [live updates contract](contracts/live-updates.md) replaces browser
+polling. `GET /api/stream` sends an event when the database changes.
+One change feed per server reads the SQLite data version, so writes from
+local MCP and CLI processes count too. The stream carries no data: the
+client reads again with the normal commands. The stream closes while the
+document is hidden and reopens with an immediate refresh.
+
+## Inbox
+
+The [inbox contract](contracts/inbox.md) lists comments, mentions and review
+submissions by others that concern the reader. Items derive from `events`
+when read; nothing is copied. Each actor has one read cursor in
+`inbox_cursors`. Marking read is not a task write, and exports omit cursors.
 
 ## GitHub pull requests
 

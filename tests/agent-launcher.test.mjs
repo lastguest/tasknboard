@@ -327,7 +327,7 @@ test("a custom command path and prompt are used, and disabled agents or events n
     store.execute("create_task", { boardId: board.id, title, assignee: "bot" }, human);
   const first = make("Custom");
   launcher.assigned(first);
-  await settle();
+  await waitFor(() => calls.length >= 1);
   assert.equal(calls[0].command, custom);
   assert.match(calls[0].args[1], /Work on TNB-1 \(Custom\) for bot on /);
   assert.match(calls[0].args[1], /project data/);

@@ -483,7 +483,7 @@ test("the board migration preserves legacy keys and epic references", (t) => {
     "APP-2",
   );
   const backup = store.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 17);
+  assert.equal(backup.schemaVersion, 18);
   assert.equal(Object.hasOwn(backup, "workspace"), false);
   assert.equal(backup.tasks[0].boardId, defaultBoard.id);
   // Exports hold stored records; formerPrefixes, inSidebar, inProgress, and
@@ -621,7 +621,7 @@ test("task links upgrade an existing version 13 database without changing boards
   db.close();
   store = createStore(path);
   try {
-    assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 17);
+    assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 18);
     assert.equal(store.execute("list_boards", {}, human).boards[0].description, board.description);
     assert.equal(store.execute("get_task", { id: first.id }, human).version, first.version);
     const linked = store.execute("link_task", {

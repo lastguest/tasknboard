@@ -55,6 +55,6 @@ A former task key keeps resolving after the rename. Every command that takes a t
 
 ## Workspace and export
 
-`workspace_info` returns the board list and schema version `17`. It does not return workspace task or epic prefix settings. `export_workspace` includes all boards with their lanes, task `boardId` values, board prefix reservations, and `boardSidebarHidden` as `{ actor, boardId }` rows.
+`workspace_info` returns the board list and schema version `18`. It does not return workspace task or epic prefix settings. `export_workspace` includes all boards with their lanes, task `boardId` values, board prefix reservations, and `boardSidebarHidden` as `{ actor, boardId }` rows.
 
 The schema upgrade creates `BOARD-1` with the task prefix that was active before the upgrade. It adds `boardId: "BOARD-1"` to stored tasks without changing their task keys, epic IDs, or task-to-epic references. The old workspace prefix settings are then removed from runtime storage. Schema version `12` adds the per-person sidebar choices; every board starts in every sidebar.

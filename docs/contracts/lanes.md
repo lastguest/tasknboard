@@ -165,7 +165,7 @@ asks for the lane of the same role that receives its tasks.
 
 ## Storage and upgrade
 
-Migration 17 adds a `lanes(number, board_id, position, name, role)` table. For
+Migration 18 adds a `lanes(number, board_id, position, name, role)` table. For
 each board it creates Backlog, In progress, In review, and Done lanes. It
 then rewrites stored data in the same transaction:
 
@@ -176,7 +176,7 @@ then rewrites stored data in the same transaction:
 - Each view condition on `status` becomes a condition on `role`, with
   `backlog` mapped to `todo`. Each view `groupBy: "status"` becomes `lane`.
 
-`workspace_info` and `export_workspace` report `schemaVersion: 17`. The export
+`workspace_info` and `export_workspace` report `schemaVersion: 18`. The export
 includes every board with its lanes, without the derived task counts.
 
 ## Acceptance criteria
