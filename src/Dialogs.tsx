@@ -29,6 +29,7 @@ import { EpicTag } from "./Epics";
 import {
   GitHubSettings,
   parsePullRef,
+  PullRefs,
   pullHash,
   TaskPullRequests,
 } from "./PullRequests";
@@ -590,7 +591,11 @@ function Activity({
               </time>
             </div>
             {detail &&
-              (markdownEvents.has(e.kind) ? (
+              (pullEvents.has(e.kind) && pullUrls(e).length ? (
+                <p className="event-body">
+                  <PullRefs urls={pullUrls(e)} />
+                </p>
+              ) : markdownEvents.has(e.kind) ? (
                 <MarkdownEventBody source={detail} />
               ) : (
                 <p className="event-body">{detail}</p>
@@ -600,6 +605,17 @@ function Activity({
       })}
     </ol>
   );
+}
+
+/** Pull request link events list the pull requests they added or removed. */
+const pullEvents = new Set(["link_pull_requests", "unlink_pull_request"]);
+function pullUrls(e: TaskEvent): string[] {
+  try {
+    const urls = JSON.parse(e.body).pullRequests;
+    return Array.isArray(urls) ? urls.filter((u) => typeof u === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Comments and review summaries are Markdown written by people and agents. */

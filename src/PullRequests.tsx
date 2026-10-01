@@ -289,6 +289,44 @@ function usePullInfo(prs: TaskPullRequest[]) {
 export const usePullStates = (prs: TaskPullRequest[]) =>
   usePullInfo(prs).map((info) => info?.state ?? null);
 
+/**
+ * Pull request references in text such as the activity log: each links to
+ * its page and carries its state icon once GitHub reports it.
+ */
+export function PullRefs({ urls }: { urls: string[] }) {
+  const prs = urls.flatMap((url): TaskPullRequest[] => {
+    const ref = parsePullRef(url);
+    return ref
+      ? [{ repository: `${ref.owner}/${ref.repo}`, number: ref.number, url }]
+      : [];
+  });
+  const states = usePullStates(prs);
+  return (
+    <span className="pr-refs">
+      {prs.map((pr, i) => {
+        const [owner, repo] = pr.repository.split("/");
+        const state = states[i];
+        return (
+          <a
+            key={pr.url}
+            className="pr-ref"
+            href={pullHash({ owner, repo, number: pr.number })}
+          >
+            {state ? (
+              <StateIcon state={state} size={13} />
+            ) : (
+              <span className="pr-state-icon unknown" aria-hidden="true">
+                <Icon name="pull" size={13} />
+              </span>
+            )}
+            {pr.repository}#{pr.number}
+          </a>
+        );
+      })}
+    </span>
+  );
+}
+
 function TaskPullRequestRow({
   pr,
   busy,

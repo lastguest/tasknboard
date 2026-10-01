@@ -369,3 +369,59 @@ test("The Pull requests list shows the tasks that link each pull request", async
   );
   await expect(row(1299).locator(".pr-row-task")).toHaveCount(0);
 });
+
+test("The activity log shows linked pull requests with their state", async ({ page }) => {
+  const task = await command("create_task", {
+    boardId: "BOARD-1",
+    title: `Activity pull requests ${Date.now()}`,
+  });
+  const linked = await command("link_pull_requests", {
+    id: task.id,
+    expectedVersion: task.version,
+    pullRequests: ["acme/api#1301", "acme/api#1302"],
+  });
+  await command("unlink_pull_request", {
+    id: task.id,
+    expectedVersion: linked.version,
+    pullRequest: "acme/api#1302",
+  });
+  await page.addInitScript((value) => {
+    sessionStorage.setItem("tasknboard-token", value);
+  }, humanToken);
+  await page.route("**/api/github_status", (route) =>
+    route.fulfill({
+      json: {
+        configured: true,
+        connected: true,
+        source: "settings",
+        account: { login: "ada", name: "", avatarUrl: "" },
+      },
+    }),
+  );
+  await page.route("**/api/get_pull_request_states", (route) => {
+    const { pullRequests } = route.request().postDataJSON();
+    return route.fulfill({
+      json: {
+        pullRequests: pullRequests.map((pr: { owner: string; repo: string; number: number }) => ({
+          repository: `${pr.owner}/${pr.repo}`,
+          number: pr.number,
+          title: "",
+          state: pr.number === 1302 ? "merged" : "open",
+        })),
+      },
+    });
+  });
+  await page.route("**/api/get_pull_request", (route) => {
+    const { owner, repo, number } = route.request().postDataJSON();
+    return route.fulfill({ json: pull(owner, repo, number) });
+  });
+  await page.goto(`${baseURL}/#task/${task.id}`);
+  const added = page.locator(".event.kind-link_pull_requests");
+  const removed = page.locator(".event.kind-unlink_pull_request");
+  await expect(added.locator(".pr-ref")).toHaveText(["acme/api#1301", "acme/api#1302"]);
+  await expect(added.getByRole("img", { name: "Open" })).toBeVisible();
+  await expect(added.getByRole("img", { name: "Merged" })).toBeVisible();
+  await expect(removed.locator(".pr-ref")).toHaveText(["acme/api#1302"]);
+  await added.getByRole("link", { name: /acme\/api#1301/ }).click();
+  await expect(page).toHaveURL(/#pulls\/acme\/api\/1301$/);
+});

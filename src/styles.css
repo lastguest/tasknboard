@@ -1779,6 +1779,25 @@ footer {
 .task-prs .pr-state-icon {
   padding-top: 0;
 }
+.pr-refs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.pr-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
+  text-decoration: none;
+  font-variant-numeric: tabular-nums;
+}
+.pr-ref .pr-state-icon {
+  padding-top: 0;
+}
+.pr-ref:hover {
+  text-decoration: underline;
+}
 .task-pr-ref {
   flex: none;
   margin-left: auto;
