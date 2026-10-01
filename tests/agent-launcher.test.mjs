@@ -77,6 +77,8 @@ test("assigning a task to an installed agent starts its CLI in the board folder"
   assert.match(call.args[1], /"bot"/);
   assert.ok(call.args.includes("--dangerously-skip-permissions"));
   assert.equal(call.options.cwd, repository);
+  // Overriding it would make Claude Code read another keychain login.
+  assert.equal(call.options.env.CLAUDE_CONFIG_DIR, process.env.CLAUDE_CONFIG_DIR);
   assert.ok(events(store, task.id).includes("agent_started"));
 });
 
@@ -103,9 +105,16 @@ test("a busy agent queues the next assignment and starts it when the run ends", 
   await settle();
   assert.equal(calls.length, 2);
   assert.match(calls[1].args.at(-1), /TNB-2/);
+  const started = store
+    .execute("get_task", { id: second.id }, human)
+    .events.findLast((e) => e.kind === "agent_started");
+  await writeFile(started.body.split("Log: ")[1].replace(/\.$/, ""), "booting\nNot logged in\n");
   calls[1].child.emit("exit", 1);
   await settle();
-  assert.ok(events(store, second.id).includes("agent_stopped"));
+  const stopped = store
+    .execute("get_task", { id: second.id }, human)
+    .events.find((e) => e.kind === "agent_stopped");
+  assert.match(stopped.body, /exited with code 1: Not logged in\. Log:/);
   assert.ok(!events(store, first.id).includes("agent_stopped"));
 });
 

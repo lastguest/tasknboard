@@ -1,4 +1,4 @@
-import { access, mkdir, open, stat } from "node:fs/promises";
+import { access, mkdir, open, readFile, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, join } from "node:path";
 import { spawn as spawnProcess } from "node:child_process";
@@ -136,10 +136,9 @@ export function createAgentLauncher({
             folder,
             prompt,
           ];
-    const env =
-      client === clients.claude
-        ? { ...process.env, CLAUDE_CONFIG_DIR: join(home, ".claude") }
-        : { ...process.env, HOME: home, USERPROFILE: home };
+    // Keep the user's own environment: on macOS, setting CLAUDE_CONFIG_DIR
+    // makes Claude Code read a different keychain login and report "Not logged in".
+    const env = { ...process.env, HOME: home, USERPROFILE: home };
     const logs = join(home, ".tasknboard", "logs", identity);
     await mkdir(logs, { recursive: true });
     const log = join(
@@ -178,14 +177,22 @@ export function createAgentLauncher({
     const finish = (code) => {
       if (running.get(identity) !== child) return;
       running.delete(identity);
-      if (code !== 0)
-        note(
-          task.id,
-          identity,
-          "agent_stopped",
-          `${client.name} exited${code == null ? "" : ` with code ${code}`}. Log: ${log}`,
-        );
-      void next(identity);
+      void (async () => {
+        if (code !== 0) {
+          // The last output line usually names the cause, such as a missing login.
+          const reason = await readFile(log, "utf8").then(
+            (text) => text.trim().split("\n").at(-1)?.slice(0, 300) ?? "",
+            () => "",
+          );
+          note(
+            task.id,
+            identity,
+            "agent_stopped",
+            `${client.name} exited${code == null ? "" : ` with code ${code}`}${reason ? `: ${reason}` : ""}. Log: ${log}`,
+          );
+        }
+        await next(identity);
+      })();
     };
     child.once("error", () => finish(null));
     child.once("exit", (code) => finish(code));
