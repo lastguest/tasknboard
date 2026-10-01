@@ -84,6 +84,13 @@ test("GitHub device authorization shows pending code, honors slow_down, and keep
   });
   const settings = await openGitHubSettings(page, connected("saved-user"));
 
+  // A connected workspace shows no new code until the person asks to switch.
+  const disconnect = settings.getByRole("button", { name: "Disconnect" });
+  await expect(disconnect).toHaveClass(/danger-button/);
+  await expect(settings.getByText("Connected", { exact: true })).toBeVisible();
+  await expect(settings.getByLabel("GitHub authorization code")).toHaveCount(0);
+  await expect(settings.getByText("Authorization", { exact: true })).toHaveCount(0);
+  await settings.getByRole("button", { name: "Switch account" }).click();
   await expect(settings.getByLabel("GitHub authorization code")).toHaveText(
     "ABCD-EFGH",
   );

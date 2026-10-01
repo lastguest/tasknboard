@@ -1630,7 +1630,10 @@ export function GitHubSettings({
         );
         if (controller.signal.aborted) return;
         setStatus(next);
-        if (next.configured) await prepareAuthorization(controller);
+        // A connected workspace needs no new code; switching accounts is an
+        // explicit action from the Status card.
+        if (next.configured && !next.connected)
+          await prepareAuthorization(controller);
       } catch (e) {
         if (!controller.signal.aborted)
           setMessage({ ok: false, text: githubError(errorOf(e)) });
@@ -1785,135 +1788,142 @@ export function GitHubSettings({
         </Row>
       </Group>
     );
+  const busy = preparing || canceling || disconnecting;
   return (
-    <>
-      <Group
-        title="Status"
-        note="One GitHub account serves the whole workspace. Everyone signed in sees the pull requests that account can read."
+    <Group
+      title="Status"
+      note="One GitHub account serves the whole workspace. Everyone signed in sees the pull requests that account can read. TasknBoard connects with GitHub device authorization."
+    >
+      <Row
+        title="GitHub"
+        hint={
+          !status
+            ? "Checking…"
+            : !status.configured
+              ? "GitHub authorization is not configured on this server. Ask the operator to set TASKNBOARD_GITHUB_CLIENT_ID."
+              : status.connected
+                ? `Signed in as @${status.account.login}${status.account.name ? ` (${status.account.name})` : ""}.`
+                : "Not connected."
+        }
       >
-        <Row
-          title="GitHub"
-          hint={
-            !status
-              ? "Checking…"
-              : !status.configured
-                ? "GitHub authorization is not configured on this server. Ask the operator to set TASKNBOARD_GITHUB_CLIENT_ID."
-                : status.connected
-                  ? `Signed in as @${status.account.login}${status.account.name ? ` (${status.account.name})` : ""}.`
-                  : "Not connected."
-          }
-        >
-          {status?.connected && (
-            <GitHubAvatar person={status.account} size={24} />
-          )}
-          <span className={`settings-pill ${status?.connected ? "on" : "off"}`}>
-            {!status
-              ? "Checking…"
-              : !status.configured
-                ? "Unavailable"
-                : status.connected
-                  ? "Connected"
-                  : "Off"}
-          </span>
-          {status?.connected && (
-            <button
-              type="button"
-              className="secondary small-button"
-              disabled={preparing || canceling || disconnecting}
-              onClick={() => void disconnect()}
-            >
-              Disconnect
-            </button>
-          )}
-        </Row>
-      </Group>
-      <Group
-        title="Authorization"
-        note="TasknBoard uses GitHub device authorization. Authorize TasknBoard in GitHub to connect or switch the workspace account."
-      >
+        {status?.connected && (
+          <GitHubAvatar person={status.account} size={24} />
+        )}
+        <span className={`settings-pill ${status?.connected ? "on" : "off"}`}>
+          {!status
+            ? "Checking…"
+            : !status.configured
+              ? "Unavailable"
+              : status.connected
+                ? "Connected"
+                : "Off"}
+        </span>
+        {status?.connected && !authorization && (
+          <button
+            type="button"
+            className="secondary small-button"
+            disabled={busy}
+            onClick={() => void prepareAuthorization()}
+          >
+            {preparing ? "Preparing…" : "Switch account"}
+          </button>
+        )}
+        {status?.connected && (
+          <button
+            type="button"
+            className="danger-button small-button"
+            disabled={busy}
+            onClick={() => void disconnect()}
+          >
+            {disconnecting ? "Disconnecting…" : "Disconnect"}
+          </button>
+        )}
+      </Row>
+      {status?.configured && (authorization || !status.connected) && (
         <div className="settings-row settings-row-stack">
           <div className="settings-row-text">
-            <span className="settings-row-title">Sign in with GitHub</span>
+            <span className="settings-row-title">
+              {authorization ? (
+                <>
+                  One-time code{" "}
+                  <code aria-label="GitHub authorization code">
+                    {authorization.userCode}
+                  </code>
+                </>
+              ) : (
+                "Sign in with GitHub"
+              )}
+            </span>
             <span className="settings-row-hint">
               Open GitHub and enter the one-time code to approve access.
             </span>
           </div>
-          {authorization && (
-            <div className="settings-row-text">
-              <span className="settings-row-title">One-time code</span>
-              <code aria-label="GitHub authorization code">
-                {authorization.userCode}
-              </code>
-            </div>
-          )}
-          {status?.configured && (
-            <div className="settings-token">
-              {authorization ? (
-                <a
-                  className="primary small-button"
-                  href={authorization.verificationUri}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(event) => {
-                    setMessage(null);
-                    if (!isTauri()) return;
-                    event.preventDefault();
-                    invoke("open_external_url", {
-                      url: authorization.verificationUri,
-                    }).catch(() =>
-                      setMessage({
-                        ok: false,
-                        text: `Could not open your browser. Go to ${authorization.verificationUri} and enter the code.`,
-                      }),
-                    );
-                  }}
-                >
-                  {status.connected
-                    ? "Switch GitHub account"
-                    : "Connect GitHub"}
-                </a>
-              ) : (
-                <button
-                  type="button"
-                  className="primary small-button"
-                  disabled={preparing || canceling || disconnecting}
-                  onClick={() => void prepareAuthorization()}
-                >
-                  {canceling
-                    ? "Canceling authorization…"
-                    : disconnecting
-                      ? "Disconnecting…"
-                      : preparing
-                        ? "Preparing authorization…"
-                        : "Prepare authorization"}
-                </button>
-              )}
-              {authorization && (
-                <button
-                  type="button"
-                  className="secondary small-button"
-                  onClick={() => void stopWaiting()}
-                >
-                  Cancel authorization
-                </button>
-              )}
-              {authorization && (
-                <p className="small" role="status" aria-live="polite">
-                  Waiting for approval in GitHub…
-                </p>
-              )}
-            </div>
-          )}
-          {message && (
-            <p
-              className={message.ok ? "small ok" : "inline-error"}
-              role={message.ok ? "status" : "alert"}
-            >
-              {message.text}
-            </p>
-          )}
+          <div className="settings-token">
+            {authorization ? (
+              <a
+                className="primary small-button"
+                href={authorization.verificationUri}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(event) => {
+                  setMessage(null);
+                  if (!isTauri()) return;
+                  event.preventDefault();
+                  invoke("open_external_url", {
+                    url: authorization.verificationUri,
+                  }).catch(() =>
+                    setMessage({
+                      ok: false,
+                      text: `Could not open your browser. Go to ${authorization.verificationUri} and enter the code.`,
+                    }),
+                  );
+                }}
+              >
+                {status.connected ? "Switch GitHub account" : "Connect GitHub"}
+              </a>
+            ) : (
+              <button
+                type="button"
+                className="primary small-button"
+                disabled={busy}
+                onClick={() => void prepareAuthorization()}
+              >
+                {canceling
+                  ? "Canceling authorization…"
+                  : disconnecting
+                    ? "Disconnecting…"
+                    : preparing
+                      ? "Preparing authorization…"
+                      : "Prepare authorization"}
+              </button>
+            )}
+            {authorization && (
+              <button
+                type="button"
+                className="secondary small-button"
+                onClick={() => void stopWaiting()}
+              >
+                Cancel authorization
+              </button>
+            )}
+            {authorization && (
+              <p className="small" role="status" aria-live="polite">
+                Waiting for approval in GitHub…
+              </p>
+            )}
+          </div>
         </div>
-      </Group>
-    </>
+      )}
+      {message && (
+        <div className="settings-row">
+          <p
+            className={message.ok ? "small ok" : "inline-error"}
+            role={message.ok ? "status" : "alert"}
+          >
+            {message.text}
+          </p>
+        </div>
+      )}
+    </Group>
   );
 }
