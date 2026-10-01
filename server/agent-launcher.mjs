@@ -10,6 +10,24 @@ const clients = {
   codex: { name: "Codex", executable: "codex" },
 };
 
+/**
+ * The line of CLI output that names why a run failed: its last "ERROR:" line,
+ * with the API message when the line holds JSON, else its last line. Later
+ * lines are often noise, such as other MCP servers shutting down.
+ */
+export function failureReason(output) {
+  const lines = output.trim().split("\n").map((line) => line.trim()).filter(Boolean);
+  const error = lines.findLast((line) => /^error:/i.test(line));
+  let reason = error ? error.replace(/^error:\s*/i, "") : (lines.at(-1) ?? "");
+  try {
+    const body = JSON.parse(reason);
+    reason = body.error?.message ?? body.message ?? reason;
+  } catch {
+    // Plain text stays as it is.
+  }
+  return reason.slice(0, 300);
+}
+
 export function agentPrompt(identity, taskId) {
   return [
     `You are the TasknBoard agent "${identity}". A person assigned task ${taskId} to you and started you to work on it now.`,
@@ -179,11 +197,7 @@ export function createAgentLauncher({
       running.delete(identity);
       void (async () => {
         if (code !== 0) {
-          // The last output line usually names the cause, such as a missing login.
-          const reason = await readFile(log, "utf8").then(
-            (text) => text.trim().split("\n").at(-1)?.slice(0, 300) ?? "",
-            () => "",
-          );
+          const reason = await readFile(log, "utf8").then(failureReason, () => "");
           note(
             task.id,
             identity,

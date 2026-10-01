@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStore } from "../server/store.mjs";
-import { createAgentLauncher } from "../server/agent-launcher.mjs";
+import { createAgentLauncher, failureReason } from "../server/agent-launcher.mjs";
 
 const human = { id: "you", kind: "human" };
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
@@ -198,4 +198,19 @@ test("board repository folders must be absolute paths", (t) => {
     human,
   );
   assert.equal(board.repository, "C:\\work\\ops");
+});
+
+test("a failed run reports the CLI's error line, not trailing noise", () => {
+  assert.equal(
+    failureReason(
+      [
+        "warning: something",
+        'ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The model is not supported."}}',
+        "2026-10-01T08:39:34Z ERROR rmcp::transport::worker: worker quit",
+      ].join("\n"),
+    ),
+    "The model is not supported.",
+  );
+  assert.equal(failureReason("booting\nNot logged in · Please run /login\n"), "Not logged in · Please run /login");
+  assert.equal(failureReason(""), "");
 });
