@@ -2,12 +2,15 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { command, errorOf, type ApiError } from "./api";
 import { Icon } from "./Icons";
 import { useMentions } from "./Mentions";
+import { findTaskReferences } from "./task-references";
+import { TaskChip, useTaskReferences } from "./TaskReferences";
 
 /*
  * Task descriptions are Markdown written by people and agents, so they are
  * untrusted. This renderer builds React elements directly: no HTML string is
  * ever injected, raw HTML in the source stays literal text, links are limited
  * to web and mail URLs, and images only load from this workspace's uploads.
+ * Task keys in plain text become chips, built as elements like the rest.
  */
 
 const uploadedImage = /^\/files\/[0-9a-f]{32}$/;
@@ -26,9 +29,12 @@ function safeHref(url: string) {
 
 // ---------------------------------------------------------------- inline
 
+/** Task keys to turn into chips; absent where chips must not appear. */
+type Refs = ReturnType<typeof useTaskReferences>;
+
 type InlineRule = {
   re: RegExp;
-  render: (m: RegExpExecArray, key: number) => ReactNode;
+  render: (m: RegExpExecArray, key: number, refs: Refs) => ReactNode;
 };
 
 const inlineRules: InlineRule[] = [
@@ -68,7 +74,7 @@ const inlineRules: InlineRule[] = [
     re: /\[((?:\\.|[^\]\\])+)\]\(\s*<?([^\s)>]+)>?(?:\s+"([^"]*)")?\s*\)/y,
     render: (m, key) => {
       const href = safeHref(m[2]);
-      const children = inline(m[1]);
+      const children = inline(m[1], null);
       return href ? (
         <a
           key={key}
@@ -112,26 +118,39 @@ const inlineRules: InlineRule[] = [
   },
   {
     re: /(\*\*|__)(?=\S)([\s\S]*?\S)\1/y,
-    render: (m, key) => <strong key={key}>{inline(m[2])}</strong>,
+    render: (m, key, refs) => <strong key={key}>{inline(m[2], refs)}</strong>,
   },
   {
     re: /~~(?=\S)([\s\S]*?\S)~~/y,
-    render: (m, key) => <del key={key}>{inline(m[1])}</del>,
+    render: (m, key, refs) => <del key={key}>{inline(m[1], refs)}</del>,
   },
   {
     re: /\*(?=[^\s*])([\s\S]*?[^\s*])\*|\b_(?=[^\s_])([\s\S]*?[^\s_])_\b/y,
-    render: (m, key) => <em key={key}>{inline(m[1] ?? m[2])}</em>,
+    render: (m, key, refs) => (
+      <em key={key}>{inline(m[1] ?? m[2], refs)}</em>
+    ),
   },
 ];
 // Characters that can start an inline rule; everything else is plain text.
 const inlineStart = /[\\`!\[<h*_~]/g;
 
-export function inline(source: string): ReactNode[] {
+export function inline(source: string, refs: Refs): ReactNode[] {
   const out: ReactNode[] = [];
   let text = "",
     i = 0;
   const flush = () => {
-    if (text) out.push(text);
+    let at = 0;
+    for (const ref of refs ? findTaskReferences(text, refs) : []) {
+      // An unread key stays text until its task is read.
+      if (!ref.task) {
+        refs!.wanted.add(ref.id);
+        continue;
+      }
+      if (ref.start > at) out.push(text.slice(at, ref.start));
+      out.push(<TaskChip key={out.length} task={ref.task} />);
+      at = ref.end;
+    }
+    if (text.length > at) out.push(text.slice(at));
     text = "";
   };
   while (i < source.length) {
@@ -146,7 +165,7 @@ export function inline(source: string): ReactNode[] {
       const m = rule.re.exec(source);
       if (!m) continue;
       flush();
-      out.push(rule.render(m, out.length));
+      out.push(rule.render(m, out.length, refs));
       i += m[0].length;
       matched = true;
       break;
@@ -159,10 +178,12 @@ export function inline(source: string): ReactNode[] {
 }
 
 /** Single newlines inside a paragraph are kept, as in comments on GitHub. */
-function lines(source: string) {
+function lines(source: string, refs: Refs) {
   return source.split("\n").flatMap((line, i) => {
     const hard = line.replace(/( {2,}|\\)$/, "");
-    return i === 0 ? inline(hard) : [<br key={`br${i}`} />, ...inline(hard)];
+    return i === 0
+      ? inline(hard, refs)
+      : [<br key={`br${i}`} />, ...inline(hard, refs)];
   });
 }
 
@@ -194,7 +215,12 @@ const cells = (row: string) =>
 
 type Toggle = (line: number) => void;
 
-function blocks(src: string[], offset: number, toggle?: Toggle): ReactNode[] {
+function blocks(
+  src: string[],
+  offset: number,
+  refs: Refs,
+  toggle?: Toggle,
+): ReactNode[] {
   const out: ReactNode[] = [];
   let i = 0;
   while (i < src.length) {
@@ -221,7 +247,7 @@ function blocks(src: string[], offset: number, toggle?: Toggle): ReactNode[] {
     }
     if ((m = heading.exec(line))) {
       const Tag = `h${Math.min(m[1].length + 2, 6)}` as "h3";
-      out.push(<Tag key={key}>{inline(m[2])}</Tag>);
+      out.push(<Tag key={key}>{inline(m[2], refs)}</Tag>);
       i++;
       continue;
     }
@@ -241,7 +267,7 @@ function blocks(src: string[], offset: number, toggle?: Toggle): ReactNode[] {
         body.push(src[i++].replace(quote, ""));
       out.push(
         <blockquote key={key}>
-          {blocks(body, offset + start, toggle)}
+          {blocks(body, offset + start, refs, toggle)}
         </blockquote>,
       );
       continue;
@@ -272,7 +298,7 @@ function blocks(src: string[], offset: number, toggle?: Toggle): ReactNode[] {
               <tr>
                 {head.map((c, n) => (
                   <th key={n} style={{ textAlign: align[n] }}>
-                    {inline(c)}
+                    {inline(c, refs)}
                   </th>
                 ))}
               </tr>
@@ -282,7 +308,7 @@ function blocks(src: string[], offset: number, toggle?: Toggle): ReactNode[] {
                 <tr key={r}>
                   {head.map((_, n) => (
                     <td key={n} style={{ textAlign: align[n] }}>
-                      {inline(row[n] ?? "")}
+                      {inline(row[n] ?? "", refs)}
                     </td>
                   ))}
                 </tr>
@@ -337,8 +363,8 @@ function blocks(src: string[], offset: number, toggle?: Toggle): ReactNode[] {
               content.length === 1 ||
               !content.slice(1).some((l) => startsBlock(l) || !l.trim());
             const inner = tight
-              ? lines(content.join("\n"))
-              : blocks(content, offset + start, toggle);
+              ? lines(content.join("\n"), refs)
+              : blocks(content, offset + start, refs, toggle);
             if (!task) return <li key={start}>{inner}</li>;
             const checked = task[1] !== " ";
             return (
@@ -371,7 +397,7 @@ function blocks(src: string[], offset: number, toggle?: Toggle): ReactNode[] {
       )
     )
       para.push(src[i++]);
-    out.push(<p key={key}>{lines(para.join("\n"))}</p>);
+    out.push(<p key={key}>{lines(para.join("\n"), refs)}</p>);
   }
   return out;
 }
@@ -395,10 +421,11 @@ export function Markdown({
   className?: string;
   onToggleTask?: Toggle;
 }) {
+  const refs = useTaskReferences();
   const normalized = source.replace(/\r\n?/g, "\n").replace(/\t/g, "    ");
   return (
     <div className={`markdown ${className}`}>
-      {blocks(normalized.split("\n"), 0, onToggleTask)}
+      {blocks(normalized.split("\n"), 0, refs, onToggleTask)}
     </div>
   );
 }

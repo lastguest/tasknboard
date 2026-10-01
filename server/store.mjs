@@ -827,6 +827,16 @@ export function createStore(path, { clock = Date.now } = {}) {
           tasks: tasks.map((t) => ({ ...t, score: Math.round(t.score * 1000) / 1000 })),
         };
       });
+    // Task references in Markdown read many tasks at once; missing IDs are left out.
+    if (command === "get_tasks")
+      return readTransaction(() => ({
+        tasks: p.ids.flatMap((id) => {
+          const t = findTask(id) ?? findTask(renamedTaskKey(id));
+          return t
+            ? [{ id: t.id, title: t.title, status: t.status, archived: Boolean(t.archived) }]
+            : [];
+        }),
+      }));
     if (command === "list_epics")
       return readTransaction(() => {
         if (p.boardId) getBoard(p.boardId);

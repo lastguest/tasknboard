@@ -2875,6 +2875,55 @@ footer {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+/* A task key in Markdown; the title shows on hover or keyboard focus. */
+.markdown a.task-ref {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: baseline;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 18px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.markdown a.task-ref:hover {
+  border-color: var(--subtle);
+}
+.task-ref-id {
+  font-variant-numeric: tabular-nums;
+}
+.task-ref-state {
+  color: var(--muted);
+}
+.task-ref.is-archived .task-ref-id {
+  text-decoration: line-through;
+}
+.task-ref-title {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 5;
+  display: none;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-strong);
+  pointer-events: none;
+}
+.task-ref:hover .task-ref-title,
+.task-ref:focus-visible .task-ref-title {
+  display: block;
+}
 .markdown code {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 12px;

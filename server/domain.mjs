@@ -190,6 +190,7 @@ export const schemas = {
       limit: z.number().int().min(1).max(20).default(5),
     })
     .strict(),
+  get_tasks: z.object({ ids: z.array(id).min(1).max(100) }).strict(),
   create_task: z
     .object({
       boardId,

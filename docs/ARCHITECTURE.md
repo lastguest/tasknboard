@@ -115,6 +115,13 @@ trigram and Jaccard scoring. The store scans non-archived tasks in memory, with
 no index. `find_similar_tasks` is a read. MCP agents call it before
 `create_task`. The New task dialog lists matches but never blocks a create.
 
+## Task references
+
+The [task references contract](contracts/task-references.md) turns a task key
+in rendered Markdown into a chip with the current status of the task. A pure
+function recognizes keys with known board prefixes. The `get_tasks` command
+reads the cited tasks in one batch. The application refresh reads them again.
+
 ## Views
 
 The [views contract](contracts/views.md) saves task filters and display
