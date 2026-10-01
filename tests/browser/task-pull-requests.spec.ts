@@ -220,3 +220,31 @@ test("Stand-up cards and notes show the pull request mark", async ({ page }) => 
     "2 pull requests",
   );
 });
+
+test("Epic pages mark tasks that link pull requests", async ({ page }) => {
+  const stamp = Date.now();
+  const epic = await command("create_epic", { title: `PR epic ${stamp}` });
+  const task = await command("create_task", {
+    boardId: "BOARD-1",
+    title: `Epic task with pull requests ${stamp}`,
+    epic: epic.id,
+  });
+  await command("link_pull_requests", {
+    id: task.id,
+    expectedVersion: task.version,
+    pullRequests: ["acme/api#801", "acme/api#802"],
+  });
+  await page.addInitScript((value) => {
+    sessionStorage.setItem("tasknboard-token", value);
+  }, humanToken);
+  await page.goto(baseURL);
+  await page
+    .locator(".nav-epics")
+    .getByRole("button", { name: new RegExp(`^${epic.title}`) })
+    .click();
+  const card = page.getByRole("article", { name: new RegExp(`^${task.id}:`) });
+  await expect(card.locator(".pr-count")).toHaveAttribute("title", "2 pull requests");
+  await page.getByRole("button", { name: "List", exact: true }).click();
+  const row = page.getByRole("row").filter({ hasText: task.id });
+  await expect(row.locator(".pr-count")).toHaveAttribute("title", "2 pull requests");
+});
