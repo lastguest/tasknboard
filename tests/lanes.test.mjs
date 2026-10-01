@@ -94,6 +94,15 @@ test("deleting a lane moves every task and view to a lane of the same role", (t)
     human,
   );
 
+  const counts = () =>
+    Object.fromEntries(s.board().lanes.map((l) => [l.name, [l.tasks, l.archivedTasks]]));
+  assert.deepEqual(counts(), {
+    Backlog: [0, 0],
+    "In progress": [0, 0],
+    "In review": [0, 0],
+    Done: [0, 0],
+    Testing: [1, 1],
+  });
   assert.throws(
     () =>
       s.execute("delete_lane", { id: testing, expectedVersion: s.board().version, moveTo: s.lane("Backlog") }, human),
@@ -116,6 +125,7 @@ test("deleting a lane moves every task and view to a lane of the same role", (t)
   );
   assert.equal(board.lanes.some((l) => l.id === testing), false);
   assert.deepEqual(board.lanes.map((l) => l.name), ["Backlog", "In progress", "In review", "Done"]);
+  assert.deepEqual(counts()["In progress"], [1, 1]);
 
   const moved = s.execute("get_task", { id: claimed.id }, agent);
   assert.equal(moved.lane, s.lane("In progress"));
@@ -277,5 +287,8 @@ test("the lane upgrade moves tasks, history and views from statuses to lanes", (
   assert.equal(migratedView.version, view.version);
   assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 17);
   const backup = store.execute("export_workspace", {}, human);
-  assert.deepEqual(backup.boards[1].lanes, boards[1].lanes);
+  assert.deepEqual(
+    backup.boards[1].lanes,
+    boards[1].lanes.map(({ id, name, role }) => ({ id, name, role })),
+  );
 });

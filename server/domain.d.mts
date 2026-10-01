@@ -5,7 +5,15 @@ export type BoardId = `BOARD-${number}`;
 export type LaneRole = "todo" | "in_progress" | "in_review" | "done";
 export const laneRoles: LaneRole[];
 export const laneLimit: number;
-export type Lane = { id: `LANE-${number}`; name: string; role: LaneRole };
+export type Lane = {
+  id: `LANE-${number}`;
+  name: string;
+  role: LaneRole;
+  /** Non-archived tasks in the lane. Derived on every read, not exported. */
+  tasks: number;
+  /** Archived tasks in the lane. Derived on every read, not exported. */
+  archivedTasks: number;
+};
 export type Board = {
   id: BoardId;
   name: string;

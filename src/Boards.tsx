@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { laneLimit } from "../server/domain.mjs";
-import { ApiError, command, errorOf, loadTasks } from "./api";
+import { ApiError, command, errorOf } from "./api";
 import { desktopApp } from "./AppUpdates";
 import { RoleIcon } from "./Board";
 import { Dialog } from "./Dialogs";
@@ -553,6 +553,8 @@ export function BoardEditor({
   );
 }
 
+const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+
 type LaneWrite =
   | { name: "create_lane"; args: { name: string; role: LaneRole } }
   | { name: "update_lane"; args: { id: string; patch: { name?: string; position?: number } } }
@@ -570,7 +572,6 @@ function LaneSettings({
   onSaved: (saved: BoardRecord) => void;
 }) {
   const headingId = useId();
-  const [counts, setCounts] = useState<Map<string, number> | null>(null);
   const [names, setNames] = useState<Record<string, string>>({});
   const [deleting, setDeleting] = useState<null | { id: string; moveTo: string }>(null);
   const [newName, setNewName] = useState("");
@@ -580,19 +581,6 @@ function LaneSettings({
   const writing = useRef(false);
   const [error, setError] = useState<ApiError | null>(null);
   const lanes = board.lanes;
-
-  async function count() {
-    try {
-      const tasks = await loadTasks(board.id);
-      const next = new Map<string, number>();
-      for (const t of tasks) next.set(t.lane, (next.get(t.lane) ?? 0) + 1);
-      setCounts(next);
-    } catch {
-      // Counts are a hint; the lanes stay editable without them.
-      setCounts(null);
-    }
-  }
-  useEffect(() => void count(), [board.id]);
 
   async function write(change: LaneWrite) {
     if (writing.current) return false;
@@ -606,7 +594,6 @@ function LaneSettings({
         expectedVersion: board.version,
       });
       onSaved(saved);
-      if (change.name === "delete_lane") void count();
       return true;
     } catch (cause) {
       const failure = errorOf(cause);
@@ -660,7 +647,7 @@ function LaneSettings({
       </p>
       <ol className="lane-list">
         {lanes.map((lane, index) => {
-          const tasks = counts?.get(lane.id) ?? 0;
+          const tasks = lane.tasks;
           const targets = lanes.filter((l) => l.id !== lane.id && l.role === lane.role);
           const name = names[lane.id] ?? lane.name;
           return (
@@ -687,9 +674,9 @@ function LaneSettings({
                 <span className="kind-tag lane-role-tag">{roleTitle(lane.role)}</span>
                 <span
                   className="count"
-                  aria-label={counts ? `${tasks} ${tasks === 1 ? "task" : "tasks"}` : undefined}
+                  aria-label={`${tasks} ${tasks === 1 ? "task" : "tasks"}`}
                 >
-                  {counts ? tasks : "–"}
+                  {tasks}
                 </span>
                 <button
                   type="button"
@@ -748,7 +735,8 @@ function LaneSettings({
                 >
                   <label>
                     Delete {lane.name} and move its{" "}
-                    {counts ? `${tasks} ${tasks === 1 ? "task" : "tasks"}` : "tasks"}{" "}
+                    {plural(tasks, "task")}
+                    {lane.archivedTasks > 0 && ` and ${plural(lane.archivedTasks, "archived task")}`}{" "}
                     to{" "}
                     <select
                       aria-label="Move tasks to"

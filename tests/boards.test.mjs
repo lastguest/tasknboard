@@ -486,9 +486,12 @@ test("the board migration preserves legacy keys and epic references", (t) => {
   assert.equal(backup.schemaVersion, 17);
   assert.equal(Object.hasOwn(backup, "workspace"), false);
   assert.equal(backup.tasks[0].boardId, defaultBoard.id);
-  // Exports hold stored records; formerPrefixes, inSidebar, and inProgress are derived.
-  const { formerPrefixes, inSidebar, inProgress, ...storedBoard } = defaultBoard;
-  assert.deepEqual(backup.boards, [storedBoard]);
+  // Exports hold stored records; formerPrefixes, inSidebar, inProgress, and
+  // lane task counts are derived.
+  const { formerPrefixes, inSidebar, inProgress, lanes, ...storedBoard } = defaultBoard;
+  assert.deepEqual(backup.boards, [
+    { ...storedBoard, lanes: lanes.map(({ tasks, archivedTasks, ...lane }) => lane) },
+  ]);
   assert.deepEqual(backup.boardPrefixReservations, [
     { prefix: "APP", boardId: defaultBoard.id },
     { prefix: "TNB", boardId: defaultBoard.id },

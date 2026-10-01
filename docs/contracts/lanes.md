@@ -31,6 +31,10 @@ type Lane = {
   id: `LANE-${number}`;
   name: string;
   role: LaneRole;
+  /** Non-archived tasks in the lane. */
+  tasks: number;
+  /** Archived tasks in the lane. delete_lane moves them too. */
+  archivedTasks: number;
 };
 type Board = {
   // ...existing fields
@@ -46,6 +50,9 @@ type Task = {
   role: LaneRole;
 };
 ```
+
+The server derives `tasks` and `archivedTasks` on every board read. They are
+not stored.
 
 Lane IDs are workspace-unique, allocated in creation order, and never reused.
 Names are trimmed, contain 1–40 characters, and are unique on their board
@@ -170,7 +177,7 @@ then rewrites stored data in the same transaction:
   `backlog` mapped to `todo`. Each view `groupBy: "status"` becomes `lane`.
 
 `workspace_info` and `export_workspace` report `schemaVersion: 17`. The export
-includes every board with its lanes.
+includes every board with its lanes, without the derived task counts.
 
 ## Acceptance criteria
 

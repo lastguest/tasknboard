@@ -372,9 +372,9 @@ export function createStore(path, { clock = Date.now } = {}) {
       .run(prefix, boardId);
   /**
    * Adds `formerPrefixes`, the retired prefixes whose task keys still resolve
-   * on each board, `inSidebar`, the caller's own sidebar preference, `lanes`,
-   * and `inProgress`, the number of active tasks in lanes with role
-   * in_progress. Derived on every read.
+   * on each board, `inSidebar`, the caller's own sidebar preference, `lanes`
+   * with their `tasks` and `archivedTasks` counts, and `inProgress`, the
+   * number of active tasks in lanes with role in_progress. Derived on every read.
    */
   const boardsFor = (identity, boards) => {
     const reservations = db
@@ -397,13 +397,28 @@ export function createStore(path, { clock = Date.now } = {}) {
         .all()
         .map((r) => [r.board_id, r.count]),
     );
+    const laneCounts = new Map(
+      db
+        .prepare(
+          `SELECT json_extract(data, '$.lane') AS lane,
+ SUM(NOT coalesce(json_extract(data, '$.archived'), 0)) AS tasks,
+ SUM(coalesce(json_extract(data, '$.archived'), 0)) AS archived
+ FROM tasks GROUP BY lane`,
+        )
+        .all()
+        .map((r) => [r.lane, r]),
+    );
     return boards.map((board) => ({
       ...board,
       formerPrefixes: reservations
         .filter((r) => r.board_id === board.id && r.prefix !== board.prefix)
         .map((r) => r.prefix),
       inSidebar: !hidden.has(board.id),
-      lanes: lanesOf(board.id),
+      lanes: lanesOf(board.id).map((lane) => ({
+        ...lane,
+        tasks: laneCounts.get(lane.id)?.tasks ?? 0,
+        archivedTasks: laneCounts.get(lane.id)?.archived ?? 0,
+      })),
       inProgress: inProgress.get(board.id) ?? 0,
     }));
   };
