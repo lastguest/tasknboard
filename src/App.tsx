@@ -751,6 +751,19 @@ export default function App() {
             onSelect: () => selectBoard(board.id),
           })),
         },
+        ...(isHuman
+          ? [
+              {
+                items: [
+                  {
+                    label: "New board",
+                    icon: <Icon name="plus" size={14} />,
+                    onSelect: () => setBoardDialog({ board: null }),
+                  },
+                ],
+              },
+            ]
+          : []),
       ],
     });
   }
