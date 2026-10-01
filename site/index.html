@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TasknBoard — the free Kanban for teams and coding agents</title>
+    <meta
+      name="description"
+      content="A fast, local-first Kanban board for small teams and coding agents. Free, source on GitHub, no account, no cloud."
+    />
+    <meta property="og:title" content="TasknBoard — plan, assign, ship." />
+    <meta
+      property="og:description"
+      content="A fast, local-first Kanban board for small teams and coding agents. Free, no account, no cloud."
+    />
+    <meta property="og:image" content="assets/shots/board.png" />
+    <meta name="theme-color" content="#08090a" />
+    <link rel="icon" href="assets/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="mark" viewBox="112 104 288 304">
+        <mask id="cut">
+          <rect x="112" y="104" width="288" height="304" fill="#fff" />
+          <circle cx="176" cy="172" r="30" fill="#000" />
+          <rect x="148" y="244" width="216" height="28" rx="14" fill="#000" />
+          <rect x="148" y="300" width="144" height="28" rx="14" fill="#000" />
+        </mask>
+        <rect x="112" y="104" width="288" height="304" rx="44" fill="currentColor" mask="url(#cut)" />
+      </symbol>
+    </svg>
+
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <a class="brand" href="#top">
+          <svg width="20" height="21"><use href="#mark" /></svg>
+          TasknBoard
+        </a>
+        <nav class="nav-links">
+          <a href="#features">Features</a>
+          <a href="#agents">Agents</a>
+          <a href="#free">Pricing</a>
+          <a href="#install">Install</a>
+        </nav>
+        <div class="nav-cta">
+          <a class="btn ghost sm" href="https://github.com/lastguest/tasknboard">GitHub</a>
+          <a class="btn primary sm" href="#install">Download</a>
+        </div>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero wrap">
+        <a class="pill" href="https://github.com/lastguest/tasknboard">
+          <span class="pill-tag">Free</span> No account. No cloud. No seats. <span aria-hidden="true">→</span>
+        </a>
+        <h1>Plan the work.<br /><span class="dim">Let agents do it.</span></h1>
+        <p class="lede">
+          TasknBoard is a fast, focused Kanban board for small teams and coding agents.
+          It runs on your machine, opens in a second, and costs nothing — ever.
+        </p>
+        <div class="hero-cta">
+          <a class="btn primary" href="#install">Get TasknBoard</a>
+          <a class="btn ghost" href="https://github.com/lastguest/tasknboard">
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.06-.49.06-.49.8.06 1.23.82 1.23.82.72 1.23 1.88.87 2.34.67.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+            Read the source
+          </a>
+        </div>
+        <p class="hero-meta">macOS · Windows · Web · iOS · Terminal</p>
+
+        <div class="hero-shot">
+          <div class="glow" aria-hidden="true"></div>
+          <figure class="frame">
+            <img src="assets/shots/board.png" width="2880" height="1800" alt="TasknBoard board view with Backlog, In progress, In review and Done columns" />
+          </figure>
+        </div>
+      </section>
+
+      <section class="logos wrap" aria-label="Works with">
+        <p>Assign tasks to the coding agents you already use</p>
+        <ul>
+          <li>Claude Code</li>
+          <li>Codex</li>
+          <li>OpenCode</li>
+          <li>Pi</li>
+          <li>Any MCP client</li>
+        </ul>
+      </section>
+
+      <section id="features" class="section wrap">
+        <div class="section-head">
+          <span class="eyebrow">Built for flow</span>
+          <h2>Simple enough to start in a minute.<br /><span class="dim">Sharp enough to run a team.</span></h2>
+        </div>
+
+        <div class="trio">
+          <article>
+            <span class="num">01</span>
+            <h3>Install and go</h3>
+            <p>One download. No sign-up, no workspace setup, no invitations to chase. Your board is ready when the window opens.</p>
+          </article>
+          <article>
+            <span class="num">02</span>
+            <h3>Keyboard first</h3>
+            <p><kbd>N</kbd> new task, <kbd>⌘</kbd><kbd>K</kbd> search, <kbd>F</kbd> filter. Drag between columns, or never touch the mouse.</p>
+          </article>
+          <article>
+            <span class="num">03</span>
+            <h3>Yours, locally</h3>
+            <p>Everything lives in one SQLite file on your disk. Works offline. Nothing leaves your machine unless you host it.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="feature wrap">
+        <div class="feature-copy">
+          <span class="eyebrow">Tasks</span>
+          <h2>Every detail, one tab away.</h2>
+          <p>
+            Tasks open in tabs that keep your draft while you switch. Markdown context, acceptance criteria,
+            links between tasks, GitHub pull requests and the full activity history — side by side.
+          </p>
+          <ul class="checks">
+            <li>Edits never overwrite each other — conflicts merge field by field</li>
+            <li>Link blockers, duplicates and related work</li>
+            <li>Pull request state, right on the card</li>
+          </ul>
+        </div>
+        <figure class="frame">
+          <img loading="lazy" src="assets/shots/task.png" width="2880" height="1800" alt="Task details with context, acceptance criteria, links and activity" />
+        </figure>
+      </section>
+
+      <section class="feature reverse wrap">
+        <div class="feature-copy">
+          <span class="eyebrow">Views</span>
+          <h2>Board or list. Your call.</h2>
+          <p>
+            Group, order and filter by status, priority, assignee, label or epic. Save any filter as a view,
+            share it with the team, and star it into your sidebar.
+          </p>
+          <ul class="checks">
+            <li>Epics to track bigger goals</li>
+            <li>Multiple boards, each with its own task keys</li>
+            <li>Personal and shared views</li>
+          </ul>
+        </div>
+        <figure class="frame">
+          <img loading="lazy" src="assets/shots/list.png" width="2880" height="1800" alt="List view grouped by status" />
+        </figure>
+      </section>
+
+      <section id="agents" class="section wrap agents">
+        <div class="section-head center">
+          <span class="eyebrow">Agents</span>
+          <h2>Assign a task. An agent picks it up.</h2>
+          <p class="lede">
+            Connect Claude Code, Codex, OpenCode or Pi in one click. Assign a task to an agent and it claims
+            the work, runs in your repository, and submits it for review. You stay the one who marks it Done.
+          </p>
+        </div>
+        <figure class="frame wide">
+          <img loading="lazy" src="assets/shots/agents.png" width="2880" height="1800" alt="Agents page with roster and one-click connections for coding agents" />
+        </figure>
+        <div class="steps">
+          <div><span>1</span><h4>Assign</h4><p>Pick an agent as the assignee, like any teammate.</p></div>
+          <div><span>2</span><h4>Claim</h4><p>The agent takes a lease, so two never work the same task.</p></div>
+          <div><span>3</span><h4>Review</h4><p>Work lands In review with evidence. A human approves.</p></div>
+        </div>
+      </section>
+
+      <section class="bento wrap">
+        <article class="cell big">
+          <div class="cell-copy">
+            <span class="eyebrow">Stand-up mode</span>
+            <h3>Share one tab. Run the meeting.</h3>
+            <p>A full-screen board for your call. Walk through each person with the arrow keys and flag highlights and blockers as you go.</p>
+          </div>
+          <img loading="lazy" src="assets/shots/standup.png" width="2880" height="1800" alt="Stand-up mode team overview with highlight and blocker notes" />
+        </article>
+        <article class="cell">
+          <span class="eyebrow">Everywhere</span>
+          <h3>Desktop, web, phone, terminal.</h3>
+          <p>Native apps for macOS and Windows, a web server for your team, an iOS client, and an interactive board in your terminal.</p>
+          <pre class="mini"><code><span class="c">$</span> tasknboard
+<span class="c">›</span> /new Fix login redirect
+<span class="c">›</span> /assign claude</code></pre>
+        </article>
+        <article class="cell phone">
+          <img loading="lazy" src="assets/shots/mobile.png" width="1170" height="2532" alt="TasknBoard on a phone" />
+        </article>
+        <article class="cell">
+          <span class="eyebrow">Built in</span>
+          <h3>MCP server included.</h3>
+          <p>Any MCP-capable agent can list, claim, comment and submit through the same rules as people. Every move is validated by the server.</p>
+        </article>
+      </section>
+
+      <section id="free" class="section wrap free">
+        <div class="section-head center">
+          <span class="eyebrow">Pricing</span>
+          <h2>$0. That's the whole page.</h2>
+          <p class="lede">No trial, no tiers, no per-seat math. Every feature, for everyone.</p>
+        </div>
+        <div class="price">
+          <div class="price-card">
+            <div class="price-top">
+              <span class="plan">Everything</span>
+              <span class="amount">$0<small>/ forever</small></span>
+            </div>
+            <ul class="checks">
+              <li>Unlimited boards, tasks and people</li>
+              <li>Coding agents and MCP</li>
+              <li>Desktop, web, iOS and CLI</li>
+              <li>Stand-up mode, views and epics</li>
+              <li>GitHub pull request links</li>
+              <li>Automatic, signed updates</li>
+            </ul>
+            <a class="btn primary block" href="#install">Download free</a>
+          </div>
+          <div class="open">
+            <h3>Read every line.</h3>
+            <p>
+              The full source lives on GitHub: the app, the server, the agent integrations and the build pipeline.
+              Read it, build it yourself, file an issue, send a pull request.
+            </p>
+            <p class="fine">
+              Free for personal and noncommercial use under the
+              <a href="https://github.com/lastguest/tasknboard/blob/main/LICENSE">PolyForm Noncommercial 1.0</a> license.
+            </p>
+            <a class="btn ghost" href="https://github.com/lastguest/tasknboard">View on GitHub →</a>
+          </div>
+        </div>
+      </section>
+
+      <section id="install" class="section wrap install">
+        <div class="section-head center">
+          <span class="eyebrow">Install</span>
+          <h2>Ready in under a minute.</h2>
+        </div>
+        <div class="install-grid">
+          <div class="install-card">
+            <h4>macOS</h4>
+            <p>Apple Silicon, macOS 13.5+</p>
+            <pre><code>brew tap lastguest/tasknboard https://github.com/lastguest/tasknboard.git
+brew install --cask lastguest/tasknboard/tasknboard</code></pre>
+            <a class="btn ghost sm" href="https://github.com/lastguest/tasknboard/releases/download/latest/TasknBoard-macos-arm64.zip">Or download the .zip</a>
+          </div>
+          <div class="install-card">
+            <h4>Windows</h4>
+            <p>Windows x64 installer</p>
+            <pre><code># Installs for the current user.
+# No administrator access needed.</code></pre>
+            <a class="btn ghost sm" href="https://github.com/lastguest/tasknboard/releases/download/latest/TasknBoard-windows-x64-setup.exe">Download the installer</a>
+          </div>
+          <div class="install-card">
+            <h4>Self-host</h4>
+            <p>Node.js 24+, for a shared team server</p>
+            <pre><code>git clone https://github.com/lastguest/tasknboard
+cd tasknboard && npm ci && npm run build
+npm start</code></pre>
+            <a class="btn ghost sm" href="https://github.com/lastguest/tasknboard#centralized-server">Server guide</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="final wrap">
+        <svg class="final-mark" width="44" height="46"><use href="#mark" /></svg>
+        <h2>Less managing. More shipping.</h2>
+        <div class="hero-cta">
+          <a class="btn primary" href="#install">Get TasknBoard — free</a>
+          <a class="btn ghost" href="https://github.com/lastguest/tasknboard">Star on GitHub</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap footer-inner">
+        <a class="brand" href="#top"><svg width="16" height="17"><use href="#mark" /></svg> TasknBoard</a>
+        <nav>
+          <a href="https://github.com/lastguest/tasknboard">GitHub</a>
+          <a href="https://github.com/lastguest/tasknboard/releases/tag/latest">Releases</a>
+          <a href="https://github.com/lastguest/tasknboard/issues">Issues</a>
+          <a href="https://github.com/lastguest/tasknboard/blob/main/LICENSE">License</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>
