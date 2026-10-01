@@ -172,6 +172,10 @@ export function labelTone(label: string) {
   return Math.abs(hash) % 6;
 }
 
+/** Stand-up notes, which stop mattering once the task is Done. */
+export const standupNotes = (task: Task, status: Status = task.status) =>
+  status === "done" ? undefined : task.standup;
+
 /** The server only accepts Done for reviewed work. */
 export const doneLocked = (s: Status) => s !== "in_review" && s !== "done";
 

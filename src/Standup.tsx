@@ -4,7 +4,7 @@ import { Dialog, ErrorNote } from "./Dialogs";
 import { Icon } from "./Icons";
 import { Markdown } from "./Markdown";
 import { ApiError, command, errorOf, taskNumber } from "./api";
-import { statusTitle, type Actor, type Task } from "./types";
+import { standupNotes, statusTitle, type Actor, type Task } from "./types";
 import { Avatar, displayName, usePeople } from "./People";
 
 type Stage = { key: string; name: string; assignee?: string };
@@ -217,13 +217,13 @@ export function Standup({
     (t) => stage.assignee === undefined || t.assignee === stage.assignee,
   );
   const visible = scope
-    .filter((t) => focus === "all" || Boolean(t.standup?.[focus]))
+    .filter((t) => focus === "all" || Boolean(standupNotes(t)?.[focus]))
     .sort(
       (a, b) =>
-        Number(Boolean(b.standup?.blocker)) -
-          Number(Boolean(a.standup?.blocker)) ||
-        Number(Boolean(b.standup?.highlight)) -
-          Number(Boolean(a.standup?.highlight)) ||
+        Number(Boolean(standupNotes(b)?.blocker)) -
+          Number(Boolean(standupNotes(a)?.blocker)) ||
+        Number(Boolean(standupNotes(b)?.highlight)) -
+          Number(Boolean(standupNotes(a)?.highlight)) ||
         taskNumber(a.id) - taskNumber(b.id),
     );
 
@@ -322,8 +322,8 @@ export function Standup({
   }
 
   const counts = {
-    highlight: scope.filter((t) => t.standup?.highlight).length,
-    blocker: scope.filter((t) => t.standup?.blocker).length,
+    highlight: scope.filter((t) => standupNotes(t)?.highlight).length,
+    blocker: scope.filter((t) => standupNotes(t)?.blocker).length,
   };
   return (
     <div className="standup-shell">

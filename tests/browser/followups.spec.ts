@@ -332,6 +332,30 @@ test("An active agent claim rejects edits and keeps the draft", async ({ page })
   expect((await command("get_task", { id: task.id })).title).toBe(task.title);
 });
 
+test("Done tasks hide their stand-up notes on the board and in Stand-up", async ({ page }) => {
+  const prefix = `Closed notes ${key()}`;
+  let done = await create(`${prefix} done`, "reviewer");
+  done = await command("set_standup_notes", { id: done.id, expectedVersion: done.version, highlight: "Shipped", blocker: "Old blocker" });
+  done = await command("update_task", { id: done.id, expectedVersion: done.version, patch: { status: "in_review" } });
+  await command("update_task", { id: done.id, expectedVersion: done.version, patch: { status: "done" } });
+  const open = await create(`${prefix} open`, "reviewer");
+  await command("set_standup_notes", { id: open.id, expectedVersion: open.version, highlight: "", blocker: "Still blocked" });
+  await connect(page);
+  await search(page).fill(prefix);
+  const doneCard = page.locator(".task-card", { has: card(page, done.id) });
+  await expect(doneCard).toBeVisible();
+  await expect(doneCard.locator(".task-signal")).toHaveCount(0);
+  await expect(doneCard).not.toHaveClass(/has-blocker|has-highlight/);
+  await expect(page.locator(".task-card", { has: card(page, open.id) }).locator(".task-signal.blocker")).toBeVisible();
+  await nav(page, "Stand-up").click();
+  await expect(doneCard.locator(".task-signal")).toHaveCount(0);
+  await page.getByRole("button", { name: /^Blockers/ }).click();
+  await expect(card(page, open.id)).toBeVisible();
+  await expect(card(page, done.id)).toBeHidden();
+  await page.getByRole("button", { name: /^Highlights/ }).click();
+  await expect(card(page, done.id)).toBeHidden();
+});
+
 test("Stand-up fixes participant order, saves claimed-task notes and restores state", async ({ page }) => {
   const task = await create(`Standup ${key()}`, "reviewer");
   const claimed = await command("claim_task", { id: task.id, expectedVersion: task.version }, agentToken);

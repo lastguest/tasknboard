@@ -5,6 +5,7 @@ import {
   doneLocked,
   labelTone,
   priorities,
+  standupNotes,
   statusTitle,
   type Epic,
   type Status,
@@ -241,9 +242,10 @@ export function TaskCard({
   const commentLabel = `${task.commentCount} ${task.commentCount === 1 ? "comment" : "comments"}`;
   const assigneeName = usePersonName(task.assignee);
   const agent = agents.has(task.assignee);
-  const signal = task.standup?.blocker
+  const standup = standupNotes(task, pending ?? task.status);
+  const signal = standup?.blocker
     ? "has-blocker"
-    : task.standup?.highlight
+    : standup?.highlight
       ? "has-highlight"
       : "";
   const updated = updatedLabel(task.updatedAt);
@@ -302,16 +304,16 @@ export function TaskCard({
         {task.labels.map((label) => <Label key={label} label={label} />)}
         <ClaimChip task={task} />
       </div>
-      {task.standup?.blocker && (
+      {standup?.blocker && (
         <div className="task-signal blocker">
           <strong>Blocker</strong>
-          <span>{task.standup.blocker}</span>
+          <span>{standup.blocker}</span>
         </div>
       )}
-      {task.standup?.highlight && (
+      {standup?.highlight && (
         <div className="task-signal highlight">
           <strong>Highlight</strong>
-          <span>{task.standup.highlight}</span>
+          <span>{standup.highlight}</span>
         </div>
       )}
       <div className="card-bottom">
