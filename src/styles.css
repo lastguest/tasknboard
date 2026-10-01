@@ -1072,18 +1072,8 @@ footer {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  color: var(--subtle);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-}
-.pr-count.open {
-  color: var(--accent);
-}
-.pr-count.merged {
-  color: #bca0f4;
-}
-.pr-count.closed {
-  color: var(--danger);
 }
 .card-bottom .status-select {
   width: auto;
@@ -1784,9 +1774,6 @@ footer {
 }
 .task-prs .pr-state-icon {
   padding-top: 0;
-}
-.task-prs .pr-state-icon.unknown {
-  color: var(--subtle);
 }
 .task-pr-ref {
   flex: none;
@@ -3811,17 +3798,25 @@ footer {
 }
 .pr-state-icon {
   display: inline-flex;
-  color: var(--accent);
   padding-top: 1px;
 }
+/* Pull request state colours, shared by every icon and task mark. */
+.pr-state-icon.open,
+.pr-count.open {
+  color: var(--accent);
+}
 .pr-state-icon.draft,
-.pr-state-icon.closed {
+.pr-count.draft,
+.pr-state-icon.unknown,
+.pr-count.unknown {
   color: var(--subtle);
 }
-.pr-state-icon.merged {
+.pr-state-icon.merged,
+.pr-count.merged {
   color: #bca0f4;
 }
-.pr-state-icon.closed {
+.pr-state-icon.closed,
+.pr-count.closed {
   color: var(--danger);
 }
 .diffstat {

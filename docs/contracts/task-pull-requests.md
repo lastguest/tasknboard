@@ -46,6 +46,7 @@ minute. Without a connection the mark stays grey.
 The task details panel lists them under **Pull requests**; the **+** button
 takes one or more pasted links. Each row opens the pull request in the
 **Pull requests** section (`#pulls/<owner>/<repo>/<number>`). With GitHub
-connected, rows show the title and an open, draft, merged or closed icon,
-read through `get_pull_request` at most once a minute; otherwise they show
-`owner/repo` and the number. A pull request lists the tasks that link it.
+connected, rows show the title and an open, draft, merged or closed icon in
+the same colours as the card mark, from the same batched
+`get_pull_request_states` read; otherwise they show `owner/repo` and the
+number. A pull request lists the tasks that link it.

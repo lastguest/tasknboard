@@ -202,14 +202,7 @@ function StateIcon({ state, size = 16 }: { state: PrState; size?: number }) {
   );
 }
 
-/**
- * Pull request summaries for task details, read once a minute at most.
- * Without a GitHub connection the rows show only the repository and number.
- */
-const summaryCache = new Map<
-  string,
-  { at: number; value: Promise<PullSummary | null> }
->();
+/** Whether GitHub is connected, read again after a minute. */
 let connection: { at: number; value: Promise<boolean> } | null = null;
 function githubConnected() {
   if (!connection || Date.now() - connection.at >= 60_000)
@@ -222,31 +215,14 @@ function githubConnected() {
     };
   return connection.value;
 }
-function pullSummary(pr: TaskPullRequest) {
-  const key = pr.url.toLowerCase();
-  const cached = summaryCache.get(key);
-  if (cached && Date.now() - cached.at < 60_000) return cached.value;
-  const [owner, repo] = pr.repository.split("/");
-  const value = githubConnected().then((connected) =>
-    connected
-      ? command<PullSummary>("get_pull_request", {
-          owner,
-          repo,
-          number: pr.number,
-        }).catch(() => null)
-      : null,
-  );
-  summaryCache.set(key, { at: Date.now(), value });
-  return value;
-}
-
 /**
- * Pull request states for task cards. Cards ask for what they show; requests
- * made in the same render go to GitHub as one `get_pull_request_states` call,
- * and each state is read again after a minute. Without a GitHub connection
- * every state stays unknown.
+ * Pull request titles and states for task cards and details. Each asks for
+ * what it shows; requests made in the same render go to GitHub as one
+ * `get_pull_request_states` call, and each is read again after a minute.
+ * Without a GitHub connection every state stays unknown.
  */
-const pullStates = new Map<string, { at: number; state: PrState | null }>();
+type PullInfo = { title: string; state: PrState };
+const pullStates = new Map<string, { at: number; info: PullInfo | null }>();
 const stateListeners = new Set<() => void>();
 let stateVersion = 0;
 let wanted = new Map<string, TaskPullRequest>();
@@ -259,7 +235,7 @@ function wantStates(prs: TaskPullRequest[]) {
     const entry = pullStates.get(key);
     if (entry && Date.now() - entry.at < 60_000) continue;
     // The last state stays on the card while it is read again.
-    pullStates.set(key, { at: Date.now(), state: entry?.state ?? null });
+    pullStates.set(key, { at: Date.now(), info: entry?.info ?? null });
     wanted.set(key, pr);
   }
   if (!wanted.size || flushQueued) return;
@@ -275,18 +251,20 @@ async function flushStates() {
     const chunk = batch.slice(i, i + 100);
     try {
       const { pullRequests } = await command<{
-        pullRequests: { repository: string; number: number; state: PrState }[];
+        pullRequests: { repository: string; number: number; title: string; state: PrState }[];
       }>("get_pull_request_states", {
         pullRequests: chunk.map((pr) => {
           const [owner, repo] = pr.repository.split("/");
           return { owner, repo, number: pr.number };
         }),
       });
-      const found = new Map(pullRequests.map((pr) => [stateKey(pr), pr.state]));
+      const found = new Map(
+        pullRequests.map((pr) => [stateKey(pr), { title: pr.title, state: pr.state }]),
+      );
       for (const pr of chunk)
         pullStates.set(stateKey(pr), {
           at: Date.now(),
-          state: found.get(stateKey(pr)) ?? null,
+          info: found.get(stateKey(pr)) ?? null,
         });
     } catch {
       // The cards keep a neutral mark; the next read tries again.
@@ -301,12 +279,15 @@ const subscribeStates = (listener: () => void) => {
     stateListeners.delete(listener);
   };
 };
-/** Each pull request's state, or null while unknown. */
-export function usePullStates(prs: TaskPullRequest[]) {
+/** Each pull request's title and state, or null while unknown. */
+function usePullInfo(prs: TaskPullRequest[]) {
   useSyncExternalStore(subscribeStates, () => stateVersion);
   useEffect(() => wantStates(prs));
-  return prs.map((pr) => pullStates.get(stateKey(pr))?.state ?? null);
+  return prs.map((pr) => pullStates.get(stateKey(pr))?.info ?? null);
 }
+/** Each pull request's state, or null while unknown. */
+export const usePullStates = (prs: TaskPullRequest[]) =>
+  usePullInfo(prs).map((info) => info?.state ?? null);
 
 function TaskPullRequestRow({
   pr,
@@ -317,14 +298,8 @@ function TaskPullRequestRow({
   busy: boolean;
   onRemove: () => void;
 }) {
-  const [summary, setSummary] = useState<PullSummary | null>(null);
-  useEffect(() => {
-    let live = true;
-    void pullSummary(pr).then((value) => live && setSummary(value));
-    return () => {
-      live = false;
-    };
-  }, [pr]);
+  // The same batched read as the card marks, so both show the same state.
+  const [summary] = usePullInfo([pr]);
   const [owner, repo] = pr.repository.split("/");
   return (
     <li>
@@ -339,7 +314,7 @@ function TaskPullRequestRow({
             <Icon name="pull" size={14} />
           </span>
         )}
-        <span className="task-link-title">{summary?.title ?? pr.repository}</span>
+        <span className="task-link-title">{summary?.title || pr.repository}</span>
         <span className="task-pr-ref">
           {summary ? `${repo}#${pr.number}` : `#${pr.number}`}
         </span>

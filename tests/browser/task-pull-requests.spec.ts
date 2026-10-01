@@ -73,6 +73,18 @@ test("tasks link pull requests, mark the card, and open them in Pull requests", 
       },
     }),
   );
+  // Rows read titles and states in one batch; the pull request page reads its detail.
+  await page.route("**/api/get_pull_request_states", (route) => {
+    const { pullRequests } = route.request().postDataJSON();
+    return route.fulfill({
+      json: {
+        pullRequests: pullRequests.map((p: { owner: string; repo: string; number: number }) => {
+          const { repository, number, title, state } = pull(p.owner, p.repo, p.number);
+          return { repository, number, title, state };
+        }),
+      },
+    });
+  });
   await page.route("**/api/get_pull_request", (route) => {
     const { owner, repo, number } = route.request().postDataJSON();
     return route.fulfill({ json: pull(owner, repo, number) });
@@ -94,6 +106,8 @@ test("tasks link pull requests, mark the card, and open them in Pull requests", 
   await section.getByRole("button", { name: "Link", exact: true }).click();
   await expect(section.getByRole("link")).toHaveCount(2);
   await expect(section.getByRole("img", { name: "Merged" })).toBeVisible();
+  // Rows and the card mark share one colour per state.
+  await expect(section.locator(".pr-state-icon.merged")).toHaveCSS("color", "rgb(188, 160, 244)");
 
   await section.getByRole("link", { name: /Add token bucket limiter/ }).click();
   await expect(page).toHaveURL(/#pulls\/acme\/api\/412$/);
