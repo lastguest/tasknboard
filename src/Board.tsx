@@ -344,7 +344,7 @@ const pullStateOrder: PrState[] = ["open", "draft", "merged", "closed"];
  * A pull request mark when a task links any, with a count past one. With
  * GitHub connected it takes the colour of the most active state.
  */
-function PullCount({ task }: { task: Task }) {
+export function PullCount({ task }: { task: Task }) {
   const prs = task.pullRequests ?? [];
   const states = usePullStates(prs);
   const count = prs.length;

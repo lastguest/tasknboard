@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Assignee, Board } from "./Board";
+import { Assignee, Board, PullCount } from "./Board";
 import { Dialog, ErrorNote } from "./Dialogs";
 import { Icon } from "./Icons";
 import { Markdown } from "./Markdown";
@@ -93,7 +93,7 @@ function StandupNotes({
       title={
         <>
           <span className="task-id">{current.id}</span>{" "}
-          {statusTitle(current.status)}
+          {statusTitle(current.status)} <PullCount task={current} />
         </>
       }
       onClose={() => !busy && onClose()}

@@ -194,3 +194,29 @@ test("card marks take the colour of their pull requests' state", async ({ page }
   // Every card on the board is read in one request, each pull request once.
   expect(batches[0].map((pr) => pr.number).filter((n) => n >= 600).sort()).toEqual([600, 601]);
 });
+
+test("Stand-up cards and notes show the pull request mark", async ({ page }) => {
+  const task = await command("create_task", {
+    boardId: "BOARD-1",
+    title: `Stand-up with pull requests ${Date.now()}`,
+    assignee: "reviewer",
+  });
+  await command("link_pull_requests", {
+    id: task.id,
+    expectedVersion: task.version,
+    pullRequests: ["acme/api#701", "acme/api#702"],
+  });
+  await page.addInitScript((value) => {
+    sessionStorage.setItem("tasknboard-token", value);
+  }, humanToken);
+  await page.goto(baseURL);
+  await page.locator(".sidebar").getByRole("button", { name: /^Stand-up(?:\s|$)/ }).click();
+  await expect(page.getByRole("heading", { name: "Team overview" })).toBeVisible();
+  const card = page.getByRole("article", { name: new RegExp(`^${task.id}:`) });
+  await expect(card.locator(".pr-count")).toHaveAttribute("title", "2 pull requests");
+  await card.getByRole("button", { name: new RegExp(`^${task.id}:`) }).click();
+  await expect(page.getByRole("dialog").locator(".pr-count")).toHaveAttribute(
+    "title",
+    "2 pull requests",
+  );
+});
