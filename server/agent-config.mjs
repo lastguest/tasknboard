@@ -18,10 +18,15 @@ export const agentClients = {
     executable: "claude",
     model: { hint: "An alias such as sonnet or opus, or a full model ID." },
     profile: { label: "Agent", flag: "--agent", hint: "A Claude Code agent defined in .claude/agents." },
+    // stream-json writes each step to the log as it happens; plain -p
+    // prints only the final answer, so a working run looked stuck.
     args: ({ prompt, model, profile }) => [
       "-p",
       prompt,
       "--dangerously-skip-permissions",
+      "--verbose",
+      "--output-format",
+      "stream-json",
       ...(model ? ["--model", model] : []),
       ...(profile ? ["--agent", profile] : []),
     ],

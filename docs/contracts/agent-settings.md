@@ -56,6 +56,23 @@ prompt. Placeholders are `{{agent}}`, `{{task}}`, `{{title}}`, `{{board}}`,
 and for mentions `{{author}}` and `{{comment}}`, for the stand-up `{{tasks}}`.
 An empty prompt uses the default.
 
+## Runs and logs
+
+Each run writes its output to `~/.tasknboard/logs/<identity>/<task>-<time>.log`.
+Claude Code runs with `--verbose --output-format stream-json`, so its log
+fills as it works; plain `-p` printed only the final answer. A failed run's
+activity entry uses the `result` message of that output.
+
+When TasknBoard quits during a run, the run stops with it. The task records
+`agent_stopped`, the agent's claim is released, and the run and the waiting
+queue are saved under `agent_runs.interrupted`. When TasknBoard opens, those
+runs start again, with a prompt line that tells the agent to check earlier
+progress first.
+
+Cards assigned to an agent show a logs button, and the task menu has
+**Agent logs**. The dialog lists the task's runs, newest first, and shows the
+chosen one as readable steps. A running log refreshes every two seconds.
+
 ## HTTP
 
 Only people may call these. Agents receive 403.
@@ -65,5 +82,9 @@ Only people may call these. Agents receive 403.
   configuration, current run, and queue. Shared servers return no agents.
 - `POST /api/agent-config-save { identity, config }` validates and stores a
   full configuration. Shared servers reject it with `AGENTS_UNSUPPORTED`.
+- `POST /api/agent-logs { taskId, identity?, file? }` returns `available`,
+  the task's runs, and the newest run's log, or the named one. Only files the
+  run list names can be read, at most their last 512 KB. Away from the desktop
+  app it returns `{ available: false, runs: [] }`.
 - `POST /api/agent-event { event: "standup" }` queues the stand-up runs and
   returns `{ started: identity[] }`. The UI sends it when the stand-up opens.

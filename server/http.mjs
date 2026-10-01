@@ -8,6 +8,7 @@ import { createCliHelper } from "./cli-helper.mjs";
 import { createClaudePlugin } from "./claude-plugin.mjs";
 import { createCodexPlugin } from "./codex-plugin.mjs";
 import { createAgentLauncher } from "./agent-launcher.mjs";
+import { createAgentLogs } from "./agent-logs.mjs";
 import {
   agentClients,
   agentEvents,
@@ -45,6 +46,12 @@ const claudePlugin = createClaudePlugin({ mcpEntry, database: dbPath });
 const launcher = createAgentLauncher({
   store,
   desktop: desktop && !Object.keys(tokens).length,
+});
+// Runs that the last quit stopped start again.
+launcher.resume();
+const agentLogs = createAgentLogs({
+  home: launcher.enabled ? process.env.TASKNBOARD_USER_HOME : "",
+  running: launcher.runningLogs,
 });
 store.registerActors(
   Object.keys(tokens).length ? Object.values(tokens) : [localActor],
@@ -106,6 +113,30 @@ function agentCommand(name, args, actor) {
     throw httpError("VALIDATION", "event: Only standup can be sent.", 400);
   const identities = new Set([...roster(), ...Object.keys(listConfigs(store))]);
   return { started: launcher.standup([...identities]) };
+}
+/** A task's agent runs, and one run's log: `{ taskId, identity?, file? }`. */
+async function agentLogsCommand(args, actor) {
+  if (actor.kind !== "human")
+    throw httpError("FORBIDDEN", "Only a person can read agent logs.", 403);
+  if (
+    !args ||
+    typeof args !== "object" ||
+    Array.isArray(args) ||
+    typeof args.taskId !== "string" ||
+    Object.keys(args).some((key) => !["taskId", "identity", "file"].includes(key))
+  )
+    throw httpError("VALIDATION", "Provide taskId, and identity and file to read one log.", 400);
+  if (!agentLogs.root) return { available: false, runs: [] };
+  const runs = await agentLogs.list(args.taskId);
+  const chosen =
+    args.identity !== undefined || args.file !== undefined
+      ? { identity: String(args.identity), file: String(args.file) }
+      : runs[0];
+  return {
+    available: true,
+    runs,
+    log: chosen ? await agentLogs.read(args.taskId, chosen.identity, chosen.file) : null,
+  };
 }
 const json = (res, status, value) => {
   res.writeHead(status, {
@@ -291,6 +322,10 @@ const server = createServer(async (req, res) => {
           launcher.register(installed.identity, "claude");
           json(res, 200, { ...installed, autoStart: true });
         }
+        return;
+      }
+      if (name === "agent-logs") {
+        json(res, 200, await agentLogsCommand(args, actor));
         return;
       }
       if (["agent-configs", "agent-config-save", "agent-event"].includes(name)) {

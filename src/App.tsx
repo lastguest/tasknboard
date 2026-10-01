@@ -1,5 +1,6 @@
 import { AppVersion } from "./AppUpdates";
 import { ConnectionHelpers } from "./ConnectionHelpers";
+import { AgentLogs } from "./AgentLogs";
 import {
   AgentSettings,
   useAgentSettings,
@@ -171,6 +172,8 @@ export default function App() {
   const [help, setHelp] = useState(false);
   const [menu, setMenu] = useState<MenuState | null>(null);
   useKeyboardContextMenu();
+  /** The task whose agent run logs are open. */
+  const [logTask, setLogTask] = useState("");
   const [standup, setStandup] = useState(false);
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -540,6 +543,16 @@ export default function App() {
           : viewTitles[view];
   /** People manage epics and archive tasks; the server enforces both. */
   const isHuman = workspaceInfoLoaded && actor.kind === "human";
+  // Logs exist where the desktop app starts agents.
+  const [logsAvailable, setLogsAvailable] = useState(false);
+  useEffect(() => {
+    if (!isHuman) return;
+    const controller = new AbortController();
+    command<{ autoStart: boolean }>("agent-configs", {}, controller.signal)
+      .then((info) => setLogsAvailable(info.autoStart))
+      .catch(() => setLogsAvailable(false));
+    return () => controller.abort();
+  }, [isHuman]);
   const openEpic = (epic: Epic) => {
     setEpicId(epic.id);
     setView("epic");
@@ -1111,6 +1124,15 @@ export default function App() {
               disabled: Boolean(opening),
               onSelect: () => void openTask(task),
             },
+            ...(logsAvailable
+              ? [
+                  {
+                    label: "Agent logs",
+                    icon: <Icon name="terminal" size={14} />,
+                    onSelect: () => setLogTask(task.id),
+                  },
+                ]
+              : []),
           ],
         },
         {
@@ -2130,6 +2152,7 @@ export default function App() {
                     onEpic={setEpic}
                     onNew={newTask}
                     onMenu={taskMenu}
+                    onLogs={logsAvailable ? (t) => setLogTask(t.id) : undefined}
                     pending={pending}
                     list={list}
                     groups={groups}
@@ -2240,6 +2263,7 @@ export default function App() {
       )}
       {help && <ShortcutHelp onClose={() => setHelp(false)} />}
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
+      {logTask && <AgentLogs taskId={logTask} onClose={() => setLogTask("")} />}
       {!standup && <Toasts toasts={toasts} onDismiss={dismissToast} />}
     </PeopleContext.Provider>
   );

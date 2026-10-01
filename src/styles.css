@@ -4662,3 +4662,63 @@ footer {
 .agent-settings-actions.dirty > .small {
   color: var(--accent);
 }
+.card-logs {
+  /* Above the layer that opens the task from anywhere on the card. */
+  position: relative;
+  z-index: 1;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--subtle);
+  cursor: pointer;
+}
+.card-logs:hover,
+.card-logs:focus-visible {
+  color: var(--text);
+  border-color: var(--border);
+}
+.agent-logs-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.agent-logs-bar .field {
+  margin: 0;
+  min-width: min(360px, 100%);
+}
+.agent-logs-bar > .small {
+  color: var(--muted);
+  padding-bottom: 8px;
+}
+.agent-log-output {
+  margin: 0;
+  height: min(60vh, 560px);
+  overflow: auto;
+  padding: 12px 14px;
+  background: #15171a;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+  line-height: 1.55;
+  color: #cfd6de;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-log-path {
+  margin-top: 8px;
+  color: var(--subtle);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+.agent-logs-body {
+  padding: 16px 22px 20px;
+}

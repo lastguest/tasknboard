@@ -80,6 +80,7 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   assert.equal((await post("list_tasks", {}, "bad")).status, 401);
   // Agent settings stay on the local desktop app, and only people see them.
   assert.equal((await post("agent-configs", {}, agentToken)).status, 403);
+  assert.equal((await post("agent-logs", { taskId: "TNB-1" }, agentToken)).status, 403);
   const sharedAgents = await (await post("agent-configs")).json();
   assert.equal(sharedAgents.mode, "shared");
   assert.deepEqual(sharedAgents.agents, {});
@@ -269,4 +270,7 @@ test("a local workspace saves agent settings and rejects invalid ones", async (t
   assert.equal((await post("agent-config-save", { identity: "-bad", config })).status, 400);
   assert.equal((await post("agent-event", { event: "deploy" })).status, 400);
   assert.deepEqual((await post("agent-event", { event: "standup" })).body, { started: [] });
+  // Logs belong to the desktop app that runs agents; elsewhere there are none.
+  assert.deepEqual((await post("agent-logs", { taskId: "TNB-1" })).body, { available: false, runs: [] });
+  assert.equal((await post("agent-logs", { taskId: "TNB-1", path: "/etc/passwd" })).status, 400);
 });

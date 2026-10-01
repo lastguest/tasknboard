@@ -144,6 +144,7 @@ const paths: Record<string, React.ReactNode> = {
   ),
   mdWrite: <path d="M4 20h4L19 9l-4-4L4 16v4ZM13.5 6.5l4 4" />,
   mdRule: <path d="M3 12h18M7 7h10M7 17h10" />,
+  terminal: <path d="m4 7 5 5-5 5M12 18h8" />,
   mdImage: (
     <>
       <rect x="3" y="4" width="18" height="16" rx="2" />

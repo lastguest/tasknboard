@@ -24,11 +24,16 @@ export function failureReason(output) {
   let reason = error ? error.replace(/^error:\s*/i, "") : (lines.at(-1) ?? "");
   try {
     const body = JSON.parse(reason);
-    reason = body.error?.message ?? body.message ?? reason;
+    reason =
+      // Claude Code's stream-json output ends with a result event.
+      (body.type === "result" ? body.result || body.errors?.join("; ") : undefined) ??
+      body.error?.message ??
+      body.message ??
+      reason;
   } catch {
     // Plain text stays as it is.
   }
-  return reason.slice(0, 300);
+  return String(reason).slice(0, 300);
 }
 
 /**
@@ -47,6 +52,8 @@ export function agentPrompt(identity, clientId, eventPrompt) {
   ].join("\n");
 }
 
+/** Settings key for runs the service stopped when it quit, to start again. */
+export const interruptedKey = "agent_runs.interrupted";
 const defaultPrompts = Object.fromEntries(agentEvents.map((e) => [e.id, e.prompt]));
 /** Events whose run works on the task, so unassigning it stops the run. */
 const taskWork = new Set(["task_assigned", "changes_requested"]);
@@ -255,7 +262,14 @@ export function createAgentLauncher({
     }
     const template =
       config.events[job.event].prompt?.trim() || defaultPrompts[job.event] || "";
-    const prompt = agentPrompt(identity, config.client, renderPrompt(template, values));
+    const eventPrompt = renderPrompt(template, values);
+    const prompt = agentPrompt(
+      identity,
+      config.client,
+      job.resumed
+        ? `TasknBoard quit while an earlier run worked on this. Read the task's comments and the working tree for its progress before you continue.\n${eventPrompt}`
+        : eventPrompt,
+    );
     const base = client.args({
       prompt,
       folder,
@@ -302,7 +316,7 @@ export function createAgentLauncher({
       note(task.id, identity, "agent_not_started", `${client.name} could not start. Log: ${log}`);
       return false;
     }
-    const run = { child, job, cancelled: false };
+    const run = { child, job, log, cancelled: false };
     running.set(identity, run);
     // Listen before any await: a CLI that fails at once must not leave a stale run.
     const finish = (code) => {
@@ -328,7 +342,7 @@ export function createAgentLauncher({
       task.id,
       identity,
       "agent_started",
-      `Started ${client.name} in ${folder} (${reason}). Log: ${log}`,
+      `Started ${client.name} in ${folder} (${reason}${job.resumed ? ", again after TasknBoard restarted" : ""}). Log: ${log}`,
     );
     await output.close();
     return true;
@@ -448,11 +462,81 @@ export function createAgentLauncher({
       queued: (queues.get(identity) ?? []).map(({ event, taskId }) => ({ event, taskId })),
     };
   }
+  /**
+   * Call when the service quits. Runs end with it, so each one is recorded on
+   * its task, its claim is released, and it is saved with the queue to start
+   * again when the service opens.
+   */
   function stop() {
-    for (const run of running.values()) run.child.kill();
+    const interrupted = [];
+    for (const [identity, run] of running) {
+      run.cancelled = true;
+      run.child.kill();
+      interrupted.push({ identity, ...run.job });
+      const task = readTask(identity, run.job.taskId);
+      const config = readConfig(store, identity);
+      const name = agentClients[config?.client]?.name ?? "The agent";
+      if (task?.lease?.actor === identity && task.lease.expiresAt > clock())
+        try {
+          store.execute(
+            "release_task",
+            { id: task.id, expectedVersion: task.version },
+            asAgent(identity),
+          );
+        } catch {
+          // The claim then expires on its own.
+        }
+      note(
+        run.job.taskId,
+        identity,
+        "agent_stopped",
+        `TasknBoard quit while ${name} was working on this. It starts again when TasknBoard opens.`,
+      );
+    }
+    for (const [identity, queue] of queues)
+      for (const job of queue) interrupted.push({ identity, ...job });
     running.clear();
     queues.clear();
     busy.clear();
+    if (enabled)
+      try {
+        store.setSettings({
+          [interruptedKey]: interrupted.length ? JSON.stringify(interrupted) : "",
+        });
+      } catch (error) {
+        console.error(error);
+      }
   }
-  return { assigned, changed, commented, standup, register, status, stop, enabled };
+  /** Call when the service opens: starts the runs it stopped when it quit. */
+  function resume() {
+    if (!enabled) return;
+    let saved = [];
+    try {
+      saved = JSON.parse(store.setting(interruptedKey) || "[]");
+    } catch {
+      // A damaged list starts nothing.
+    }
+    store.setSettings({ [interruptedKey]: "" });
+    for (const { identity, event, taskId, values } of saved) {
+      if (!identity || !agentEvents.some((e) => e.id === event)) continue;
+      const queue = queues.get(identity) ?? [];
+      queue.push({ event, taskId, values: values ?? {}, resumed: true });
+      queues.set(identity, queue);
+    }
+    for (const identity of queues.keys()) void next(identity);
+  }
+  /** Log files that runs write to now. */
+  const runningLogs = () => new Set([...running.values()].map((run) => run.log));
+  return {
+    assigned,
+    changed,
+    commented,
+    standup,
+    register,
+    status,
+    stop,
+    resume,
+    runningLogs,
+    enabled,
+  };
 }

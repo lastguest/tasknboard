@@ -215,6 +215,8 @@ type BoardProps = {
   onNew?: () => void;
   /** Opens the task's context menu. */
   onMenu?: (e: React.MouseEvent<HTMLElement>, t: Task) => void;
+  /** Opens the agent run logs of a task assigned to an agent. */
+  onLogs?: (t: Task) => void;
   pending?: Map<string, Status>;
   list?: boolean;
   /** List sections, from a view's grouping. Without them the list is by status. */
@@ -229,6 +231,7 @@ export function TaskCard({
   onOpen,
   onMove,
   onMenu,
+  onLogs,
   pending,
   presentation,
 }: Omit<BoardProps, "tasks" | "pending" | "list" | "onNew" | "groups"> & {
@@ -257,6 +260,17 @@ export function TaskCard({
     >
       <div className="card-top">
         <span className="task-id">{task.id}</span>
+        {onLogs && agent && !presentation && (
+          <button
+            type="button"
+            className="card-logs"
+            title="Agent logs"
+            aria-label={`Agent logs for ${task.id}`}
+            onClick={() => onLogs(task)}
+          >
+            <Icon name="terminal" size={13} />
+          </button>
+        )}
         <span
           className="card-assignee"
           title={
@@ -328,6 +342,7 @@ export function Board({
   onEpic,
   onNew,
   onMenu,
+  onLogs,
   pending = new Map(),
   list = false,
   groups,
@@ -506,6 +521,7 @@ export function Board({
                   onOpen={onOpen}
                   onMove={canDrag ? onMove : undefined}
                   onMenu={onMenu}
+                  onLogs={onLogs}
                   pending={pending.get(t.id)}
                   presentation={presentation}
                 />

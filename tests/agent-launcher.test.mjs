@@ -271,6 +271,7 @@ test("each CLI gets its model, profile, extra arguments, and environment", async
   const expected = {
     claude: (prompt) => [
       "-p", prompt, "--dangerously-skip-permissions",
+      "--verbose", "--output-format", "stream-json",
       "--model", "m1", "--agent", "p1", "--verbose",
     ],
     codex: (prompt, folder) => [
@@ -514,4 +515,62 @@ test("the login shell supplies the account and profile variables", { skip: proce
   });
   assert.equal(env.USER, userInfo().username);
   assert.match(env.PATH, /\/bin/);
+});
+
+test("a failed stream-json run reports Claude Code's result message", () => {
+  const output = [
+    JSON.stringify({ type: "system", subtype: "init" }),
+    JSON.stringify({ type: "result", subtype: "success", is_error: true, result: "Not logged in · Please run /login" }),
+  ].join("\n");
+  assert.equal(failureReason(output), "Not logged in · Please run /login");
+});
+
+test("quitting records the stopped run, releases its claim, and starts it again on open", async (t) => {
+  const { store, launcher, calls, board, home } = await fixture(t);
+  const bot = { id: "bot", kind: "agent" };
+  const make = (title) =>
+    store.execute("create_task", { boardId: board.id, title, assignee: "bot" }, human);
+  const first = make("Working");
+  const second = make("Waiting");
+  launcher.assigned(first);
+  launcher.assigned(second);
+  await settle();
+  const claimed = store.execute("claim_task", { id: first.id, expectedVersion: 1 }, bot);
+  assert.equal(claimed.lease.actor, "bot");
+  launcher.stop();
+  assert.ok(calls[0].child.killed);
+  const after = store.execute("get_task", { id: first.id }, human);
+  assert.equal(after.lease, null, "the claim is released so the next run can claim it");
+  assert.match(after.events.at(-1).body, /TasknBoard quit while Claude Code was working/);
+  assert.equal(JSON.parse(store.setting("agent_runs.interrupted")).length, 2);
+
+  // The service opens again with the same database.
+  const reopened = [];
+  const next = createAgentLauncher({
+    store,
+    desktop: true,
+    home,
+    searchPath: join(home, "bin"),
+    environment: async () => ({ PATH: join(home, "bin") }),
+    spawn: (command, args, options) => {
+      const child = Object.assign(new EventEmitter(), { kill() {} });
+      reopened.push({ args, child });
+      return child;
+    },
+  });
+  next.resume();
+  await settle();
+  assert.equal(store.setting("agent_runs.interrupted"), "");
+  assert.equal(reopened.length, 1);
+  assert.match(reopened[0].args[1], /TasknBoard quit while an earlier run worked on this/);
+  assert.match(reopened[0].args[1], new RegExp(first.id));
+  const started = store
+    .execute("get_task", { id: first.id }, human)
+    .events.findLast((e) => e.kind === "agent_started");
+  assert.match(started.body, /again after TasknBoard restarted/);
+  reopened[0].child.emit("exit", 0);
+  await settle();
+  assert.equal(reopened.length, 2);
+  assert.match(reopened[1].args[1], new RegExp(second.id));
+  next.stop();
 });
