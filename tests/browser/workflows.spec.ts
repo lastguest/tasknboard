@@ -132,6 +132,27 @@ test("Settings, task workflow, agent review, archive, and export", async ({ page
   await details.getByRole("button", { name: "Post comment" }).click();
   await expect(details).toContainText(comment);
 
+  // Typing @ suggests people from the roster; the keyboard picks one.
+  const commentBox = details.getByLabel("Add a comment");
+  await expect(commentBox).toHaveValue("");
+  await commentBox.pressSequentially("Over to @brow");
+  const mentions = details.getByRole("listbox", { name: "Mention someone" });
+  await expect(mentions.getByRole("option")).toHaveText(["browser-agentAgent"]);
+  await commentBox.press("Enter");
+  await expect(mentions).toBeHidden();
+  await expect(commentBox).toHaveValue("Over to @browser-agent ");
+  await commentBox.pressSequentially("and @");
+  await expect(mentions.getByRole("option")).toHaveCount(2);
+  await commentBox.press("ArrowDown");
+  await expect(mentions.getByRole("option", { selected: true })).toContainText("reviewer");
+  // Escape closes the list and leaves the task open.
+  await commentBox.press("Escape");
+  await expect(mentions).toBeHidden();
+  await expect(details).toBeVisible();
+  await commentBox.press("Backspace");
+  await expect(commentBox).toHaveValue("Over to @browser-agent and ");
+  await commentBox.fill("");
+
   const latest = await command<any>("get_task", { id: taskId });
   const claimed = await command<any>("claim_task", {
     id: taskId,
