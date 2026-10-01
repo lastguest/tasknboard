@@ -222,9 +222,12 @@ test("lane roles keep the claim flow and the human review gate", (t) => {
 
 test("the lane upgrade moves tasks, history and views from statuses to lanes", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "tasknboard-lanes-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "legacy.sqlite");
   let store = createStore(path);
+  t.after(() => {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
   store.execute("create_board", { name: "Ops", prefix: "OPS" }, human);
   const make = (boardId, title) => store.execute("create_task", { boardId, title }, human);
   const tasks = [make("BOARD-1", "One"), make("BOARD-1", "Two"), make("BOARD-2", "Three")];
@@ -262,7 +265,6 @@ test("the lane upgrade moves tasks, history and views from statuses to lanes", (
   db.close();
 
   store = createStore(path);
-  t.after(() => store.close());
   const boards = store.execute("list_boards", {}, human).boards;
   const laneOf = (boardId, role) =>
     boards.find((b) => b.id === boardId).lanes.find((l) => l.role === role).id;
