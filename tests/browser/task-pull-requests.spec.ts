@@ -92,7 +92,8 @@ test("tasks link pull requests, mark the card, and open them in Pull requests", 
 
   await page.goto(baseURL);
   const card = page.getByRole("article", { name: new RegExp(`^${task.id}:`) });
-  await expect(card.locator(".pr-count")).toHaveText("1 pull request");
+  // The mark reads its state from the mocked batch; wait for that final label.
+  await expect(card.locator(".pr-count")).toHaveText("1 pull request: 1 open");
 
   await card.getByRole("button", { name: new RegExp(`^${task.id}:`) }).click();
   const section = page.getByRole("region", { name: "Pull requests" });
