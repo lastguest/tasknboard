@@ -72,3 +72,18 @@ test("a person adds a lane, moves a task through it, and deletes it into another
     "Moved from a deleted lane to In progress",
   );
 });
+
+test("a lane name typed before Esc closes the board dialog is saved", async ({ page }) => {
+  await command("create_task", { boardId: "BOARD-1", title: `Rename ${key()}` });
+  await connect(page);
+  const name = `Inbox ${key()}`;
+  const dialog = await editBoard(page);
+  await dialog.getByRole("textbox", { name: "Name of Backlog" }).fill(name);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(column(page, name)).toHaveCount(1);
+  const board = (await command("list_boards")).boards[0];
+  expect(board.lanes[0].name).toBe(name);
+  // Other specs expect the default lane names.
+  await command("update_lane", { id: "LANE-1", expectedVersion: board.version, patch: { name: "Backlog" } });
+});

@@ -635,6 +635,12 @@ function LaneSettings({
     else if (await write({ name: "update_lane", args: { id: lane.id, patch: { name } } }))
       done();
   }
+  // Esc closes the dialog without a blur, so save a typed name on unmount.
+  const savePending = useRef(() => {});
+  savePending.current = () => {
+    for (const lane of lanes) void rename(lane);
+  };
+  useEffect(() => () => savePending.current(), []);
 
   async function add(event: React.FormEvent) {
     event.preventDefault();
