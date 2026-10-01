@@ -748,30 +748,52 @@ export function PullRequestsPage({
                   const ref = refOf(pr);
                   const selected = sameRef(ref, target);
                   const linked = linkedTasks(tasks, ref);
+                  // The title button covers the row; task chips sit above it.
                   return (
-                    <button
+                    <div
                       key={pr.url}
-                      type="button"
                       className={`pr-row ${selected ? "selected" : ""}`}
-                      aria-current={selected ? "true" : undefined}
-                      onClick={() => onTarget(ref)}
                     >
                       <StateIcon state={pr.state} />
                       <span className="pr-row-main">
-                        <span className="pr-row-title">{pr.title}</span>
+                        <button
+                          type="button"
+                          className="pr-row-open"
+                          aria-current={selected ? "true" : undefined}
+                          onClick={() => onTarget(ref)}
+                        >
+                          <span className="pr-row-title">{pr.title}</span>
+                          <span className="sr-only">
+                            {" "}
+                            {pr.repository}#{pr.number}
+                          </span>
+                        </button>
                         <span className="pr-row-meta">
                           <GitHubAvatar person={pr.author} size={16} />
                           <span className="pr-row-repo">
                             {pr.repository}#{pr.number}
                           </span>
-                          {linked.length > 0 && (
-                            <span
-                              className="pr-row-tasks"
-                              title={linked.map((t) => `${t.id} ${t.title}`).join("\n")}
+                          {linked.slice(0, 2).map((t) => (
+                            <button
+                              key={t.id}
+                              type="button"
+                              className="pr-row-task"
+                              title={`${t.id} ${t.title}`}
+                              aria-label={`Open ${t.id}: ${t.title}`}
+                              onClick={() => onOpenTask(t)}
                             >
-                              <span className="sr-only">Linked to </span>
-                              {linked[0].id}
-                              {linked.length > 1 && ` +${linked.length - 1}`}
+                              {t.id}
+                            </button>
+                          ))}
+                          {linked.length > 2 && (
+                            <span
+                              className="pr-row-more"
+                              title={linked
+                                .slice(2)
+                                .map((t) => `${t.id} ${t.title}`)
+                                .join("\n")}
+                            >
+                              +{linked.length - 2}
                             </span>
                           )}
                           <span className="pr-row-branch">{pr.headRef}</span>
@@ -789,7 +811,7 @@ export function PullRequestsPage({
                           deletions={pr.deletions}
                         />
                       </span>
-                    </button>
+                    </div>
                   );
                 })}
               </div>

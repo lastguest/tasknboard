@@ -354,10 +354,18 @@ test("The Pull requests list shows the tasks that link each pull request", async
   await page.locator(".sidebar").getByRole("button", { name: /^Pull requests/ }).click();
   const row = (number: number) =>
     page.locator(".pr-row").filter({ hasText: `acme/api#${number}` });
-  await expect(row(1201).locator(".pr-row-tasks")).toHaveText(`Linked to ${first.id} +1`);
-  await expect(row(1201).locator(".pr-row-tasks")).toHaveAttribute(
-    "title",
-    new RegExp(`${first.id} First linker[\\s\\S]*${second.id} Second linker`),
+  // Each linked task is a chip that opens it; the rest of the row opens the pull request.
+  await expect(row(1201).locator(".pr-row-task")).toHaveText([second.id, first.id].sort());
+  await row(1201).getByRole("button", { name: `Open ${second.id}: Second linker ${stamp}` }).click();
+  await expect(page.getByRole("textbox", { name: "Title" })).toHaveValue(`Second linker ${stamp}`);
+  await page.locator(".sidebar").getByRole("button", { name: /^Pull requests/ }).click();
+  // Anywhere else on the row, such as its timestamp, opens the pull request.
+  const time = await row(1201).locator("time").boundingBox();
+  await page.mouse.click(time!.x + time!.width / 2, time!.y + time!.height / 2);
+  await expect(page).toHaveURL(/#pulls\/acme\/api\/1201$/);
+  await expect(row(1201).getByRole("button", { name: /^Untitled acme\/api#1201$/ })).toHaveAttribute(
+    "aria-current",
+    "true",
   );
-  await expect(row(1299).locator(".pr-row-tasks")).toHaveCount(0);
+  await expect(row(1299).locator(".pr-row-task")).toHaveCount(0);
 });
