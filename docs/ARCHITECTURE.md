@@ -60,7 +60,7 @@ them. Shared servers return no settings and start no agents.
 
 Implemented: task CRUD (archive rather than delete), filters, board/list,
 keyboard shortcuts, persisted comments/events, MCP tools, lease coordination,
-version conflicts, minimal actor tokens, server polling, backup export.
+version conflicts, minimal actor tokens, live updates, backup export.
 Not implemented: organization membership UI, OAuth/SSO, remote Streamable HTTP
 MCP endpoint, granular per-project roles, offline replica sync, notification
 service, general attachments (only description images are stored), enforced
@@ -117,8 +117,16 @@ Personal views exist only for their owner. Stars are per person and are not
 versioned.
 
 The UI loads WebMCP validation only when the browser exposes
-`document.modelContext`. Ordinary browsers do not download that chunk. Polling
-pauses while the document is hidden and resumes with an immediate refresh.
+`document.modelContext`. Ordinary browsers do not download that chunk.
+
+## Live updates
+
+The [live updates contract](contracts/live-updates.md) replaces browser
+polling. `GET /api/stream` sends an event when the database changes.
+One change feed per server reads the SQLite data version, so writes from
+local MCP and CLI processes count too. The stream carries no data: the
+client reads again with the normal commands. The stream closes while the
+document is hidden and reopens with an immediate refresh.
 
 ## GitHub pull requests
 

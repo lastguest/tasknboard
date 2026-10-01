@@ -1283,6 +1283,17 @@ export function createStore(path, { clock = Date.now } = {}) {
         if (value) db.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, value);
         else db.prepare("DELETE FROM settings WHERE key=?").run(key);
     });
+  const versionQuery = db.prepare(
+    "SELECT (SELECT data_version FROM pragma_data_version) AS other, total_changes() AS own",
+  );
+  /**
+   * Changes when any connection commits to the database file. data_version
+   * covers other connections; total_changes covers this one.
+   */
+  const dataVersion = () => {
+    const { other, own } = versionQuery.get();
+    return `${other}:${own}`;
+  };
   /** Activity written by the service itself, such as an automatic agent start. */
   const recordEvent = (taskId, actor, kind, body = "") =>
     transaction(() => {
@@ -1298,6 +1309,7 @@ export function createStore(path, { clock = Date.now } = {}) {
     setting,
     settingKeys,
     setSettings,
+    dataVersion,
     close: () => db.close(),
   };
 }

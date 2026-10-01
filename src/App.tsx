@@ -24,7 +24,15 @@ import {
 } from "./Dialogs";
 import { Icon } from "./Icons";
 import { AssigneeFilter, UNASSIGNED } from "./AssigneeFilter";
-import { ApiError, command, errorOf, loadTasks, taskNumber, token } from "./api";
+import {
+  ApiError,
+  command,
+  errorOf,
+  loadTasks,
+  subscribeChanges,
+  taskNumber,
+  token,
+} from "./api";
 import { Standup } from "./Standup";
 import { BoardControls, BoardEditor, type BoardPage, SidebarBoards } from "./Boards";
 import {
@@ -369,30 +377,59 @@ export default function App() {
     return () => controller.abort();
   }, [refresh]);
 
+  // The server pushes change events; the stream is closed while the tab is hidden.
+  const [streamEpoch, setStreamEpoch] = useState(0);
   useEffect(() => {
-    let timer: number | undefined;
-    const startPolling = () => {
+    let stream: AbortController | null = null;
+    let debounce: number | undefined;
+    const changed = () => {
+      window.clearTimeout(debounce);
+      debounce = window.setTimeout(() => void refresh(), 150);
+    };
+    const open = () => {
       void refresh();
-      timer = window.setInterval(() => {
-        if (!document.hidden) void refresh();
-      }, 5000);
+      stream = new AbortController();
+      void subscribeChanges(changed, stream.signal);
+    };
+    const close = () => {
+      stream?.abort();
+      stream = null;
+      window.clearTimeout(debounce);
     };
     const onVisibilityChange = () => {
-      if (document.hidden) {
-        if (timer !== undefined) window.clearInterval(timer);
-        timer = undefined;
-      } else if (timer === undefined) {
-        startPolling();
-      }
+      if (document.hidden) close();
+      else if (!stream) open();
     };
 
-    if (!document.hidden) startPolling();
+    if (!document.hidden) open();
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
-      if (timer !== undefined) window.clearInterval(timer);
+      close();
     };
+  }, [refresh, streamEpoch]);
+  /** A new token needs a new stream; the old one may be waiting to retry. */
+  const reconnect = useCallback(() => {
+    setStreamEpoch((n) => n + 1);
+    return refresh();
   }, [refresh]);
+
+  // Leases expire without a database change, so render again at the next expiry.
+  const [leaseClock, setLeaseClock] = useState(0);
+  useEffect(() => {
+    const now = Date.now();
+    const next = Math.min(
+      ...tasks.map((t) =>
+        t.lease && t.lease.expiresAt > now ? t.lease.expiresAt : Infinity,
+      ),
+    );
+    if (next === Infinity) return;
+    const timer = window.setTimeout(
+      () => setLeaseClock((n) => n + 1),
+      next - now + 50,
+    );
+    return () => window.clearTimeout(timer);
+  }, [tasks, leaseClock]);
 
   const toastSeq = useRef(0);
   const notify = useCallback((next: Omit<Toast, "id">) => {
@@ -2283,7 +2320,7 @@ export default function App() {
             setSettingsPage(undefined);
             setSettingsClosed((n) => n + 1);
           }}
-          onReconnect={refresh}
+          onReconnect={reconnect}
         />
       )}
       {epicDialog && (
