@@ -43,7 +43,7 @@ export const githubSchemas = {
     .strict(),
 };
 
-async function request(token, path, init = {}) {
+async function apiRequest(token, path, init = {}) {
   let res;
   try {
     res = await fetch(api + path, {
@@ -120,8 +120,8 @@ async function oauthRequest(path, fields) {
   return body;
 }
 
-async function graphql(token, query, variables) {
-  const body = await request(token, "/graphql", {
+async function queryGitHub(query, variables, request) {
+  const body = await request("/graphql", {
     method: "POST",
     body: JSON.stringify({ query, variables }),
   });
@@ -221,6 +221,77 @@ export function createGitHub(store) {
     ),
   });
   const token = () => store.setting("github.token") || "";
+  let refreshing;
+  const tokenSettings = (body) => {
+    const expiry = (seconds) =>
+      Number.isFinite(Number(seconds)) && Number(seconds) > 0
+        ? String(Date.now() + Number(seconds) * 1000)
+        : "";
+    return {
+      "github.token": body.access_token,
+      "github.refreshToken": body.refresh_token || "",
+      "github.expiresAt": expiry(body.expires_in),
+      "github.refreshExpiresAt": expiry(body.refresh_token_expires_in),
+    };
+  };
+  const unauthorized = () =>
+    fail(
+      "GITHUB_UNAUTHORIZED",
+      "GitHub rejected the token. Reconnect GitHub in Settings.",
+      502,
+    );
+  const refresh = async (rejectedToken) => {
+    if (token() !== rejectedToken) return required();
+    if (refreshing?.generation === generation) return refreshing.promise;
+    const refreshToken = store.setting("github.refreshToken");
+    const expiresAt = Number(store.setting("github.refreshExpiresAt"));
+    if (
+      !refreshToken ||
+      !githubClientId() ||
+      (expiresAt && expiresAt <= Date.now())
+    )
+      unauthorized();
+    const snapshot = generation;
+    const operation = { generation: snapshot };
+    operation.promise = (async () => {
+      const body = await oauthRequest("/login/oauth/access_token", {
+        client_id: githubClientId(),
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      });
+      if (generation !== snapshot) return required();
+      if (
+        body.error ||
+        typeof body.access_token !== "string" ||
+        !body.access_token ||
+        typeof body.refresh_token !== "string" ||
+        !body.refresh_token
+      )
+        unauthorized();
+      store.setSettings(tokenSettings(body));
+      return body.access_token;
+    })();
+    refreshing = operation;
+    try {
+      return await operation.promise;
+    } finally {
+      if (refreshing === operation) refreshing = undefined;
+    }
+  };
+  const request = async (path, init = {}) => {
+    let value = required();
+    const expiresAt = Number(store.setting("github.expiresAt"));
+    const refreshed = Boolean(expiresAt && expiresAt <= Date.now() + 60000);
+    if (refreshed) value = await refresh(value);
+    try {
+      return await apiRequest(value, path, init);
+    } catch (error) {
+      if (error.code !== "GITHUB_UNAUTHORIZED" || refreshed) throw error;
+      value = await refresh(value);
+      return apiRequest(value, path, init);
+    }
+  };
+  const graphql = (...args) => queryGitHub(...args, request);
   const humanOnly = (identity) => {
     if (identity.kind !== "human")
       fail("FORBIDDEN", "Only humans use the GitHub integration", 403);
@@ -249,9 +320,7 @@ export function createGitHub(store) {
       connected: true,
       source: "settings",
       configured,
-      account: cached
-        ? JSON.parse(cached)
-        : account(await request(stored, "/user")),
+      account: cached ? JSON.parse(cached) : account(await request("/user")),
     };
   };
   const handlers = {
@@ -406,7 +475,7 @@ export function createGitHub(store) {
           );
         }
         tokenIssued = true;
-        const user = account(await request(body.access_token, "/user"));
+        const user = account(await apiRequest(body.access_token, "/user"));
         if (!current(attempt))
           fail(
             "GITHUB_AUTHORIZATION_REPLACED",
@@ -422,7 +491,7 @@ export function createGitHub(store) {
           );
         }
         store.setSettings({
-          "github.token": body.access_token,
+          ...tokenSettings(body),
           "github.account": JSON.stringify(user),
         });
         generation++;
@@ -443,7 +512,13 @@ export function createGitHub(store) {
     async disconnect_github() {
       generation++;
       attempts.clear();
-      store.setSettings({ "github.token": "", "github.account": "" });
+      store.setSettings({
+        "github.token": "",
+        "github.account": "",
+        "github.refreshToken": "",
+        "github.expiresAt": "",
+        "github.refreshExpiresAt": "",
+      });
       return status();
     },
     async list_pull_requests({ filter, query, state }) {
@@ -463,7 +538,6 @@ export function createGitHub(store) {
         .filter(Boolean)
         .join(" ");
       const data = await graphql(
-        required(),
         `query($q: String!) { search(query: $q, type: ISSUE, first: 50) {
           issueCount nodes { ... on PullRequest { ${summaryFields} } } } }`,
         { q: search },
@@ -490,7 +564,7 @@ export function createGitHub(store) {
       const params = pullRequests
         .map((_, i) => `$o${i}: String!, $r${i}: String!, $n${i}: Int!`)
         .join(", ");
-      const body = await request(required(), "/graphql", {
+      const body = await request("/graphql", {
         method: "POST",
         body: JSON.stringify({
           query: `query(${params}) { ${fields.join(" ")} }`,
@@ -498,7 +572,11 @@ export function createGitHub(store) {
         }),
       });
       if (!body?.data)
-        fail("GITHUB_ERROR", body?.errors?.[0]?.message || "GitHub query failed.", 502);
+        fail(
+          "GITHUB_ERROR",
+          body?.errors?.[0]?.message || "GitHub query failed.",
+          502,
+        );
       return {
         pullRequests: pullRequests.flatMap((_, i) => {
           const pr = body.data[`p${i}`]?.pullRequest;
@@ -517,7 +595,6 @@ export function createGitHub(store) {
     },
     async get_pull_request({ owner, repo, number }) {
       const data = await graphql(
-        required(),
         `query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) {
           pullRequest(number: $number) { ${summaryFields} body changedFiles mergedAt closedAt
             mergedBy { login avatarUrl }
@@ -651,7 +728,6 @@ export function createGitHub(store) {
       // GitHub lists at most 3,000 files; stop at 300 to keep the page usable.
       for (let page = 1; page <= 3; page++) {
         const batch = await request(
-          required(),
           `/repos/${owner}/${repo}/pulls/${number}/files?per_page=100&page=${page}`,
         );
         files.push(...batch);

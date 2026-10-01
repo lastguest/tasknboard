@@ -25,7 +25,19 @@ The browser verification link always points to `https://github.com/login/device`
 Pending authorization stays in server memory and belongs to the initiating human.
 The service enforces the polling interval and expiry. Restarting the service
 requires a new authorization attempt. Disconnect cancels pending authorization
-and deletes the saved token. It does not revoke the grant on GitHub.
+and deletes the saved access token, refresh token, and expiry times. It does not revoke the grant on GitHub.
+
+When GitHub returns a refresh token, the service saves both tokens and their
+expiry times in the server settings. No command or export returns either token.
+Before a GitHub API request, the service refreshes an access token that expires
+within 60 seconds. A rejected access token triggers one refresh and one retry.
+Concurrent requests share one refresh. The service saves each rotated token pair
+in one transaction. Disconnect or a new connection prevents an earlier refresh
+from overwriting the current connection.
+
+Device flow refresh requires no client secret. Connections without a refresh
+token, or with an expired or rejected refresh token, require authorization again.
+Existing connections require one reconnect to save a refresh token.
 
 ## Commands
 

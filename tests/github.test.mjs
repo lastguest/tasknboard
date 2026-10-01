@@ -35,6 +35,9 @@ function fakeGitHub() {
   const plans = [];
   const flows = new Map();
   const acceptedTokens = new Set([goodToken]);
+  const refreshResponses = [];
+  const queueRefresh = (response, gate) =>
+    refreshResponses.push({ response, gate });
   const userGates = new Map();
   let flowNumber = 0;
   const queueFlow = (responses = [], options = {}) =>
@@ -81,6 +84,13 @@ function fakeGitHub() {
     }
     if (req.url === "/login/oauth/access_token") {
       const form = new URLSearchParams(body);
+      if (form.get("grant_type") === "refresh_token") {
+        const next = refreshResponses.shift();
+        if (next?.gate) await next.gate;
+        const response = next?.response || { error: "bad_refresh_token" };
+        if (response.access_token) acceptedTokens.add(response.access_token);
+        return send(200, response);
+      }
       const flow = flows.get(form.get("device_code"));
       if (!flow) return send(200, { error: "incorrect_device_code" });
       const response = flow.responses.shift() || {
@@ -226,7 +236,14 @@ function fakeGitHub() {
     }
     send(404, { message: "Not Found" });
   });
-  return { server, seen, queueFlow, holdUserToken };
+  return {
+    server,
+    seen,
+    queueFlow,
+    holdUserToken,
+    queueRefresh,
+    revoke: (token) => acceptedTokens.delete(token),
+  };
 }
 
 test("GitHub integration keeps the token on the server and proxies pull requests", async (t) => {
@@ -651,6 +668,126 @@ test("GitHub integration keeps the token on the server and proxies pull requests
   });
   assert.equal(files.body.files.length, 2);
   assert.equal(files.body.files[1].patch, null);
+
+  // Exercise refresh through the actual HTTP service and provider transport.
+  const authorize = async (response) => {
+    await post("disconnect_github");
+    github.queueFlow([response]);
+    assert.equal((await post("connect_github")).status, 200);
+    await pause(1050);
+    const authorized = await post("poll_github_authorization");
+    assert.equal(authorized.status, 200);
+    assert.equal(authorized.body.connected, true);
+  };
+  const refreshRequests = () =>
+    pollRequests().filter(
+      (r) => new URLSearchParams(r.body).get("grant_type") === "refresh_token",
+    );
+  await authorize({
+    access_token: goodToken,
+    refresh_token: "refresh-one",
+    expires_in: 1,
+    refresh_token_expires_in: 3600,
+  });
+  github.queueRefresh({
+    access_token: "refreshed-one",
+    refresh_token: "refresh-two",
+    expires_in: 3600,
+    refresh_token_expires_in: 3600,
+  });
+  const concurrent = await Promise.all([
+    post("list_pull_requests"),
+    post("list_pull_requests"),
+  ]);
+  assert.ok(concurrent.every((r) => r.status === 200));
+  assert.equal(refreshRequests().length, 1);
+  assert.deepEqual(
+    Object.fromEntries(new URLSearchParams(refreshRequests()[0].body)),
+    {
+      client_id: "test-client-id",
+      grant_type: "refresh_token",
+      refresh_token: "refresh-one",
+    },
+  );
+  assert.ok(!JSON.stringify(concurrent).includes("refresh-two"));
+
+  // A 401 refreshes once and uses the rotated refresh token.
+  github.revoke("refreshed-one");
+  github.queueRefresh({
+    access_token: "refreshed-two",
+    refresh_token: "refresh-three",
+    expires_in: 3600,
+    refresh_token_expires_in: 3600,
+  });
+  assert.equal(
+    (
+      await post("get_pull_request_files", {
+        owner: "acme",
+        repo: "resolver",
+        number: 7,
+      })
+    ).status,
+    200,
+  );
+  assert.equal(refreshRequests().length, 2);
+  assert.equal(
+    new URLSearchParams(refreshRequests()[1].body).get("refresh_token"),
+    "refresh-two",
+  );
+  assert.ok(
+    !JSON.stringify((await post("export_workspace")).body).includes(
+      "refresh-three",
+    ),
+  );
+
+  github.revoke("refreshed-two");
+  github.queueRefresh({ error: "bad_refresh_token" });
+  assert.equal(
+    (await post("list_pull_requests")).body.code,
+    "GITHUB_UNAUTHORIZED",
+  );
+  assert.equal(refreshRequests().length, 3);
+
+  await authorize({
+    access_token: goodToken,
+    refresh_token: "expired-refresh",
+    expires_in: 1,
+    refresh_token_expires_in: 0.001,
+  });
+  await pause(10);
+  assert.equal(
+    (await post("list_pull_requests")).body.code,
+    "GITHUB_UNAUTHORIZED",
+  );
+  assert.equal(refreshRequests().length, 3);
+
+  // Disconnect must win over an in-flight refresh.
+  await authorize({
+    access_token: goodToken,
+    refresh_token: "refresh-disconnect",
+    expires_in: 1,
+  });
+  let releaseRefresh;
+  const refreshGate = new Promise((resolve) => {
+    releaseRefresh = resolve;
+  });
+  github.queueRefresh(
+    { access_token: "disconnected-refresh", refresh_token: "must-not-save" },
+    refreshGate,
+  );
+  const pendingRefresh = post("list_pull_requests");
+  await waitFor(() => refreshRequests().length === 4);
+  await post("disconnect_github");
+  releaseRefresh();
+  assert.equal((await pendingRefresh).body.code, "GITHUB_NOT_CONNECTED");
+  assert.equal((await post("github_status")).body.connected, false);
+  await authorize({ access_token: goodToken });
+  github.revoke(goodToken);
+  assert.equal(
+    (await post("list_pull_requests")).body.code,
+    "GITHUB_UNAUTHORIZED",
+  );
+  assert.equal(refreshRequests().length, 4);
 
   // Exports and ordinary commands never carry the GitHub token.
   const backup = await post("export_workspace");
