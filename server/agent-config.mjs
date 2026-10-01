@@ -125,7 +125,7 @@ export const agentEvents = [
     id: "mention",
     label: "Mentioned in a comment",
     description:
-      "A person writes @identity in a comment. To reply, the agent claims the task, which makes it the assignee.",
+      "A person writes @identity in a comment. The agent can reply without claiming the task.",
     enabled: false,
     placeholders: ["agent", "task", "title", "board", "author", "comment"],
     prompt: [
@@ -133,7 +133,7 @@ export const agentEvents = [
       "",
       "{{comment}}",
       "",
-      "Call get_task for {{task}} and read the context. Agents need a claim to comment, so call claim_task, add_comment with your reply, then release_task.",
+      "Call get_task for {{task}} and read the context, then add_comment with your reply. Comments need no claim.",
       "Only change code when the comment asks for it and the task is assigned to you.",
     ].join("\n"),
   },

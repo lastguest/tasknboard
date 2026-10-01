@@ -90,6 +90,28 @@ test("claim exclusion, agent ownership, heartbeat and review lifecycle", (t) => 
   assert.equal(task.status, "done");
   assert.equal(task.events.length, 5);
 });
+test("anyone can comment on a task claimed by someone else", (t) => {
+  const s = fixture(t);
+  let task = s.make();
+  task = s.execute("claim_task", { id: task.id, expectedVersion: 1 }, a);
+  task = s.execute(
+    "add_comment",
+    { id: task.id, expectedVersion: task.version, body: "Human reply" },
+    human,
+  );
+  task = s.execute(
+    "add_comment",
+    { id: task.id, expectedVersion: task.version, body: "Agent reply" },
+    b,
+  );
+  assert.equal(task.lease.actor, a.id);
+  assert.equal(task.assignee, a.id);
+  assert.equal(task.status, "in_progress");
+  assert.deepEqual(
+    task.events.filter((e) => e.kind === "add_comment").map((e) => e.actor),
+    [human.id, b.id],
+  );
+});
 test("expired leases deny old agent writes and allow takeover", (t) => {
   const s = fixture(t);
   let task = s.make();

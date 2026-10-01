@@ -1046,6 +1046,8 @@ export function createStore(path, { clock = Date.now } = {}) {
         t.lease = { actor: identity.id, expiresAt: clock() + 900000 };
         t.assignee = identity.id;
         t.status = "in_progress";
+      } else if (command === "add_comment") {
+        // Anyone may reply, claimed or not; the comment changes no task field.
       } else {
         if (active(t) && t.lease.actor !== identity.id)
           fail("LEASE_CONFLICT", `Task is claimed by ${t.lease.actor}`);

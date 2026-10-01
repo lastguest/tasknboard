@@ -1411,9 +1411,9 @@ export function TaskEditor({
                   </p>
                   {foreignLease && (
                     <p className="small warn">
-                      While this claim is active, the server rejects edits,
-                      comments and archiving from anyone else. Stand-up notes
-                      remain editable.
+                      While this claim is active, the server rejects edits and
+                      archiving from anyone else. Comments and stand-up notes
+                      remain open.
                     </p>
                   )}
                 </>
