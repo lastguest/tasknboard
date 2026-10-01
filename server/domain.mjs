@@ -380,6 +380,10 @@ export const schemas = {
     .object({ from: label, to: z.union([z.literal(""), label]) })
     .strict()
     .refine((v) => v.from !== v.to, "to: Choose a different label"),
+  list_inbox: z
+    .object({ limit: z.number().int().min(1).max(100).default(50) })
+    .strict(),
+  mark_inbox_read: z.object({ upTo: z.number().int().min(0) }).strict(),
   workspace_info: z.object({}).strict(),
   export_workspace: z.object({}).strict(),
 };

@@ -62,8 +62,8 @@ Implemented: task CRUD (archive rather than delete), filters, board/list,
 keyboard shortcuts, persisted comments/events, MCP tools, lease coordination,
 version conflicts, minimal actor tokens, server polling, backup export.
 Not implemented: organization membership UI, OAuth/SSO, remote Streamable HTTP
-MCP endpoint, granular per-project roles, offline replica sync, notification
-service, general attachments (only description images are stored), enforced
+MCP endpoint, granular per-project roles, offline replica sync, external
+notifications (email, push), general attachments (only description images are stored), enforced
 dependencies (task links do not block status changes), custom workflows.
 Remote MCP currently means a local stdio bridge to the shared authenticated API.
 For public deployment, terminate HTTPS and configure tokens. Token rotation is
@@ -119,6 +119,13 @@ versioned.
 The UI loads WebMCP validation only when the browser exposes
 `document.modelContext`. Ordinary browsers do not download that chunk. Polling
 pauses while the document is hidden and resumes with an immediate refresh.
+
+## Inbox
+
+The [inbox contract](contracts/inbox.md) lists comments, mentions and review
+submissions by others that concern the reader. Items derive from `events`
+when read; nothing is copied. Each actor has one read cursor in
+`inbox_cursors`. Marking read is not a task write, and exports omit cursors.
 
 ## GitHub pull requests
 
