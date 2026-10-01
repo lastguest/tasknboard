@@ -103,3 +103,26 @@ test("tasks link pull requests, mark the card, and open them in Pull requests", 
   await section.getByRole("button", { name: "Remove pull request acme/api#415" }).click();
   await expect(section.getByRole("link")).toHaveCount(1);
 });
+
+test("My tasks marks tasks that link pull requests", async ({ page }) => {
+  const task = await command("create_task", {
+    boardId: "BOARD-1",
+    title: `Mine with pull requests ${Date.now()}`,
+    assignee: "reviewer",
+  });
+  await command("link_pull_requests", {
+    id: task.id,
+    expectedVersion: task.version,
+    pullRequests: ["acme/api#501", "acme/api#502"],
+  });
+  await page.addInitScript((value) => {
+    sessionStorage.setItem("tasknboard-token", value);
+  }, humanToken);
+  await page.goto(baseURL);
+  await page.locator(".sidebar").getByRole("button", { name: /^My tasks/ }).click();
+  const card = page.getByRole("article", { name: new RegExp(`^${task.id}:`) });
+  await expect(card.locator(".pr-count")).toHaveAttribute("title", "2 pull requests");
+  await page.getByRole("button", { name: "List", exact: true }).click();
+  const row = page.getByRole("row").filter({ hasText: task.id });
+  await expect(row.locator(".pr-count")).toHaveAttribute("title", "2 pull requests");
+});
