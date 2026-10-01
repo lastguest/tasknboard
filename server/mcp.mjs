@@ -20,7 +20,7 @@ const descriptions = {
   list_epics:
     "List epics (projects that group tasks) with per-status task counts. Humans manage epics; agents read them.",
   get_task:
-    "Read full task context, acceptance criteria, version, claim, links to other tasks and activity.",
+    "Read full task context, acceptance criteria, version, claim, links to other tasks, linked pull requests and activity.",
   create_task:
     "Create a backlog task on the explicit boardId from list_boards, with instructions and acceptance criteria, optionally inside an existing epic.",
   update_task:
@@ -38,6 +38,10 @@ const descriptions = {
     "Link your claimed task to another task: relates, blocks, blocked_by, duplicates, or duplicated_by. Two tasks have at most one link. Links inform; they do not block status changes. Returns a new task version.",
   unlink_task:
     "Remove the link between your claimed task and target, in either direction. Returns a new task version.",
+  link_pull_requests:
+    "Link one or many GitHub pull requests to your claimed task. Pass each as a URL (https://github.com/owner/repo/pull/123) or owner/repo#123. Already-linked ones are skipped; at most 20 per task. Returns a new task version.",
+  unlink_pull_request:
+    "Remove one linked GitHub pull request (URL or owner/repo#123) from your claimed task. Returns a new task version.",
   update_profile:
     "Set your own display name and uploaded avatar. Set useGravatar to enable Gravatar. Omit gravatarEmail to keep the saved address; an empty email clears it when useGravatar is false. Enabling Gravatar requires an email. The email appears only in your own profile response. Your actor ID does not change.",
   upload_image:

@@ -1382,3 +1382,57 @@ test("links survive prefix changes and refuse archived targets", (t) => {
     { code: "ARCHIVED" },
   );
 });
+
+test("tasks link GitHub pull requests by URL or owner/repo#number", (t) => {
+  const s = fixture(t);
+  const task = s.make();
+  const linked = s.execute(
+    "link_pull_requests",
+    {
+      id: task.id,
+      expectedVersion: 1,
+      pullRequests: [
+        "https://github.com/Acme/web/pull/7/files",
+        "acme/web#7",
+        "acme/api#3",
+      ],
+    },
+    human,
+  );
+  assert.equal(linked.version, 2);
+  assert.deepEqual(linked.pullRequests, [
+    { repository: "Acme/web", number: 7, url: "https://github.com/Acme/web/pull/7" },
+    { repository: "acme/api", number: 3, url: "https://github.com/acme/api/pull/3" },
+  ]);
+  assert.deepEqual(JSON.parse(linked.events.at(-1).body), {
+    pullRequests: ["https://github.com/Acme/web/pull/7", "https://github.com/acme/api/pull/3"],
+  });
+  // List reads carry them, so boards can mark the card.
+  assert.equal(
+    s.execute("list_tasks", {}, human).tasks.find((x) => x.id === task.id).pullRequests.length,
+    2,
+  );
+  assert.throws(
+    () => s.execute("link_pull_requests", { id: task.id, expectedVersion: 2, pullRequests: ["ACME/WEB#7"] }, human),
+    { code: "LINK_EXISTS" },
+  );
+  assert.throws(
+    () => s.execute("link_pull_requests", { id: task.id, expectedVersion: 2, pullRequests: ["https://gitlab.com/a/b/-/merge_requests/1"] }, human),
+    { code: "VALIDATION" },
+  );
+  const removed = s.execute(
+    "unlink_pull_request",
+    { id: task.id, expectedVersion: 2, pullRequest: "https://github.com/acme/web/pull/7" },
+    human,
+  );
+  assert.deepEqual(removed.pullRequests.map((pr) => pr.number), [3]);
+  assert.throws(
+    () => s.execute("unlink_pull_request", { id: task.id, expectedVersion: 3, pullRequest: "acme/web#7" }, human),
+    { code: "NOT_FOUND" },
+  );
+  // Agents link only tasks they have claimed.
+  assert.throws(
+    () => s.execute("link_pull_requests", { id: task.id, expectedVersion: 3, pullRequests: ["acme/web#8"] }, a),
+    { code: "LEASE_REQUIRED" },
+  );
+});

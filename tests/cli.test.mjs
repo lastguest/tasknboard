@@ -54,6 +54,21 @@ test("slash commands map to versioned workspace requests", () => {
     name: "unlink_task",
     args: { id: "TNB-1", expectedVersion: 4, target: "TNB-2" },
   });
+  assert.deepEqual(
+    planInput("/pr https://github.com/acme/web/pull/7 acme/api#3", task()).request,
+    {
+      name: "link_pull_requests",
+      args: {
+        id: "TNB-1",
+        expectedVersion: 4,
+        pullRequests: ["https://github.com/acme/web/pull/7", "acme/api#3"],
+      },
+    },
+  );
+  assert.deepEqual(planInput("/unpr acme/api#3", task()).request, {
+    name: "unlink_pull_request",
+    args: { id: "TNB-1", expectedVersion: 4, pullRequest: "acme/api#3" },
+  });
   assert.throws(() => planInput("/link follows TNB-2", task()), /Choose a link type/);
   assert.throws(() => planInput("/link blocks", task()), /Usage: \/link/);
   assert.deepEqual(planInput("/board", undefined), { kind: "boards" });

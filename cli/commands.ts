@@ -214,6 +214,36 @@ export const commands: Command[] = [
     },
   },
   {
+    name: "pr",
+    usage: "/pr <pull request URL>…",
+    summary: "Link GitHub pull requests (URL or owner/repo#123) to the selected task",
+    plan: (arg, task) => {
+      const pullRequests = required(arg, "/pr <pull request URL>…").split(/[\s,]+/);
+      const t = selected(task);
+      return versioned(
+        "link_pull_requests",
+        t,
+        { pullRequests },
+        `${pullRequests.length === 1 ? "Pull request" : "Pull requests"} linked to ${t.id}.`,
+      );
+    },
+  },
+  {
+    name: "unpr",
+    usage: "/unpr <pull request URL>",
+    summary: "Remove a linked pull request from the selected task",
+    plan: (arg, task) => {
+      const pullRequest = required(arg, "/unpr <pull request URL>");
+      const t = selected(task);
+      return versioned(
+        "unlink_pull_request",
+        t,
+        { pullRequest },
+        `Pull request removed from ${t.id}.`,
+      );
+    },
+  },
+  {
     name: "claim",
     usage: "/claim",
     summary: "Claim the selected task for 15 minutes",

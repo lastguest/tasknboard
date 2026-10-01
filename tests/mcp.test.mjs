@@ -25,7 +25,7 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
   });
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 18);
+  assert.equal(tools.tools.length, 20);
   const profileTool = tools.tools.find((tool) => tool.name === "update_profile");
   assert.ok(profileTool);
   assert.match(profileTool.description, /useGravatar.*gravatarEmail/);

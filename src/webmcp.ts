@@ -90,6 +90,16 @@ const tools = [
     false,
   ],
   [
+    "link_pull_requests",
+    "Link one or many GitHub pull requests (URL or owner/repo#123) to a task using its current expectedVersion. Already-linked ones are skipped.",
+    false,
+  ],
+  [
+    "unlink_pull_request",
+    "Remove one linked GitHub pull request from a task using the task's current expectedVersion.",
+    false,
+  ],
+  [
     "set_standup_notes",
     "Set highlight and blocker notes using the current expectedVersion. Empty strings clear notes. Each note has a 500 character limit.",
     false,

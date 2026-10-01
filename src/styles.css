@@ -1060,6 +1060,14 @@ footer {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+.pr-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #bca0f4;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
 .card-bottom .status-select {
   width: auto;
   min-width: 0;
@@ -1747,6 +1755,44 @@ footer {
   gap: 6px;
   min-width: 0;
   color: var(--text);
+}
+.task-prs li {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.task-prs a {
+  text-decoration: none;
+}
+.task-prs a:hover .task-link-title {
+  text-decoration: underline;
+}
+.task-prs .pr-state-icon {
+  padding-top: 0;
+}
+.task-prs .pr-state-icon.unknown {
+  color: var(--subtle);
+}
+.task-pr-ref {
+  flex: none;
+  margin-left: auto;
+  color: var(--subtle);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.task-pr-add {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.task-pr-add input,
+.task-pr-add button {
+  min-height: 30px;
+  height: 30px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+.task-pr-add input {
+  flex: 1;
+  min-width: 0;
 }
 .task-link-title {
   overflow: hidden;

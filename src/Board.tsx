@@ -327,11 +327,26 @@ export function TaskCard({
             </span>
           </span>
         )}
+        <PullCount task={task} />
         {onMove && !presentation && (
           <StatusSelect task={task} pending={pending} onMove={onMove} />
         )}
       </div>
     </article>
+  );
+}
+
+/** A pull request mark when a task links any, with a count past one. */
+function PullCount({ task }: { task: Task }) {
+  const count = task.pullRequests?.length ?? 0;
+  if (!count) return null;
+  const label = `${count} ${count === 1 ? "pull request" : "pull requests"}`;
+  return (
+    <span className="pr-count" title={label}>
+      <Icon name="pull" size={13} />
+      {count > 1 && <span aria-hidden="true">{count}</span>}
+      <span className="sr-only">{label}</span>
+    </span>
   );
 }
 
@@ -393,6 +408,7 @@ export function Board({
               </span>
             </span>
           )}
+          <PullCount task={t} />
           <ClaimChip task={t} />
         </td>
         {epics && (

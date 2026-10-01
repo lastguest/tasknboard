@@ -8,6 +8,7 @@ import {
   epicColors,
   linkTypes,
   imageBytesLimit,
+  pullRequestLimit,
 } from "./domain.mjs";
 import { taskMatchesView } from "./views.mjs";
 
@@ -1149,6 +1150,37 @@ export function createStore(path, { clock = Date.now } = {}) {
             command,
             JSON.stringify({ type: inverseLink[link.type], target: t.id }),
           );
+        }
+        if (command === "link_pull_requests" || command === "unlink_pull_request") {
+          const linked = t.pullRequests ?? [];
+          const same = (a) => (b) =>
+            a.repository.toLowerCase() === b.repository.toLowerCase() &&
+            a.number === b.number;
+          if (command === "link_pull_requests") {
+            const added = p.pullRequests.filter(
+              (pr, i, list) =>
+                !linked.some(same(pr)) && list.findIndex(same(pr)) === i,
+            );
+            if (!added.length)
+              fail(
+                "LINK_EXISTS",
+                `${t.id} already links ${p.pullRequests.length === 1 ? "this pull request" : "these pull requests"}`,
+              );
+            if (linked.length + added.length > pullRequestLimit)
+              fail(
+                "VALIDATION",
+                `pullRequests: A task links at most ${pullRequestLimit} pull requests`,
+                400,
+              );
+            t.pullRequests = [...linked, ...added];
+            link = { pullRequests: added.map((pr) => pr.url) };
+          } else {
+            const existing = linked.find(same(p.pullRequest));
+            if (!existing)
+              fail("NOT_FOUND", `${t.id} does not link ${p.pullRequest.url}`, 404);
+            t.pullRequests = linked.filter((pr) => pr !== existing);
+            link = { pullRequests: [existing.url] };
+          }
         }
         if (command === "archive_task") {
           if (identity.kind !== "human")

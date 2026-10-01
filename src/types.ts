@@ -32,6 +32,14 @@ export type TaskLink = {
   status: Status;
   archived: boolean;
 };
+/** A GitHub pull request linked to a task with `link_pull_requests`. */
+export type TaskPullRequest = {
+  /** `owner/repo`. */
+  repository: string;
+  number: number;
+  /** The canonical `https://github.com/owner/repo/pull/n` URL. */
+  url: string;
+};
 export type Task = {
   id: string;
   boardId: string;
@@ -50,6 +58,8 @@ export type Task = {
   updatedAt: string;
   standup?: { highlight: string; blocker: string };
   review?: { summary: string; artifactUrl: string; actor: string };
+  /** Absent until a pull request is linked. */
+  pullRequests?: TaskPullRequest[];
   /** Present on `get_task` and write results, not on `list_tasks`. */
   links?: TaskLink[];
   events?: TaskEvent[];

@@ -427,7 +427,7 @@ test("WebMCP writes refresh after a read already in flight", async ({ page }) =>
     await route.fulfill({ response: oldResponse });
   });
   await page.goto(baseURL);
-  await expect.poll(() => page.evaluate(() => (window as any).testTools.size)).toBe(14);
+  await expect.poll(() => page.evaluate(() => (window as any).testTools.size)).toBe(16);
   const title = `WebMCP ${key()}`;
   const write = page.waitForResponse((response) => response.url().endsWith("/api/create_task"));
   await page.evaluate((title) => {

@@ -75,6 +75,8 @@ const eventVerb: Record<string, string> = {
   archive_task: "archived",
   link_task: "linked",
   unlink_task: "unlinked",
+  link_pull_requests: "linked pull requests",
+  unlink_pull_request: "removed a pull request",
 };
 
 /** One message format for every failed request. */
@@ -147,6 +149,11 @@ function taskLines(task: Task, width: number): Styled[] {
             `${linkTitle(link.type)} ${link.id} ${link.title} · ${link.archived ? "Archived" : statusTitle(link.status)}`,
         )
         .join("\n"),
+    );
+  if (task.pullRequests?.length)
+    block(
+      "Pull requests",
+      task.pullRequests.map((pr) => `${pr.repository}#${pr.number}  ${pr.url}`).join("\n"),
     );
   if (task.standup) {
     block("Highlight", task.standup.highlight);

@@ -3,7 +3,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { command, errorOf, type ApiError } from "./api";
 import { Icon } from "./Icons";
 import { Markdown } from "./Markdown";
-import type { Task } from "./types";
+import type { Task, TaskPullRequest } from "./types";
 
 export type GitHubAccount = { login: string; name: string; avatarUrl: string };
 export type GitHubStatus = { configured: boolean } & (
@@ -102,9 +102,10 @@ const sameRef = (a: PullRef | null, b: PullRef | null) =>
     a.number === b.number,
   );
 
-/** Tasks that name this pull request in their review evidence or context. */
+/** Tasks that link this pull request, or name it in their review evidence or context. */
 export function linkedTasks(tasks: Task[], ref: PullRef) {
   return tasks.filter((t) =>
+    (t.pullRequests ?? []).some((pr) => sameRef(parsePullRef(pr.url), ref)) ||
     [t.review?.artifactUrl ?? "", t.description].some((text) =>
       [
         ...text.matchAll(
@@ -173,7 +174,7 @@ function GitHubAvatar({
   );
 }
 
-function StateIcon({ state }: { state: PrState }) {
+function StateIcon({ state, size = 16 }: { state: PrState; size?: number }) {
   return (
     <span
       className={`pr-state-icon ${state}`}
@@ -188,9 +189,191 @@ function StateIcon({ state }: { state: PrState }) {
               ? "pullClosed"
               : "pull"
         }
-        size={16}
+        size={size}
       />
     </span>
+  );
+}
+
+/**
+ * Pull request summaries for task details, read once a minute at most.
+ * Without a GitHub connection the rows show only the repository and number.
+ */
+const summaryCache = new Map<
+  string,
+  { at: number; value: Promise<PullSummary | null> }
+>();
+let connection: { at: number; value: Promise<boolean> } | null = null;
+function githubConnected() {
+  if (!connection || Date.now() - connection.at >= 60_000)
+    connection = {
+      at: Date.now(),
+      value: command<GitHubStatus>("github_status").then(
+        (status) => status.connected,
+        () => false,
+      ),
+    };
+  return connection.value;
+}
+function pullSummary(pr: TaskPullRequest) {
+  const key = pr.url.toLowerCase();
+  const cached = summaryCache.get(key);
+  if (cached && Date.now() - cached.at < 60_000) return cached.value;
+  const [owner, repo] = pr.repository.split("/");
+  const value = githubConnected().then((connected) =>
+    connected
+      ? command<PullSummary>("get_pull_request", {
+          owner,
+          repo,
+          number: pr.number,
+        }).catch(() => null)
+      : null,
+  );
+  summaryCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+function TaskPullRequestRow({
+  pr,
+  busy,
+  onRemove,
+}: {
+  pr: TaskPullRequest;
+  busy: boolean;
+  onRemove: () => void;
+}) {
+  const [summary, setSummary] = useState<PullSummary | null>(null);
+  useEffect(() => {
+    let live = true;
+    void pullSummary(pr).then((value) => live && setSummary(value));
+    return () => {
+      live = false;
+    };
+  }, [pr]);
+  const [owner, repo] = pr.repository.split("/");
+  return (
+    <li>
+      <a
+        href={pullHash({ owner, repo, number: pr.number })}
+        title={summary ? `${summary.title} · ${pr.repository}#${pr.number}` : pr.url}
+      >
+        {summary ? (
+          <StateIcon state={summary.state} size={14} />
+        ) : (
+          <span className="pr-state-icon unknown" aria-hidden="true">
+            <Icon name="pull" size={14} />
+          </span>
+        )}
+        <span className="task-link-title">{summary?.title ?? pr.repository}</span>
+        <span className="task-pr-ref">
+          {summary ? `${repo}#${pr.number}` : `#${pr.number}`}
+        </span>
+      </a>
+      <button
+        type="button"
+        className="icon-button compact"
+        aria-label={`Remove pull request ${pr.repository}#${pr.number}`}
+        title="Remove pull request"
+        disabled={busy}
+        onClick={onRemove}
+      >
+        <Icon name="close" size={12} />
+      </button>
+    </li>
+  );
+}
+
+/** The task details list of linked pull requests, with a paste field to add more. */
+export function TaskPullRequests({
+  pullRequests,
+  busy,
+  onLink,
+  onUnlink,
+}: {
+  pullRequests: TaskPullRequest[];
+  busy: boolean;
+  /** Resolves true when the pull requests were saved. */
+  onLink: (values: string[]) => Promise<boolean>;
+  onUnlink: (url: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [value, setValue] = useState("");
+  const [invalid, setInvalid] = useState("");
+  const close = () => {
+    setAdding(false);
+    setValue("");
+    setInvalid("");
+  };
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const values = value.split(/[\s,]+/).filter(Boolean);
+    if (!values.length) return;
+    const bad = values.find((v) => !parsePullRef(v));
+    if (bad) {
+      setInvalid(`“${bad}” is not a GitHub pull request link.`);
+      return;
+    }
+    if (await onLink(values)) close();
+  }
+  return (
+    <section className="side-block" aria-label="Pull requests">
+      <div className="side-block-head">
+        <h3>
+          <Icon name="pull" size={14} /> Pull requests
+        </h3>
+        <button
+          type="button"
+          className="icon-button compact"
+          aria-label="Link pull requests"
+          title="Link pull requests"
+          aria-expanded={adding}
+          disabled={busy}
+          onClick={() => (adding ? close() : setAdding(true))}
+        >
+          <Icon name="plus" size={14} />
+        </button>
+      </div>
+      {pullRequests.length > 0 && (
+        <ul className="task-links task-prs">
+          {pullRequests.map((pr) => (
+            <TaskPullRequestRow
+              key={pr.url}
+              pr={pr}
+              busy={busy}
+              onRemove={() => onUnlink(pr.url)}
+            />
+          ))}
+        </ul>
+      )}
+      {!pullRequests.length && !adding && (
+        <p className="small">No pull requests.</p>
+      )}
+      {adding && (
+        <form className="task-pr-add" onSubmit={submit}>
+          <input
+            autoFocus
+            aria-label="Pull request links"
+            placeholder="Paste GitHub pull request links"
+            value={value}
+            disabled={busy}
+            onChange={(e) => {
+              setValue(e.target.value);
+              setInvalid("");
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "Escape") return;
+              // Close the field, not the task panel.
+              e.stopPropagation();
+              close();
+            }}
+          />
+          <button type="submit" disabled={busy || !value.trim()}>
+            Link
+          </button>
+        </form>
+      )}
+      {invalid && <p className="small warn">{invalid}</p>}
+    </section>
   );
 }
 

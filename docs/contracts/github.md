@@ -63,8 +63,9 @@ The app opens a pull request from `#pulls/<owner>/<repo>/<number>`. It also
 accepts a GitHub URL after `#`: replace `https://` in a pull request URL with
 the app's address and `#`, like Linear's `linear.review` links. A GitHub pull
 request URL pasted into the main search, or typed there and followed by Enter,
-opens the pull request. A task links to a pull request when its review artifact
-URL or description contains the pull request URL. Tasks with a pull request
+opens the pull request. A task links to a pull request when it lists it in
+`pullRequests` ([task pull requests](task-pull-requests.md)), or when its
+review artifact URL or description contains the pull request URL. Tasks with a pull request
 artifact show **Review pull request**.
 Avatars load from `avatars.githubusercontent.com`, which the content security
 policy allows. Other remote images in pull request text remain links.

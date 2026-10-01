@@ -120,6 +120,37 @@ export const linkTypes = [
   "duplicates",
   "duplicated_by",
 ];
+/** At most this many pull requests link to one task. */
+export const pullRequestLimit = 20;
+/**
+ * A GitHub pull request from its URL or `owner/repo#123`, stored as
+ * `{ repository, number, url }` with the canonical URL.
+ */
+export function parsePullRequest(value) {
+  const text = String(value).trim();
+  const match =
+    text.match(
+      /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)(?:[/?#].*)?$/i,
+    ) ?? text.match(/^([\w-]+)\/([\w.-]+)#(\d+)$/);
+  if (!match || !Number(match[3])) return null;
+  const repository = `${match[1]}/${match[2]}`;
+  const number = Number(match[3]);
+  return { repository, number, url: `https://github.com/${repository}/pull/${number}` };
+}
+const pullRequest = z
+  .string()
+  .max(500)
+  .transform((value, ctx) => {
+    const pr = parsePullRequest(value);
+    if (!pr) {
+      ctx.addIssue({
+        code: "custom",
+        message: "GitHub pull request URL or owner/repo#123 required",
+      });
+      return z.NEVER;
+    }
+    return pr;
+  });
 const labels = z.array(z.string().trim().min(1).max(40))
   .transform((values) => [...new Set(values)]);
 const patch = z
@@ -204,6 +235,16 @@ export const schemas = {
     .strict(),
   unlink_task: z
     .object({ id, expectedVersion: version, target: id })
+    .strict(),
+  link_pull_requests: z
+    .object({
+      id,
+      expectedVersion: version,
+      pullRequests: z.array(pullRequest).min(1).max(pullRequestLimit),
+    })
+    .strict(),
+  unlink_pull_request: z
+    .object({ id, expectedVersion: version, pullRequest })
     .strict(),
   update_profile: z
     .object({

@@ -27,7 +27,12 @@ import { CliHelper } from "./CliHelper";
 import { MarkdownEditor } from "./Markdown";
 import { useMentions } from "./Mentions";
 import { EpicTag } from "./Epics";
-import { GitHubSettings, parsePullRef, pullHash } from "./PullRequests";
+import {
+  GitHubSettings,
+  parsePullRef,
+  pullHash,
+  TaskPullRequests,
+} from "./PullRequests";
 import {
   Avatar,
   displayName,
@@ -496,6 +501,8 @@ const kindText: Record<string, string> = {
   set_standup_notes: "updated stand-up notes",
   link_task: "linked a task",
   unlink_task: "removed a link",
+  link_pull_requests: "linked pull requests",
+  unlink_pull_request: "removed a pull request",
   agent_started: "started work automatically",
   agent_not_started: "could not start automatically",
   agent_stopped: "stopped before finishing",
@@ -539,6 +546,13 @@ function eventDetail(e: TaskEvent, epicTitle: (id: string) => string) {
     if (e.kind === "submit_review") return body.summary;
     if (e.kind === "link_task" || e.kind === "unlink_task")
       return `${linkTitle(body.type)} ${body.target}`;
+    if (e.kind === "link_pull_requests" || e.kind === "unlink_pull_request")
+      return (body.pullRequests as string[])
+        .map((url) => {
+          const ref = parsePullRef(url);
+          return ref ? `${ref.owner}/${ref.repo}#${ref.number}` : url;
+        })
+        .join(", ");
   } catch {
     // Older or free-text bodies are shown as plain text below.
   }
@@ -633,7 +647,8 @@ type Pending =
   | "review"
   | "archive"
   | "reload"
-  | "link";
+  | "link"
+  | "pulls";
 
 export function TaskEditor({
   task,
@@ -701,6 +716,7 @@ export function TaskEditor({
   const [linkPicker, setLinkPicker] = useState(false);
   const [linkMenu, setLinkMenu] = useState<MenuState | null>(null);
   const [linkError, setLinkError] = useState<ApiError | null>(null);
+  const [pullError, setPullError] = useState<ApiError | null>(null);
   /** What the discard confirmation leads to: closing, or a revert to the saved task. */
   const [discard, setDiscard] = useState<false | "close" | "revert">(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -943,6 +959,33 @@ export function TaskEditor({
       onChanged(next);
     } catch (e) {
       setLinkError(errorOf(e));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  /** Pull requests are separate writes too; true when the server saved them. */
+  async function writePulls(
+    name: "link_pull_requests" | "unlink_pull_request",
+    values: string[],
+  ) {
+    if (!current || pending) return false;
+    setPending("pulls");
+    setPullError(null);
+    try {
+      const next = await command<Task>(name, {
+        id: current.id,
+        expectedVersion: current.version,
+        ...(name === "link_pull_requests"
+          ? { pullRequests: values }
+          : { pullRequest: values[0] }),
+      });
+      setCurrent(next);
+      onChanged(next);
+      return true;
+    } catch (e) {
+      setPullError(errorOf(e));
+      return false;
     } finally {
       setPending(null);
     }
@@ -1393,6 +1436,19 @@ export function TaskEditor({
                 />
               )}
             </section>
+            <TaskPullRequests
+              pullRequests={current.pullRequests ?? []}
+              busy={Boolean(pending)}
+              onLink={(values) => writePulls("link_pull_requests", values)}
+              onUnlink={(url) => void writePulls("unlink_pull_request", [url])}
+            />
+            {pullError && (
+              <ErrorNote
+                error={pullError}
+                onReload={reload}
+                busy={Boolean(pending)}
+              />
+            )}
             <section className="side-block" aria-label="Claim">
               <h3>
                 <Icon name="lock" size={14} /> Claim
