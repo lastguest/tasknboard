@@ -37,9 +37,11 @@ import { PullRequestsPage, parsePullRef, pullHash, type PullRef } from "./PullRe
 import type { SettingsPage } from "./Dialogs";
 import {
   DisplayOptions,
+  FavoriteButton,
   FilterBar,
   ViewEditor,
   ViewGlyph,
+  ViewMeta,
   ViewsPage,
   ViewSummary,
   groupTasks,
@@ -1779,6 +1781,12 @@ export default function App() {
           >
             <header className="page-title">
               <div className="page-title-row">
+                {currentSaved && isHuman && (
+                  <FavoriteButton
+                    view={currentSaved}
+                    onToggle={() => void toggleFavorite(currentSaved)}
+                  />
+                )}
                 <h1 tabIndex={-1} data-focus-fallback="">
                   {currentEpic && (
                     <span
@@ -1812,9 +1820,25 @@ export default function App() {
                     }
                   />
                 )}
+                {currentSaved && isHuman && (
+                  <div className="board-controls" role="group" aria-label="View actions">
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => setViewDialog({ view: currentSaved })}
+                    >
+                      Edit view
+                    </button>
+                  </div>
+                )}
               </div>
               {view === "board" ? (
                 currentBoard?.description && <p>{currentBoard.description}</p>
+              ) : currentSaved ? (
+                <ViewMeta
+                  view={currentSaved}
+                  boardName={currentBoard?.name ?? "the selected board"}
+                />
               ) : (
                 <p>
                   {view === "epic"
@@ -1822,9 +1846,7 @@ export default function App() {
                       ? `${currentEpic.archived ? "Archived epic" : "Epic"} · Tasks on ${currentBoard?.name ?? "the selected board"}`
                       : "This epic isn't in the workspace."
                     : view === "saved"
-                    ? currentSaved
-                      ? `Saved filters and display · Counts for ${currentBoard?.name ?? "the selected board"}`
-                      : "This view was deleted or is no longer shared with you."
+                    ? "This view was deleted or is no longer shared with you."
                     : view === "views"
                     ? `Saved filters and display settings. Counts reflect ${currentBoard?.name ?? "the selected board"}. Star a view to keep it in the sidebar.`
                     : view === "pulls"
@@ -1882,8 +1904,6 @@ export default function App() {
                 onSave={() => void saveViewChanges()}
                 onSaveAs={() => saveAsRef.current()}
                 onReset={() => seedView(currentSaved)}
-                onEdit={() => setViewDialog({ view: currentSaved })}
-                onFavorite={() => void toggleFavorite(currentSaved)}
               />
             )}
             {view === "views" ? (

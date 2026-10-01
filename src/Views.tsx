@@ -614,7 +614,28 @@ export function ViewsPage({
   );
 }
 
-/** The heading block of an open view, with its unsaved-changes bar. */
+/** The subtitle line of an open view: who can see it, who owns it, which board it counts. */
+export function ViewMeta({
+  view,
+  boardName,
+}: {
+  view: SavedView;
+  boardName: string;
+}) {
+  const people = usePeople();
+  return (
+    <p className="view-meta">
+      <span className="view-scope">
+        <Icon name={view.shared ? "users" : "lock"} size={13} />
+        {view.shared ? "Workspace view" : "Personal view"}
+      </span>
+      <span>Owner: {displayName(people, view.owner)}</span>
+      <span>Counts for {boardName}</span>
+    </p>
+  );
+}
+
+/** The description and unsaved-changes bar under an open view's heading. */
 export function ViewSummary({
   view,
   dirty,
@@ -624,8 +645,6 @@ export function ViewSummary({
   onSave,
   onSaveAs,
   onReset,
-  onEdit,
-  onFavorite,
 }: {
   view: SavedView;
   dirty: boolean;
@@ -635,38 +654,14 @@ export function ViewSummary({
   onSave: () => void;
   onSaveAs: () => void;
   onReset: () => void;
-  onEdit: () => void;
-  onFavorite: () => void;
 }) {
-  const people = usePeople();
+  const description = view.description.trim();
+  if (!description && !(dirty && canManage)) return null;
   return (
     <div className="epic-summary view-summary">
-      {view.description.trim() && (
+      {description && (
         <Markdown source={view.description} className="epic-description" />
       )}
-      <div className="epic-summary-row">
-        <span className="view-meta">
-          <span className="view-scope">
-            <Icon name={view.shared ? "users" : "lock"} size={13} />
-            {view.shared ? "Workspace view" : "Personal view"}
-          </span>
-          <span className="small">
-            Owner: {displayName(people, view.owner)}
-          </span>
-        </span>
-        {canManage && (
-          <span className="view-summary-actions">
-            <FavoriteButton view={view} onToggle={onFavorite} />
-            <button
-              type="button"
-              className="secondary small-button"
-              onClick={onEdit}
-            >
-              Edit view
-            </button>
-          </span>
-        )}
-      </div>
       {dirty && canManage && (
         <div className="view-dirty" role="region" aria-label="Unsaved view changes">
           <Icon name="info" size={15} />

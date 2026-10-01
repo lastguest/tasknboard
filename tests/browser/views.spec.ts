@@ -92,7 +92,7 @@ test("Views save filters and display, favourite into the sidebar, and delete", a
   await expect(page.locator("tbody tr:not(.group-row)")).toHaveCount(1);
 
   // A favourite appears in the sidebar and opens the view.
-  await page.locator(".view-summary").getByRole("button", { name: `Favorite ${name}` }).click();
+  await page.locator(".page-title").getByRole("button", { name: `Favorite ${name}` }).click();
   const favorites = page.getByRole("navigation", { name: "Favorites" });
   await expect(favorites.getByRole("button", { name: new RegExp(`^${name}`) })).toBeVisible();
 

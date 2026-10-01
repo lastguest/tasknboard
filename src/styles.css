@@ -543,12 +543,15 @@ main {
 .page-title-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
 }
 .page-title-row h1 {
   min-width: 0;
+}
+/* The view star leads the title, close enough to read as part of it. */
+.page-title-row > .favorite-toggle {
+  margin-right: -6px;
 }
 .board-controls {
   display: flex;
@@ -4426,23 +4429,16 @@ footer {
   height: 22px;
   font-size: 9px;
 }
-.view-meta {
-  display: inline-flex;
+.page-title .view-meta {
+  display: flex;
   align-items: center;
-  gap: 14px;
+  flex-wrap: wrap;
+  gap: 4px 14px;
 }
 .view-scope {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  color: var(--muted);
-}
-.view-summary-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
 }
 .view-dirty {
   display: flex;
