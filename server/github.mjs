@@ -601,7 +601,7 @@ export function createGitHub(store) {
             commits(last: 1) { totalCount nodes { commit { statusCheckRollup { state contexts(first: 50) { nodes {
               __typename ... on CheckRun { name status conclusion detailsUrl title }
               ... on StatusContext { context state targetUrl description } } } } } } }
-            reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login avatarUrl } ... on Team { name slug } } } }
+            reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login avatarUrl }  } } }
             latestReviews(first: 20) { nodes { state author { login avatarUrl } } }
             comments { totalCount }
             reviewThreads { totalCount }
@@ -614,7 +614,7 @@ export function createGitHub(store) {
                 ... on ClosedEvent { createdAt actor { login avatarUrl } }
                 ... on ReopenedEvent { createdAt actor { login avatarUrl } }
                 ... on ReadyForReviewEvent { createdAt actor { login avatarUrl } }
-                ... on ReviewRequestedEvent { createdAt actor { login avatarUrl } requestedReviewer { ... on User { login } ... on Team { name } } }
+                ... on ReviewRequestedEvent { id createdAt actor { login avatarUrl } requestedReviewer { __typename ... on User { login } } }
                 ... on HeadRefForcePushedEvent { createdAt actor { login avatarUrl } } } } } } }`,
         { owner, repo, number },
       );
@@ -628,12 +628,53 @@ export function createGitHub(store) {
       const rollup = pr.commits.nodes[0]?.commit.statusCheckRollup;
       const reviewers = new Map();
       for (const { requestedReviewer: r } of pr.reviewRequests.nodes)
-        if (r)
-          reviewers.set(r.login || r.slug, {
-            login: r.login || `@${r.slug}`,
-            avatarUrl: r.avatarUrl || "",
+        if (r?.login)
+          reviewers.set(r.login, { ...person(r), state: "requested" });
+      if (
+        pr.reviewRequests.nodes.some(
+          ({ requestedReviewer: r }) => r?.__typename === "Team",
+        )
+      ) {
+        const requested = await request(
+          `/repos/${owner}/${repo}/pulls/${number}/requested_reviewers`,
+        );
+        for (const team of requested.teams)
+          reviewers.set(`@${team.slug}`, {
+            login: `@${team.slug}`,
+            avatarUrl: "",
             state: "requested",
           });
+      }
+      const teamRequests = new Map();
+      const missingTeamEvents = new Set(
+        pr.timelineItems.nodes
+          .filter(
+            (n) =>
+              n.__typename === "ReviewRequestedEvent" &&
+              n.requestedReviewer?.__typename === "Team",
+          )
+          .map((n) => n.id),
+      );
+      if (missingTeamEvents.size) {
+        for (let page = 1; ; page++) {
+          const events = await request(
+            `/repos/${owner}/${repo}/issues/${number}/timeline?per_page=100&page=${page}`,
+          );
+          for (const event of events) {
+            if (missingTeamEvents.has(event.node_id)) {
+              teamRequests.set(event.node_id, event.requested_team.name);
+              missingTeamEvents.delete(event.node_id);
+            }
+          }
+          if (!missingTeamEvents.size || events.length < 100) break;
+        }
+        if (missingTeamEvents.size)
+          fail(
+            "GITHUB_ERROR",
+            "GitHub did not return the requested team review events.",
+            502,
+          );
+      }
       for (const review of pr.latestReviews.nodes)
         if (review.author)
           reviewers.set(review.author.login, {
@@ -682,7 +723,7 @@ export function createGitHub(store) {
                 actor: person(n.actor),
                 createdAt: n.createdAt,
                 body:
-                  n.requestedReviewer?.login || n.requestedReviewer?.name || "",
+                  n.requestedReviewer?.login || teamRequests.get(n.id) || "",
               },
             ];
           default: {

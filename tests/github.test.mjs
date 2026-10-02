@@ -124,8 +124,26 @@ function fakeGitHub() {
         },
         { filename: "logo.png", status: "added", additions: 0, deletions: 0 },
       ]);
+    if (req.url === "/repos/acme/resolver/pulls/7/requested_reviewers")
+      return send(200, {
+        users: [],
+        teams: [{ slug: "maintainers", name: "Maintainers" }],
+      });
+    if (req.url.startsWith("/repos/acme/resolver/issues/7/timeline"))
+      return send(200, [
+        { node_id: "team-event", requested_team: { name: "Maintainers" } },
+      ]);
     if (req.url === "/graphql") {
       const { query, variables } = JSON.parse(body);
+      if (/\.\.\. on Team\s*\{[^}]*\b(name|slug)\b/.test(query))
+        return send(200, {
+          errors: [
+            {
+              type: "INSUFFICIENT_SCOPES",
+              message: "Team fields require read:org",
+            },
+          ],
+        });
       if (query.includes("search("))
         return send(200, {
           data: { search: { issueCount: 1, nodes: [pr, {}] } },
@@ -198,6 +216,7 @@ function fakeGitHub() {
                       avatarUrl: "",
                     },
                   },
+                  { requestedReviewer: { __typename: "Team" } },
                 ],
               },
               latestReviews: {
@@ -221,6 +240,13 @@ function fakeGitHub() {
                       committedDate: "2026-09-21T00:00:00Z",
                       author: { user: null, name: "Wax" },
                     },
+                  },
+                  {
+                    __typename: "ReviewRequestedEvent",
+                    id: "team-event",
+                    createdAt: "2026-09-22T00:00:00Z",
+                    actor: { login: "octo", avatarUrl: "" },
+                    requestedReviewer: { __typename: "Team" },
                   },
                   {
                     __typename: "MergedEvent",
@@ -610,14 +636,16 @@ test("GitHub integration keeps the token on the server and proxies pull requests
     detail.body.reviewers.map((r) => [r.login, r.state]),
     [
       ["reviewer", "requested"],
+      ["@maintainers", "requested"],
       ["octo", "approved"],
     ],
   );
   assert.deepEqual(
     detail.body.activity.map((a) => a.kind),
-    ["commit", "merged"],
+    ["commit", "review_requested", "merged"],
   );
   assert.equal(detail.body.activity[0].actor.login, "Wax");
+  assert.equal(detail.body.activity[1].body, "Maintainers");
 
   assert.equal(
     (
