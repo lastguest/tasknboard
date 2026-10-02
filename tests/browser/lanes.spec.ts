@@ -18,7 +18,7 @@ async function command(name: string, args: object = {}) {
 async function connect(page: Page) {
   await page.addInitScript((value) => sessionStorage.setItem("tasknboard-token", value), humanToken);
   await page.goto(baseURL);
-  await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
+  await expect(page.locator(".workspace-status .identity")).toContainText("reviewer");
 }
 const editBoard = async (page: Page) => {
   await page.getByRole("group", { name: "Board actions" }).getByRole("button", { name: "Edit board" }).click();

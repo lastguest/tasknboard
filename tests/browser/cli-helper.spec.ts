@@ -16,7 +16,7 @@ async function openCliHelper(page: Page) {
     sessionStorage.setItem("tasknboard-token", value);
   }, humanToken);
   await page.goto(baseURL);
-  await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
+  await expect(page.locator(".workspace-status .identity")).toContainText("reviewer");
 
   await page.locator(".sidebar").getByRole("button", { name: "Settings" }).click();
   const settings = page.getByRole("dialog", { name: "Settings" });

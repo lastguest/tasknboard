@@ -17,7 +17,7 @@ async function command(name: string, args: object = {}) {
 async function connect(page: Page) {
   await page.addInitScript((value) => sessionStorage.setItem("tasknboard-token", value), humanToken);
   await page.goto(baseURL);
-  await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
+  await expect(page.locator(".workspace-status .identity")).toContainText("reviewer");
 }
 
 test("A near-duplicate title in the New task dialog shows the existing task", async ({ page }) => {

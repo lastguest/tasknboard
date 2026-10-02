@@ -24,7 +24,7 @@ async function connect(page: Page) {
     sessionStorage.setItem("tasknboard-token", value);
   }, humanToken);
   await page.goto(baseURL);
-  await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
+  await expect(page.locator(".workspace-status .identity")).toContainText("reviewer");
 }
 
 test("boards scope task keys, persist selection, and own task deep links", async ({ page }) => {

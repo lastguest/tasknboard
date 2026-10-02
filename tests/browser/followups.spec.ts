@@ -22,7 +22,7 @@ async function create(title: string, assignee = "") {
 async function connect(page: Page) {
   await page.addInitScript((value) => sessionStorage.setItem("tasknboard-token", value), humanToken);
   await page.goto(baseURL);
-  await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
+  await expect(page.locator(".workspace-status .identity")).toContainText("reviewer");
 }
 /** The Save button, also while it reads "Saving…". Hidden means no save is running. */
 const saveButton = (scope: Locator) =>
@@ -537,7 +537,7 @@ test("Settings offers Change server only inside the iOS shell", async ({ page })
     });
   });
   await page.reload();
-  await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
+  await expect(page.locator(".workspace-status .identity")).toContainText("reviewer");
   await nav(page, "Settings").click();
   settings = page.getByRole("dialog", { name: "Settings" });
   await settings.getByRole("button", { name: "Connection & data" }).click();

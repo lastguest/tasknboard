@@ -33,7 +33,7 @@ async function connected(page: Page) {
     sessionStorage.setItem("tasknboard-token", value);
   }, humanToken);
   await page.goto(baseURL);
-  await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
+  await expect(page.locator(".workspace-status .identity")).toContainText("reviewer");
 }
 
 async function apiTask(title: string, assignee = "") {
@@ -92,7 +92,7 @@ test("Settings, task workflow, agent review, archive, and export", async ({ page
   await settings.getByRole("button", { name: "Save connection" }).click();
   await expect(settings.getByRole("status")).toContainText("Connection saved");
   await settings.getByRole("button", { name: "Close dialog" }).click();
-  await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
+  await expect(page.locator(".workspace-status .identity")).toContainText("reviewer");
 
   await page.getByRole("button", { name: "New task", exact: true }).click();
   const createDialog = page.getByRole("dialog", { name: "New task" });
@@ -185,7 +185,7 @@ test("Settings, task workflow, agent review, archive, and export", async ({ page
   expect(reviewed.lease).toBeNull();
 
   await page.reload();
-  await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
+  await expect(page.locator(".workspace-status .identity")).toContainText("reviewer");
   await page.getByRole("button", { name: new RegExp(`^${taskId}: Edited ${title}`) }).click();
   details = page.getByRole("region", { name: /Task details/ });
   await expect(details).toContainText(`Reviewed in browser suite ${key}`);

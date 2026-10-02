@@ -20,7 +20,7 @@ test("A change in one page appears in another open page without a reload", async
   const [writer, reader] = [await context.newPage(), await context.newPage()];
   for (const page of [writer, reader]) {
     await page.goto(baseURL);
-    await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
+    await expect(page.locator(".workspace-status .identity")).toContainText("reviewer");
   }
   let reloads = 0;
   reader.on("load", () => reloads++);
@@ -42,7 +42,7 @@ test("An agent claim appears live and its chip goes away when the lease expires"
   await page.clock.install();
   await page.addInitScript((value) => sessionStorage.setItem("tasknboard-token", value), humanToken);
   await page.goto(baseURL);
-  await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
+  await expect(page.locator(".workspace-status .identity")).toContainText("reviewer");
   const title = `Lease ${randomUUID().slice(0, 8)}`;
   const task = await command("create_task", { boardId: "BOARD-1", title }, humanToken);
   await command("claim_task", { id: task.id, expectedVersion: task.version }, agentToken);

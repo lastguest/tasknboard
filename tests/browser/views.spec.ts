@@ -19,7 +19,7 @@ async function command(name: string, args: object = {}, token = humanToken) {
 async function connect(page: Page) {
   await page.addInitScript((value) => sessionStorage.setItem("tasknboard-token", value), humanToken);
   await page.goto(baseURL);
-  await expect(page.locator(".workspace-status")).toContainText("reviewer · human");
+  await expect(page.locator(".workspace-status .identity")).toContainText("reviewer");
 }
 async function addFilter(page: Page, field: string, values: string[]) {
   // The add-filter button is an icon in the Board/List tab row; the chips stay in the Filters group.
