@@ -958,6 +958,13 @@ function PullRequestDetail({
             rel="noopener noreferrer"
             aria-label="Open on GitHub"
             title="Open on GitHub"
+            onClick={(event) => {
+              if (!isTauri()) return;
+              event.preventDefault();
+              invoke("open_external_url", {
+                url: event.currentTarget.href,
+              }).catch((cause) => setError(errorOf(cause)));
+            }}
           >
             <Icon name="external" size={15} />
           </a>
