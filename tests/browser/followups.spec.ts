@@ -716,7 +716,7 @@ test("Profiles show display names and pictures, and IDs stay unchanged", async (
     await settings.getByRole("button", { name: "Save profile" }).click();
     await expect(settings.getByRole("status")).toContainText("Profile saved");
     await settings.getByRole("button", { name: "Close dialog" }).click();
-    await expect(page.locator(".workspace-status")).toContainText("Riley Reviewer · human");
+    await expect(page.locator(".workspace-status .identity")).toContainText("Riley Reviewer");
     await expect(page.locator(".workspace-status .avatar img")).toHaveCount(1);
 
     await nav(page, "Settings").click();
