@@ -28,7 +28,7 @@ test("review changes require a reason and delegation stays visible", async ({ pa
   await page.getByRole("button", { name: new RegExp(`^${task.id}: ${title}`) }).click();
   const details = page.getByRole("region", { name: /Task details/ });
   await expect(details).toContainText("tasks/T005.result.md");
-  await expect(details.getByRole("region", { name: "Commits" })).toContainText("a123456789abcdef");
+  await expect(details.getByRole("region", { name: "Commits", exact: true })).toContainText("a123456789abcdef");
   await details.getByRole("button", { name: "Request changes", exact: true }).click();
   const send = details.getByRole("button", { name: "Send to In progress" });
   await expect(send).toBeDisabled();

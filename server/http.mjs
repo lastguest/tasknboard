@@ -20,6 +20,8 @@ import {
 import { createGitHub } from "./github.mjs";
 import { createChangeFeed } from "./changes.mjs";
 import { createCommitLinks } from "./commit-links.mjs";
+import { readTaskFiles, responseUrls } from "./task-files.mjs";
+import { readTaskCommitSummary } from "./commit-links.mjs";
 import { imageDataUrlLimit } from "./domain.mjs";
 import { dbPath, localActor, tokensFromEnvironment } from "./config.mjs";
 const host = process.env.HOST || "127.0.0.1",
@@ -61,15 +63,48 @@ store.registerActors(
   Object.keys(tokens).length ? Object.values(tokens) : [localActor],
 );
 const commitLinks = createCommitLinks(store, {
-  onError: (error, repository) => console.error(`Commit scan failed for ${repository}: ${error.message}`),
+  onError: (error, repository) =>
+    console.error(`Commit scan failed for ${repository}: ${error.message}`),
 });
 commitLinks.start();
 const httpError = (code, message, status) =>
   Object.assign(new Error(message), { code, status });
+async function dispatchAssignedTask(task, actor) {
+  if (
+    !task.assignee ||
+    task.archived ||
+    !["todo", "in_progress"].includes(task.role) ||
+    task.delegatedTo ||
+    task.lease?.expiresAt > Date.now()
+  )
+    return null;
+  const { connections } = await listMcpConnections(dbPath);
+  if (
+    connections.some(
+      (connection) =>
+        connection.identity === task.assignee &&
+        connection.state === "connected",
+    )
+  ) {
+    store.recordEvent(
+      task.id,
+      actor,
+      "dispatch_requested",
+      JSON.stringify({ to: task.assignee }),
+    );
+    changes.check();
+    return { started: [task.assignee], notified: true };
+  }
+  return launcher.runTask(task) ? { started: [task.assignee] } : null;
+}
 /** Agent settings live on this machine, like the plugins that use them. */
-function agentCommand(name, args, actor) {
+async function agentCommand(name, args, actor) {
   if (actor.kind !== "human")
-    throw httpError("FORBIDDEN", "Only a person can manage agent settings.", 403);
+    throw httpError(
+      "FORBIDDEN",
+      "Only a person can manage agent settings.",
+      403,
+    );
   const shared = Object.keys(tokens).length > 0;
   if (!args || typeof args !== "object" || Array.isArray(args))
     throw httpError("VALIDATION", "Send a JSON object.", 400);
@@ -88,15 +123,21 @@ function agentCommand(name, args, actor) {
         name: c.name,
         executable: c.executable,
         model: c.model,
-        profile: { label: c.profile.label, flag: c.profile.flag, hint: c.profile.hint },
+        profile: {
+          label: c.profile.label,
+          flag: c.profile.flag,
+          hint: c.profile.hint,
+        },
       })),
-      events: agentEvents.map(({ id, label, description, placeholders, prompt }) => ({
-        id,
-        label,
-        description,
-        placeholders,
-        hasPrompt: prompt !== null,
-      })),
+      events: agentEvents.map(
+        ({ id, label, description, placeholders, prompt }) => ({
+          id,
+          label,
+          description,
+          placeholders,
+          hasPrompt: prompt !== null,
+        }),
+      ),
       defaults: defaultConfig(),
       agents: Object.fromEntries(
         Object.entries(agents).map(([id, config]) => [
@@ -115,18 +156,48 @@ function agentCommand(name, args, actor) {
   if (name === "agent-config-save") {
     if (Object.keys(args).some((key) => !["identity", "config"].includes(key)))
       throw httpError("VALIDATION", "Provide only identity and config.", 400);
-    return { identity: args.identity, config: writeConfig(store, args.identity, args.config) };
+    return {
+      identity: args.identity,
+      config: writeConfig(store, args.identity, args.config),
+    };
   }
   if (args.event === "task_assigned") {
-    if (typeof args.taskId !== "string" || Object.keys(args).some((key) => !["event", "taskId"].includes(key)))
-      throw httpError("VALIDATION", "Provide event and taskId to run an assigned task.", 400);
+    if (
+      typeof args.taskId !== "string" ||
+      Object.keys(args).some((key) => !["event", "taskId"].includes(key))
+    )
+      throw httpError(
+        "VALIDATION",
+        "Provide event and taskId to run an assigned task.",
+        400,
+      );
     const task = store.execute("get_task", { id: args.taskId }, actor);
-    if (!launcher.runTask(task))
-      throw httpError("AGENT_NOT_READY", "The task needs an enabled agent, an open work lane, and no active claim or external dispatch.", 409);
-    return { started: [task.assignee] };
+    if (
+      task.archived ||
+      !["todo", "in_progress"].includes(task.role) ||
+      task.delegatedTo ||
+      task.lease?.expiresAt > Date.now()
+    )
+      throw httpError(
+        "AGENT_NOT_READY",
+        "Use an active, unclaimed task without external delegation.",
+        409,
+      );
+    const dispatched = await dispatchAssignedTask(task, actor);
+    if (!dispatched)
+      throw httpError(
+        "AGENT_NOT_READY",
+        "The task needs an enabled agent, an open work lane, and no active claim or external dispatch.",
+        409,
+      );
+    return dispatched;
   }
   if (args.event !== "standup" || Object.keys(args).length !== 1)
-    throw httpError("VALIDATION", "event: Send standup, or task_assigned with taskId.", 400);
+    throw httpError(
+      "VALIDATION",
+      "event: Send standup, or task_assigned with taskId.",
+      400,
+    );
   const identities = new Set([...roster(), ...Object.keys(listConfigs(store))]);
   return { started: launcher.standup([...identities]) };
 }
@@ -139,9 +210,15 @@ async function agentLogsCommand(args, actor) {
     typeof args !== "object" ||
     Array.isArray(args) ||
     typeof args.taskId !== "string" ||
-    Object.keys(args).some((key) => !["taskId", "identity", "file"].includes(key))
+    Object.keys(args).some(
+      (key) => !["taskId", "identity", "file"].includes(key),
+    )
   )
-    throw httpError("VALIDATION", "Provide taskId, and identity and file to read one log.", 400);
+    throw httpError(
+      "VALIDATION",
+      "Provide taskId, and identity and file to read one log.",
+      400,
+    );
   if (!agentLogs.root) return { available: false, runs: [] };
   const runs = await agentLogs.list(args.taskId);
   const chosen =
@@ -151,7 +228,9 @@ async function agentLogsCommand(args, actor) {
   return {
     available: true,
     runs,
-    log: chosen ? await agentLogs.read(args.taskId, chosen.identity, chosen.file) : null,
+    log: chosen
+      ? await agentLogs.read(args.taskId, chosen.identity, chosen.file)
+      : null,
   };
 }
 const json = (res, status, value) => {
@@ -167,7 +246,7 @@ const server = createServer(async (req, res) => {
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com https://gravatar.com; frame-ancestors 'none'",
+      "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https: http:; img-src 'self' data: https: http:; frame-ancestors 'none'",
     );
     const requestHost = req.headers.host || "";
     const allowedHosts = (
@@ -187,7 +266,7 @@ const server = createServer(async (req, res) => {
       json(res, 403, { message: "Origin not allowed" });
       return;
     }
-    const url = new URL(req.url, "http://localhost");
+    const url = new URL(req.url, `http://${requestHost}`);
     if (url.pathname.startsWith("/api/")) {
       let actor = localActor;
       if (Object.keys(tokens).length) {
@@ -292,9 +371,13 @@ const server = createServer(async (req, res) => {
             message: "Only a person can view MCP status.",
           });
         } else {
-          json(res, 200, Object.keys(tokens).length
-            ? { supported: false, connections: [] }
-            : await listMcpConnections(dbPath));
+          json(
+            res,
+            200,
+            Object.keys(tokens).length
+              ? { supported: false, connections: [] }
+              : await listMcpConnections(dbPath),
+          );
         }
         return;
       }
@@ -308,7 +391,11 @@ const server = createServer(async (req, res) => {
       }
       // Image uploads carry a base64 data URL; every other command stays small.
       const limit =
-        url.pathname === "/api/upload_image" ? imageDataUrlLimit + 1024 : 65536;
+        url.pathname === "/api/upload_artifact"
+          ? 12 * 1024 * 1024
+          : url.pathname === "/api/upload_image"
+            ? imageDataUrlLimit + 1024
+            : 2 * 1024 * 1024;
       let body = "";
       for await (const chunk of req) {
         body += chunk;
@@ -325,18 +412,62 @@ const server = createServer(async (req, res) => {
         return;
       }
       const name = url.pathname.slice(5);
+      if (["task-files", "task-commits"].includes(name)) {
+        if (
+          !args ||
+          typeof args !== "object" ||
+          Array.isArray(args) ||
+          typeof args.id !== "string" ||
+          Object.keys(args).some((key) => key !== "id")
+        )
+          throw httpError("VALIDATION", "Provide only the task id.", 400);
+        const task = store.execute("get_task", { id: args.id }, actor);
+        const board = store
+          .execute("list_boards", {}, actor)
+          .boards.find((item) => item.id === task.boardId);
+        if (name === "task-commits" && !board.repository)
+          throw httpError(
+            "REPOSITORY_REQUIRED",
+            "Set the board repository before reading commits.",
+            400,
+          );
+        json(
+          res,
+          200,
+          name === "task-files"
+            ? await readTaskFiles(board.repository, task)
+            : await readTaskCommitSummary(board.repository, task.commits ?? []),
+        );
+        return;
+      }
       if (name === "mcp-restart") {
         if (actor.kind !== "human")
-          throw httpError("FORBIDDEN", "Only a person can restart MCP connections.", 403);
+          throw httpError(
+            "FORBIDDEN",
+            "Only a person can restart MCP connections.",
+            403,
+          );
         if (Object.keys(tokens).length)
-          throw httpError("MCP_CONTROL_UNSUPPORTED", "Restart MCP connections from the local TasknBoard app.", 400);
+          throw httpError(
+            "MCP_CONTROL_UNSUPPORTED",
+            "Restart MCP connections from the local TasknBoard app.",
+            400,
+          );
         if (
-          !args || typeof args !== "object" || Array.isArray(args) ||
+          !args ||
+          typeof args !== "object" ||
+          Array.isArray(args) ||
           Object.keys(args).length !== 1 ||
           typeof args.id !== "string" ||
-          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(args.id)
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            args.id,
+          )
         )
-          throw httpError("VALIDATION", "Provide only a valid MCP connection id.", 400);
+          throw httpError(
+            "VALIDATION",
+            "Provide only a valid MCP connection id.",
+            400,
+          );
         json(res, 200, await restartMcpConnection(dbPath, args.id));
         return;
       }
@@ -396,24 +527,47 @@ const server = createServer(async (req, res) => {
         json(res, 200, await agentLogsCommand(args, actor));
         return;
       }
-      if (["agent-configs", "agent-config-save", "agent-event"].includes(name)) {
-        json(res, 200, agentCommand(name, args, actor));
+      if (
+        ["agent-configs", "agent-config-save", "agent-event"].includes(name)
+      ) {
+        json(res, 200, await agentCommand(name, args, actor));
         return;
       }
       // GitHub commands call out to GitHub, so they run outside the store.
       const result = await github.execute(name, args, actor);
       // Agent events compare the task with how it was before a person's edit.
       const before =
-        actor.kind === "human" && ["update_task", "request_changes", "reject_task"].includes(name) && !result
+        actor.kind === "human" &&
+        ["update_task", "request_changes", "reject_task"].includes(name) &&
+        !result
           ? store.execute("get_task", { id: args.id }, actor)
           : null;
       const output = result ?? store.execute(name, args, actor);
       // A person's edits start agents; agents cannot reassign tasks.
       if (actor.kind === "human") {
-        if (["update_task", "request_changes", "reject_task"].includes(name)) launcher.changed(before, output);
-        if (name === "add_comment") launcher.commented(output, actor, args.body);
+        if (["update_task", "request_changes", "reject_task"].includes(name))
+          launcher.changed(before, output);
+        if (name === "add_comment")
+          launcher.commented(output, actor, args.body);
+        const assigned =
+          name === "create_task"
+            ? [output]
+            : name === "bulk_create_tasks"
+              ? (output.tasks ?? [])
+              : name === "update_task" && before.assignee !== output.assignee
+                ? [output]
+                : [];
+        if (assigned.length) {
+          const boards = store.execute("list_boards", {}, actor).boards;
+          for (const task of assigned)
+            if (
+              boards.find((board) => board.id === task.boardId)?.policy
+                .autoDispatch
+            )
+              await dispatchAssignedTask(task, actor);
+        }
       }
-      json(res, 200, output);
+      json(res, 200, responseUrls(output, url.origin));
       // data_version does not change for this connection's own writes.
       changes.check();
       return;
@@ -478,6 +632,8 @@ const server = createServer(async (req, res) => {
 });
 server.listen(port, host, () => {
   const url = `http://${host.includes(":") ? `[${host}]` : host}:${server.address().port}`;
+  if (["127.0.0.1", "localhost", "::1"].includes(host))
+    store.setSettings({ workspace_url: `${url}/` });
   console.error(`TasknBoard listening on ${url}`);
   if (desktop) console.log(JSON.stringify({ url }));
 });

@@ -14,7 +14,7 @@ review workflow. The four roles are fixed:
 | `todo` | Work that nobody does yet. New tasks start here. | Backlog |
 | `in_progress` | Claimed or active work. | In progress |
 | `in_review` | Work that waits for a human decision. | In review |
-| `done` | Work that a human approved. | Done |
+| `done` | Completed work under the board completion policy. | Done |
 
 Every board has at least one lane of each role. A board can have more lanes
 of one role, for example `Inbox` and `Ready` with role `todo`. The interface
@@ -113,10 +113,10 @@ apply first. Then:
 lane, and the claim ends.
 
 Agents cannot put a task in an `in_review` lane except through
-`submit_review`. Agents can complete their claimed task directly with
-`update_task({ id, expectedVersion, patch: { lane } })`. Use the latest
-task version and a `done` lane ID from the task's board. Completion releases
-the claim.
+`submit_review`. Board policy `humanCompletionOnly` defaults to `true`.
+With this policy, only a human can complete a task. This rule also applies to architects.
+When the policy is `false`, agents can complete claimed or delegated work through `update_task`.
+Completion records the actor and the policy in the event. Completion releases the claim and delegation.
 
 In the task page, **Mark Done** moves a task to the first `done` lane. **Needs
 changes** moves it to the first `in_progress` lane.
@@ -194,7 +194,7 @@ Migration 20 removes obsolete rejected lanes and archives their tasks.
 The tasks move to a valid lane on their board and keep their data and activity.
 New boards have only the four workflow roles.
 
-`workspace_info` and `export_workspace` report `schemaVersion: 20`. The export
+`workspace_info` and `export_workspace` report `schemaVersion: 21`. The export
 includes every board with its lanes, without the derived task counts.
 
 ## Acceptance criteria
@@ -208,7 +208,7 @@ includes every board with its lanes, without the derived task counts.
    named the lane name the target lane.
 5. An agent can claim, heartbeat, release, move between `in_progress` lanes,
    and submit for review. A claim expires after 15 minutes.
-6. An agent can complete its claimed task. A human can mark a task done only after review.
+6. Board policy controls agent completion. A human marks a task done only after review.
 7. The board, list, views, epics, stand-up, CLI, and agent launcher show and
    use the lanes of each board. No code path uses the old status IDs.
 8. Existing tests pass after updates for the new model. New tests cover the

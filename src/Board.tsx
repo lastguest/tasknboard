@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  activeLease,
+  epicColor,
   labelTone,
   priorities,
   roles,
+  roleTitle,
   standupNotes,
   type Epic,
   type Lane,
@@ -140,18 +141,20 @@ function updatedLabel(value: string) {
   return Number.isNaN(date.getTime()) ? "" : `Updated ${shortDate.format(date)}`;
 }
 
-export function Label({ label }: { label: string }) {
+export function Label({ label, color }: { label: string; color?: string | null }) {
   if (!label) return null;
   return (
     <span className="label">
-      <span className={`label-dot tone-${labelTone(label)}`} aria-hidden="true" />
+      <span className={`label-dot tone-${labelTone(label)}`} style={color ? { background: epicColor({ color }) } : undefined} aria-hidden="true" />
       {label}
     </span>
   );
 }
 
 export function ClaimChip({ task }: { task: Task }) {
-  const lease = activeLease(task);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => { if (!task.lease) return; const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, [task.lease?.expiresAt]);
+  const lease = task.lease;
   const holder = usePersonName(lease?.actor ?? "");
   const delegate = usePersonName(task.delegatedTo ?? "");
   if (task.delegatedTo) return (
@@ -163,12 +166,12 @@ export function ClaimChip({ task }: { task: Task }) {
   const expiry = formatUtcTimestamp(lease.expiresAt);
   return (
     <span
-      className="claim-chip"
+      className={`claim-chip ${lease.expiresAt - now < 60000 ? "warn" : ""}`}
       title={`Claimed by ${holder} until ${expiry}`}
     >
       <Icon name="lock" size={12} />
       <span>
-        Claimed by {holder} · expires {expiry}
+        {lease.expiresAt <= now ? `Claim expired for ${holder}` : `Claimed by ${holder} · ${Math.ceil((lease.expiresAt - now) / 1000)}s left`}
       </span>
     </span>
   );
@@ -193,6 +196,8 @@ type BoardProps = {
   onLogs?: (t: Task) => void;
   /** The lane each moving task is headed for, by task ID. */
   pending?: Map<string, string>;
+  onReorder?: (task: Task, before: Task) => void;
+  doneMode?: (task: Task) => "review" | "direct" | "human";
   list?: boolean;
   archiveView?: boolean;
   /** List sections, from a view's grouping. Without them the list is by lane. */
@@ -209,6 +214,7 @@ export function TaskCard({
   onMove,
   onMenu,
   onLogs,
+  onReorder,
   pending,
   presentation,
 }: Omit<BoardProps, "tasks" | "pending" | "list" | "onNew" | "groups"> & {
@@ -237,6 +243,8 @@ export function TaskCard({
         e.dataTransfer.setData("text/plain", task.id);
         e.dataTransfer.effectAllowed = "move";
       }}
+      onDragOver={(event) => { if (onReorder) event.preventDefault(); }}
+      onDrop={(event) => { if (!onReorder) return; event.preventDefault(); event.stopPropagation(); const id = event.dataTransfer.getData("text/plain"); if (id !== task.id) onReorder({ ...task, id }, task); }}
     >
       <div className="card-top">
         <span className="task-id">{task.id}</span>
@@ -279,7 +287,8 @@ export function TaskCard({
       <div className="card-props">
         <PriorityBars task={task} />
         {task.epic && <EpicTag epic={epics?.get(task.epic)} />}
-        {task.labels.map((label) => <Label key={label} label={label} />)}
+        {task.labels.map((label) => <Label key={label} label={label} color={task.labelColors?.[label]} />)}
+        {task.blocked && <span className="task-signal blocker" title={task.blockers?.map((blocker) => blocker.id).join(", ")}>Blocked</span>}
         <ClaimChip task={task} />
       </div>
       {standup?.blocker && (
@@ -355,9 +364,11 @@ export function Board({
   onNew,
   onMenu,
   onLogs,
+  onReorder,
   pending = new Map(),
   list = false,
   archiveView = false,
+  doneMode = () => "review",
   groups,
   presentation = false,
 }: BoardProps) {
@@ -427,6 +438,7 @@ export function Board({
               lanes={lanes}
               pending={pending.get(t.id)}
               onMove={onMove}
+              doneMode={doneMode(t)}
             />
           ) : (
             <span className="status-cell">
@@ -446,7 +458,7 @@ export function Board({
         </td>
         <td data-label="Labels">
           <div className="task-labels">
-            {t.labels.map((label) => <Label key={label} label={label} />)}
+            {t.labels.map((label) => <Label key={label} label={label} color={t.labelColors?.[label]} />)}
           </div>
         </td>
       </tr>
@@ -517,7 +529,7 @@ export function Board({
           >
             <header>
               <RoleIcon role={lane.role} />
-              <h2 id={`column-${lane.id}`}>{lane.name}</h2>
+              <h2 id={`column-${lane.id}`}>{lane.name}{lane.name.toLowerCase() !== roleTitle(lane.role).toLowerCase() && <small> · {roleTitle(lane.role)}</small>}</h2>
               <span className="count" aria-label={`${cards.length} tasks`}>
                 {cards.length}
               </span>
@@ -545,6 +557,7 @@ export function Board({
                   onMove={canDrag ? onMove : undefined}
                   onMenu={onMenu}
                   onLogs={onLogs}
+                  onReorder={onReorder}
                   pending={pending.get(t.id)}
                   presentation={presentation}
                 />

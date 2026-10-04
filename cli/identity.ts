@@ -1,7 +1,7 @@
 const readCommands = new Set([
   "workspace_info", "export_workspace", "list_tasks", "get_task", "get_tasks",
   "find_similar_tasks", "list_boards", "list_epics", "list_views", "list_labels",
-  "list_inbox", "list_notifications",
+  "list_inbox", "list_notifications", "critical_path", "list_activity", "list_milestones",
 ]);
 
 /** Require an explicit agent identity for commands from scripts that change data. */

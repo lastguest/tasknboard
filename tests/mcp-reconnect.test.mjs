@@ -125,6 +125,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   const restored = connection.receive((message) => message.method === "notifications/resources/updated");
   const result = await connection.request(3, "tools/call", { name: "create_task", arguments: {} });
   assert.equal(result.error.data.ambiguous, true);
+  assert.match(result.error.message, /is reconnecting/);
   assert.match(result.error.message, /Read the task before any new write/);
   await restored;
   assert.ok((await connection.request(4, "tools/list", {})).result);

@@ -389,7 +389,9 @@ test("Stand-up fixes participant order, saves claimed-task notes and restores st
   await expect(notes).toBeHidden();
   const saved = await command("get_task", { id: task.id });
   expect(saved.standup.highlight).toBe("Saved while claimed");
-  expect(saved.lease).toEqual(claimed.lease);
+  expect(saved.lease.actor).toBe(claimed.lease.actor);
+  expect(saved.lease.expiresAt).toBe(claimed.lease.expiresAt);
+  expect(saved.lease.expiresInSeconds).toBeLessThanOrEqual(claimed.lease.expiresInSeconds);
   const late = await create(`Late participant ${key()}`, `Late ${key()}`);
   await expect(card(page, late.id)).toBeVisible();
   expect(await participants.locator("option").allTextContents()).toEqual(order);

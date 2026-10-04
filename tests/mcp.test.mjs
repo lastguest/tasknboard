@@ -10,6 +10,12 @@ import { ResourceUpdatedNotificationSchema } from "@modelcontextprotocol/sdk/typ
 import { createStore } from "../server/store.mjs";
 test("real MCP client initializes, discovers tools, claims and submits review", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "tasknboard-mcp-"));
+  const setup = createStore(join(dir, "test.sqlite"));
+  const setupActor = { id: "reviewer", kind: "human" };
+  const setupBoard = setup.execute("list_boards", {}, setupActor).boards[0];
+  setup.execute("update_board", { id: setupBoard.id, expectedVersion: setupBoard.version,
+    patch: { policy: { humanCompletionOnly: false } } }, setupActor);
+  setup.close();
   const client = new Client({ name: "integration-test", version: "1.0.0" });
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -47,7 +53,7 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
     return JSON.parse(r.content[0].text);
   };
   const info = await call("workspace_info", {});
-  assert.equal(info.schemaVersion, 20);
+  assert.equal(info.schemaVersion, 21);
   assert.ok(
     info.actors.some((entry) => entry.id === "test-agent" && entry.kind === "agent"),
   );
@@ -83,7 +89,7 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
   assert.equal(task.commentCount, 0);
   const compact = await client.callTool({ name: "add_comment", arguments: { id: task.id, body: "No version read needed" } });
   const compactTask = JSON.parse(compact.content[0].text);
-  assert.deepEqual(Object.keys(compactTask).sort(), ["id", "lane", "version"]);
+  assert.deepEqual(Object.keys(compactTask).sort(), ["completionPolicy", "id", "lane", "url", "version"]);
   task = await call("get_task", { id: task.id });
   assert.deepEqual(
     (await call("find_similar_tasks", { title: "Real protocol tests" })).tasks.map(
@@ -145,7 +151,8 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
   assert.equal((await call("get_task", { id: direct.id })).lane, doneLane);
   const archived = await client.callTool({ name: "archive_task", arguments: { id: direct.id, expectedVersion: direct.version } });
   assert.notEqual(archived.isError, true);
-  assert.deepEqual(JSON.parse(archived.content[0].text), { id: direct.id, version: direct.version + 1, lane: doneLane, archived: true });
+  assert.deepEqual(JSON.parse(archived.content[0].text), { id: direct.id, version: direct.version + 1, lane: doneLane, url: direct.url, archived: true,
+    completionPolicy: direct.completionPolicy, completion: direct.completion });
   assert.equal((await call("get_task", { id: direct.id })).archived, true);
   assert.ok(!(await call("list_tasks", {})).tasks.some((entry) => entry.id === direct.id));
   const restored = await client.callTool({ name: "restore_task", arguments: { id: direct.id, expectedVersion: direct.version + 1 } });

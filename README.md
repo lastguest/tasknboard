@@ -48,15 +48,21 @@ Create and rename epics by custom name on their pages.
 
 Views save filters (lane role, lane, priority, assignee, label, epic, and search) and display settings (board or list, grouping, order) under a name, like Linear's custom views. Filter any board with **Filter**, then choose **Save as view**. A view is personal or shared with the workspace. Star it to keep it under Favorites in the sidebar. The assignee value **Me** means whoever opens the view. Agents read shared views through MCP (`list_views`, and `list_tasks` with `view`). See [docs/contracts/views.md](docs/contracts/views.md).
 
-Link related tasks under **Links** in the task details: blocks, blocked by, related to, duplicates, or duplicated by. The other task shows the inverse link. Links inform; they do not stop lane changes. Agents use `link_task` and `unlink_task` on tasks they have claimed. See [docs/contracts/task-links.md](docs/contracts/task-links.md).
+Link related tasks under **Links** in the task details: blocks, blocked by, related to, duplicates, or duplicated by. The other task shows the inverse link. Open blockers show a Blocked badge. Review or completion of a blocker sends an unblocked notification. Open the critical path from the task details. Agents use `link_task` and `unlink_task` with a claim or durable delegation. See [docs/contracts/task-links.md](docs/contracts/task-links.md).
 
 Link GitHub pull requests to a task under **Pull requests** in the task details: paste one or more pull request links. The card shows a pull request mark, and each row opens the pull request in **Pull requests**. With GitHub connected, rows show the title and state. Agents use `link_pull_requests` and `unlink_pull_request` on tasks they have claimed; the CLI uses `/pr` and `/unpr`. See [docs/contracts/task-pull-requests.md](docs/contracts/task-pull-requests.md).
 
-Assignment records the task owner. To start work, select **Run agent** in the task details. Install an agent plugin in **Settings**, then set the board's **Repository folder**. The app runs the configured CLI in that folder. The agent claims the task and completes it or submits it for review. Each agent runs one task at a time. Runs use the CLI's automatic approval mode, so run only tasks whose text you trust. Task history records starts, errors, and the path of the run log. Shared servers do not start agents.
+Assignment records the task owner. To start work, select **Run agent** in the task details. An existing connected agent receives a dispatch notification. **Edit board** has an automatic dispatch setting, which defaults to off. Install an agent plugin in **Settings**, then set the board's **Repository folder**. The app runs the configured CLI in that folder. The agent claims the task and completes it or submits it for review. Each agent runs one task at a time. Runs use the CLI's automatic approval mode, so run only tasks whose text you trust. Task history records starts, errors, and the path of the run log. Shared servers do not start agents.
+
+Durable delegation moves a task to In progress without a lease. The delegate and delegator can add comments, link commits, and submit review. Changes requested retain the delegate and send a notification. The Delegated filter and Running now strip show this work.
+
+Reviews accept uploaded or linked images, logs, and JSON, a commit range, and verification details. Board settings can require a brief path for In progress and an artifact for review. Task details show the current brief and result files from the board repository, plus files changed in linked commits.
+
+Milestones have exit criteria and linked tasks. Epics show progress by lane role and the latest task comment. Standup shows task movement over a selected number of hours. Use Manual order to drag cards inside a lane. Agents read this order through `position`.
 
 Each agent has a settings page: open **Agents**, then **Settings** on its row. Choose the CLI, an executable path, the model, the profile (Claude Code and OpenCode `--agent`, Codex `--profile`, Pi `--provider`), extra arguments, and environment variables. Bind the events that start a run, each with its own prompt: Run task, task unassigned (stops the run for that task), changes requested, mentioned with `@identity` in a comment, and stand-up opened. See [docs/contracts/agent-settings.md](docs/contracts/agent-settings.md).
 
-Keyboard: **N** new task, **Cmd/Ctrl K** search, **F** assignee filter, **⌥/Alt V** save as view, **?** shortcuts, **Esc** close dialog. Drag between columns, or use the lane menu on each card or list row (the keyboard and touch alternative). Right-click a card, list row, epic, agent, or empty page area for a context menu, or press **Shift F10** on the focused item. The task menu changes lane, priority, and assignee, filters by assignee, copies the ID, and archives after a second confirmation. Every move is validated by the server; a rejected move stays in place with an explanation. Agents can move their claimed tasks directly to a Done lane. Human moves to Done require review first. A task in a review lane shows **Mark Done** and **Needs changes** in its details. Each board has its own lanes; change them in the board settings. See [docs/contracts/lanes.md](docs/contracts/lanes.md). The interface is English in this version.
+Keyboard: **N** new task, **Cmd/Ctrl K** search, **F** assignee filter, **⌥/Alt V** save as view, **?** shortcuts, **Esc** close dialog. Drag between columns, or use the lane menu on each card or list row (the keyboard and touch alternative). Right-click a card, list row, epic, agent, or empty page area for a context menu, or press **Shift F10** on the focused item. The task menu changes lane, priority, and assignee, filters by assignee, copies the ID, and archives after a second confirmation. Every move is validated by the server; a rejected move stays in place with an explanation. The board setting **Only a human completes a task** defaults to on. Turn it off to select an agent completion policy. Choose any authorized agent, an architect, an independent agent, or automatic completion with evidence. An epic can override the board policy. Label policies take precedence; the most restrictive matching label policy applies. Automatic completion requires an artifact and linked commits on the configured default branch. The commit scan also checks reviews after a merge. Human moves to Done require review first. Completion records the actor and the board policy. A task in a review lane shows **Mark Done** and **Needs changes** in its details. Each board has its own lanes; change them in the board settings. See [docs/contracts/lanes.md](docs/contracts/lanes.md). The interface is English in this version.
 
 A task opens in its own tab in a horizontal strip above the page. The first tab returns to the page. Each tab keeps its draft while you switch tabs, stays open after **Save changes**, and asks before it discards a draft on close. **Cancel** reverts the draft to the saved task. A new task still opens in a dialog.
 
@@ -215,7 +221,7 @@ Do not put JSON in `tasknboard.cmd` arguments. `cmd.exe` can interpret the JSON 
 Save this JSON in `C:\Temp\comment.json`:
 
 ```json
-{"id":"TNB-1","body":"The change is ready"}
+{ "id": "TNB-1", "body": "The change is ready" }
 ```
 
 ```powershell
@@ -245,19 +251,19 @@ The rules are the same as for MCP: HTTPS is required, except on loopback.
 In the board, type text to filter tasks and press Enter to open the selected task.
 Type `/` to open the command menu. Tab completes a command, and Enter runs it.
 
-| Command | Result |
-| --- | --- |
-| `/board`, `/board <id>` | List boards or select a board |
-| `/board create <prefix> <name>` | Create and select a board |
-| `/new <title>` | Create a task in the first todo lane of the selected board |
-| `/move <lane>`, `/done` | Move to a lane of the task's board, by name or a unique start of one; `/done` moves a reviewed task to the first done lane |
-| `/assign [name]`, `/priority <level>` | Change the assignee or priority |
-| `/comment <text>` | Add a comment |
-| `/claim`, `/release` | Claim or release the task for 15 minutes |
-| `/link <type> <task id>`, `/unlink <task id>` | Link the task to another task, or remove that link |
-| `/review <summary> [URL]` | Submit the task for review with an optional artifact link |
-| `/archive <task id>` | Archive the task; type its id to confirm |
-| `/mine`, `/refresh`, `/help`, `/quit` | Filter to your tasks, reload, show help, exit |
+| Command                                       | Result                                                                                                                     |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `/board`, `/board <id>`                       | List boards or select a board                                                                                              |
+| `/board create <prefix> <name>`               | Create and select a board                                                                                                  |
+| `/new <title>`                                | Create a task in the first todo lane of the selected board                                                                 |
+| `/move <lane>`, `/done`                       | Move to a lane of the task's board, by name or a unique start of one; `/done` moves a reviewed task to the first done lane |
+| `/assign [name]`, `/priority <level>`         | Change the assignee or priority                                                                                            |
+| `/comment <text>`                             | Add a comment                                                                                                              |
+| `/claim`, `/release`                          | Claim or release the task for 15 minutes                                                                                   |
+| `/link <type> <task id>`, `/unlink <task id>` | Link the task to another task, or remove that link                                                                         |
+| `/review <summary> [URL]`                     | Submit the task for review with an optional artifact link                                                                  |
+| `/archive <task id>`                          | Archive the task; type its id to confirm                                                                                   |
+| `/mine`, `/refresh`, `/help`, `/quit`         | Filter to your tasks, reload, show help, exit                                                                              |
 
 Every write uses the task version that the board last read.
 If the task changed elsewhere, the server rejects the write and the command stays in the prompt.
@@ -400,7 +406,7 @@ Tools:
 | `update_task`       | Edit claimed work                                         |
 | `set_standup_notes` | Set/clear highlight and blocker notes with version checks |
 | `add_comment`       | Append progress                                           |
-| `release_task`      | Release an active claim as its holder or an architect      |
+| `release_task`      | Release an active claim as its holder or an architect     |
 | `submit_review`     | Summary, optional artifact URL, release lease             |
 
 Each task belongs to a board. Read `list_boards` and pass `boardId` to

@@ -57,12 +57,12 @@ test("evidence retains version checks and does not grant creator access to execu
   assert.deepEqual(s.execute("get_task", { id: commented.id }, human), commented);
 });
 
-test("other workers require their own claim for commit links while comments stay open", (t) => {
+test("delegated workers attach commits without a claim while unrelated workers need a claim", (t) => {
   const s = fixture(t);
-  for (const actor of [delegate, unrelated]) {
-    assert.throws(() => s.execute("link_commits", { id: s.task.id, expectedVersion: s.task.version, commits: [sha] }, actor), { code: "LEASE_REQUIRED" });
-  }
-  const claimed = s.execute("claim_task", { id: s.task.id, expectedVersion: s.task.version }, delegate);
+  assert.throws(() => s.execute("link_commits", { id: s.task.id, expectedVersion: s.task.version, commits: [sha] }, unrelated), { code: "LEASE_REQUIRED" });
+  const evidence = s.execute("link_commits", { id:s.task.id,expectedVersion:s.task.version,commits:[sha] },delegate);
+  assert.equal(evidence.lease,null);
+  const claimed = s.execute("claim_task", { id: evidence.id, expectedVersion: evidence.version }, delegate);
   assert.throws(() => s.execute("link_commits", { id: claimed.id, expectedVersion: claimed.version, commits: [sha] }, unrelated), { code: "LEASE_CONFLICT" });
   const commented = s.execute("add_comment", { id: claimed.id, body: "A discussion reply" }, unrelated);
   assert.deepEqual(commented.lease, claimed.lease);

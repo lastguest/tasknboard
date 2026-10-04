@@ -38,7 +38,7 @@ test("A change in one page appears in another open page without a reload", async
   expect(reloads).toBe(0);
 });
 
-test("An agent claim appears live and its chip goes away when the lease expires", async ({ page }) => {
+test("An agent claim appears live and its chip shows expiry when the lease expires", async ({ page }) => {
   await page.clock.install();
   await page.addInitScript((value) => sessionStorage.setItem("tasknboard-token", value), humanToken);
   await page.goto(baseURL);
@@ -55,6 +55,6 @@ test("An agent claim appears live and its chip goes away when the lease expires"
       return chip.isVisible();
     }, { timeout: 3000 })
     .toBe(true);
-  await page.clock.runFor(15 * 60_000 + 1000);
-  await expect(chip).toBeHidden();
+  await page.clock.fastForward(15 * 60_000 + 1000);
+  await expect(chip).toContainText("Claim expired for browser-agent");
 });

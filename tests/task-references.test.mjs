@@ -58,8 +58,8 @@ test("get_tasks reads summaries by key, alias included, and leaves out missing k
     store.execute("get_tasks", { ids: [first.id, "NEW-2", "NEW-404"] }, human),
     {
       tasks: [
-        { id: "NEW-1", title: "First", lane: "LANE-1", role: "todo", archived: false },
-        { id: "NEW-2", title: "Second", lane: "LANE-1", role: "todo", archived: true },
+        { id: "NEW-1", title: "First", lane: "LANE-1", role: "todo", archived: false,lease:null,url:`/?board=${board.id}&task=NEW-1` },
+        { id: "NEW-2", title: "Second", lane: "LANE-1", role: "todo", archived: true,lease:null,url:`/?board=${board.id}&task=NEW-2` },
       ],
     },
   );

@@ -4,20 +4,21 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createStore } from "../server/store.mjs";
+import { DatabaseSync } from "node:sqlite";
 
 const human = { id: "you", kind: "human" };
 const creator = { id: "creator", kind: "agent" };
 const worker = { id: "worker", kind: "agent" };
 const architect = { id: "planner", kind: "agent", role: "architect" };
 
-function fixture(t, path = ":memory:") {
-  const store = createStore(path);
+function fixture(t, path = ":memory:",options) {
+  const store = createStore(path,options);
   t.after(() => store.close());
   const task = store.execute("create_task", { boardId: "BOARD-1", title: "Restore this card", assignee: "owner" }, creator);
   return { ...store, task };
 }
 
-const archive = (s, task) => s.execute("archive_task", { id: task.id, expectedVersion: task.version }, architect);
+const archive = (s, task) => s.execute("archive_task", { id: task.id, expectedVersion: task.version }, creator);
 const restore = (s, task, actor = creator) => s.execute("restore_task", { id: task.id, expectedVersion: task.version }, actor);
 
 test("new tasks remain visible after an earlier task is archived", (t) => {
@@ -64,7 +65,7 @@ test("an unrelated worker cannot restore a task and failure changes no task hist
   const s = fixture(t);
   const archived = archive(s, s.task);
   assert.throws(() => restore(s, archived, worker), { code: "FORBIDDEN" });
-  assert.deepEqual(s.execute("get_task", { id: archived.id }, human), archived);
+  assert.deepEqual(s.execute("get_task", { id: archived.id }, creator), archived);
 });
 
 test("restore requires the current version and an archived task", (t) => {
@@ -74,7 +75,7 @@ test("restore requires the current version and an archived task", (t) => {
   assert.throws(() => restore(s, s.task), { code: "VERSION_CONFLICT" });
   assert.throws(() => s.execute("restore_task", { id: archived.id }, creator), { code: "VALIDATION" });
   assert.throws(() => s.execute("update_task", { id: archived.id, expectedVersion: archived.version, patch: { archived: false } }, creator), { code: "VALIDATION" });
-  assert.deepEqual(s.execute("get_task", { id: archived.id }, human), archived);
+  assert.deepEqual(s.execute("get_task", { id: archived.id }, creator), archived);
   const restored = restore(s, archived);
   assert.throws(() => restore(s, restored), { code: "INVALID_TRANSITION" });
 });
@@ -87,7 +88,7 @@ test("restored state and archive attribution survive a database reopen", (t) => 
   let restored;
   try {
     const created = first.execute("create_task", { boardId: "BOARD-1", title: "Persistent card" }, creator);
-    const archived = first.execute("archive_task", { id: created.id, expectedVersion: 1 }, human);
+    const archived = first.execute("archive_task", { id: created.id, expectedVersion: 1 }, creator);
     restored = restore(first, archived);
   } finally {
     first.close();
@@ -95,9 +96,52 @@ test("restored state and archive attribution survive a database reopen", (t) => 
   const reopened = createStore(path);
   try {
     assert.deepEqual(reopened.execute("get_task", { id: restored.id }, creator), restored);
-    assert.deepEqual(restored.events.map(({ kind, actor }) => [kind, actor]), [["created", "creator"], ["archive_task", "you"], ["restore_task", "creator"]]);
+    assert.deepEqual(restored.events.map(({ kind, actor }) => [kind, actor]), [["created", "creator"], ["archive_task", "creator"], ["restore_task", "creator"]]);
     assert.equal(reopened.execute("list_tasks", {}, creator).tasks.some((task) => task.id === restored.id), true);
   } finally {
     reopened.close();
   }
+});
+
+test("a creator worker restores its recent archive even after another actor touched the task",t=>{
+  let now=1000000;const s=fixture(t,":memory:",{clock:()=>now});
+  const touched=s.execute("add_comment",{id:s.task.id,body:"Human context"},human);
+  const archived=archive(s,touched);now+=599999;
+  const restored=restore(s,archived);
+  assert.equal(restored.archived,false);
+  assert.equal(restored.events.at(-1).kind,"restore_task");
+});
+
+for(const command of ["archive_task","reject_task"]){
+  test(`a creator worker cannot reverse a human ${command}`,t=>{
+    const s=fixture(t);const archived=s.execute(command,{id:s.task.id,expectedVersion:s.task.version},human);
+    assert.throws(()=>restore(s,archived),{code:"FORBIDDEN"});
+    assert.equal(s.execute("get_task",{id:s.task.id},human).archived,true);
+    assert.equal(restore(s,archived,architect).archived,false);
+  });
+}
+
+test("a creator worker cannot restore an old archive after another actor touched the task",t=>{
+  let now=1000000;const s=fixture(t,":memory:",{clock:()=>now});
+  const touched=s.execute("add_comment",{id:s.task.id,body:"Human context"},human);
+  const archived=archive(s,touched);now+=600001;
+  assert.throws(()=>restore(s,archived),{code:"FORBIDDEN"});
+  assert.equal(restore(s,archived,human).archived,false);
+});
+
+test("a creator worker restores an old archive on an untouched task",t=>{
+  let now=1000000;const s=fixture(t,":memory:",{clock:()=>now});
+  const archived=archive(s,s.task);now+=86400000;
+  assert.equal(restore(s,archived).archived,false);
+});
+
+test("a creator worker restores a legacy archive with no task history snapshot",t=>{
+  const directory=mkdtempSync(join(tmpdir(),"tasknboard-legacy-restore-"));
+  const path=join(directory,"workspace.sqlite");let store=createStore(path);
+  t.after(()=>{store.close();rmSync(directory,{recursive:true,force:true});});
+  const task=store.execute("create_task",{boardId:"BOARD-1",title:"Old archive"},creator);
+  const archived=archive(store,task);store.close();
+  const db=new DatabaseSync(path);db.exec("DELETE FROM task_history; DELETE FROM migrations WHERE version=21");db.close();
+  store=createStore(path);
+  assert.equal(restore(store,archived).archived,false);
 });

@@ -39,7 +39,7 @@ test("expired owners can park or resume with one versioned lane move", (t) => {
   const resumed = s.execute("update_task", { id: resumedTask.id, expectedVersion: resumedTask.version, patch: { lane: "LANE-2" } }, owner);
   assert.equal(parked.lease, null);
   assert.equal(parked.assignee, owner.id);
-  assert.deepEqual(resumed.lease, { actor: owner.id, expiresAt: s.now() + 900000 });
+  assert.deepEqual(resumed.lease, { actor: owner.id, expiresAt: s.now() + 900000,expiresInSeconds:900 });
   for (const [before, after] of [[parkedTask, parked], [resumedTask, resumed]]) {
     assert.equal(after.version, before.version + 1);
     assert.equal(after.events.length, before.events.length + 1);
@@ -57,7 +57,7 @@ test("expired own lane moves retain version checks and cannot change other field
     [{ lane: "LANE-3" }, task.version, "FORBIDDEN"],
   ]) {
     assert.throws(() => s.execute("update_task", { id: task.id, expectedVersion, patch }, owner), { code });
-    assert.deepEqual(s.execute("get_task", { id: task.id }, human), task);
+    assert.deepEqual(s.execute("get_task", { id: task.id }, human), {...task,lease:{...task.lease,expiresInSeconds:0}});
   }
 });
 
@@ -70,7 +70,7 @@ test("workers cannot park foreign claims or unclaimed tasks", (t) => {
   s.expire();
   assert.throws(() => move(task, other), { code: "LEASE_REQUIRED" });
   assert.throws(() => move(unclaimed, owner), { code: "LEASE_REQUIRED" });
-  assert.deepEqual(s.execute("get_task", { id: task.id }, human), task);
+  assert.deepEqual(s.execute("get_task", { id: task.id }, human), {...task,lease:{...task.lease,expiresInSeconds:0}});
 });
 
 test("bulk parking handles expired own leases and rolls back when any task fails", (t) => {
@@ -82,7 +82,7 @@ test("bulk parking handles expired own leases and rolls back when any task fails
   s.expire();
   const input = (tasks) => ({ tasks: tasks.map(({ id, version }) => ({ id, expectedVersion: version })), lane: "LANE-1" });
   assert.throws(() => s.execute("bulk_move_tasks", input([first, foreign]), owner), { code: "LEASE_REQUIRED" });
-  assert.deepEqual(s.execute("get_task", { id: first.id }, human), first);
+  assert.deepEqual(s.execute("get_task", { id: first.id }, human), {...first,lease:{...first.lease,expiresInSeconds:0}});
   const moved = s.execute("bulk_move_tasks", input([first, second]), owner);
   for (const task of moved.tasks) {
     assert.equal(task.lane, "LANE-1");

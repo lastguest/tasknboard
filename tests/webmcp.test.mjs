@@ -33,7 +33,8 @@ test("WebMCP validates and executes against the domain, refreshes writes, reject
     },
     lifetime.signal,
   );
-  assert.equal(context.tools.size, 19);
+  assert.ok(context.tools.has("critical_path"));
+  assert.ok(context.tools.has("submit_review"));
   const call = async (name, args) =>
     JSON.parse(await context.tools.get(name).execute(args, execution()));
   const { boards } = await call("list_boards", {});

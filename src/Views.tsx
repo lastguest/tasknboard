@@ -41,6 +41,7 @@ export const fieldTitles: Record<ViewField, string> = {
   assignee: "Assignee",
   label: "Label",
   epic: "Epic",
+  delegated: "Delegated",
 };
 
 /** What a filter can offer: the workspace's people, labels and epics. */
@@ -63,6 +64,7 @@ function valueLabel(
   context: FilterContext,
   people: ReturnType<typeof usePeople>,
 ) {
+  if (field === "delegated") return value === "true" ? "Delegated" : "Not delegated";
   if (field === "role") return roleTitle(value as LaneRole);
   if (field === "lane") return findLane(context.boards, value)?.name ?? "Deleted lane";
   if (field === "priority")
@@ -84,6 +86,7 @@ function valueChoices(
   people: ReturnType<typeof usePeople>,
   selected: string[],
 ): ChoiceOption[] {
+  if (field === "delegated") return [{ value: "true", label: "Delegated" }, { value: "false", label: "Not delegated" }];
   if (field === "role")
     return roles.map((r) => ({
       value: r.id,
@@ -373,6 +376,7 @@ const groupTitles: Record<ViewGroup, string> = {
   none: "No grouping",
 };
 const orderTitles: Record<ViewOrder, string> = {
+  position: "Manual order",
   created: "Created",
   updated: "Last updated",
   priority: "Priority",

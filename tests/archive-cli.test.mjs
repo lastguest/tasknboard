@@ -80,7 +80,9 @@ test("CLI archive failures print JSON and leave the task unchanged", async (t) =
     const current = await success("get_task", { id: task.id });
     assert.equal(current.archived, false);
     assert.equal(current.version, claimed.version);
-    assert.deepEqual(current.lease, claimed.lease);
+    assert.equal(current.lease.actor, claimed.lease.actor);
+    assert.equal(current.lease.expiresAt, claimed.lease.expiresAt);
+    assert.ok(current.lease.expiresInSeconds >= 0 && current.lease.expiresInSeconds <= claimed.lease.expiresInSeconds);
     assert.equal(current.events.filter((event) => event.kind === "archive_task").length, 0);
   }
 });

@@ -15,6 +15,7 @@ import {
 import { taskMatchesView } from "./views.mjs";
 import { similarityScorer, similarityThreshold } from "./similarity.mjs";
 import { mentionedIdentities } from "./agent-config.mjs";
+import { areTaskCommitsOnDefaultBranch } from "./commit-links.mjs";
 
 // Decoded bytes must match the declared type; the data URL prefix alone is not trusted.
 const imageSignatures = {
@@ -367,6 +368,23 @@ export function createStore(path, { clock = Date.now } = {}) {
       }
       db.prepare("INSERT INTO migrations VALUES(20)").run();
     }
+    if (!db.prepare("SELECT version FROM migrations WHERE version=21").get()) {
+      db.exec("CREATE TABLE IF NOT EXISTS task_history(task_number INTEGER NOT NULL, version INTEGER NOT NULL, actor TEXT NOT NULL, sequence INTEGER NOT NULL, created_at TEXT NOT NULL, before_data TEXT, fields TEXT NOT NULL, PRIMARY KEY(task_number,version)); CREATE TABLE IF NOT EXISTS milestones(number INTEGER PRIMARY KEY AUTOINCREMENT,data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS label_colors(label TEXT PRIMARY KEY,color TEXT NOT NULL)");
+      for (const row of db.prepare("SELECT number,data FROM boards").all()) {
+        const board = JSON.parse(row.data);
+        board.policy = { requireBriefForProgress: false, requireReviewArtifact: false, autoDispatch: false, humanCompletionOnly: true,completionMode:"any_agent",labelCompletionPolicies:{} };
+        db.prepare("UPDATE boards SET data=? WHERE number=?").run(JSON.stringify(board),row.number);
+      }
+      const positions = new Map();
+      for (const row of db.prepare("SELECT number,data FROM tasks ORDER BY number").all()) {
+        const task = JSON.parse(row.data); const position = positions.get(task.lane) ?? 0;
+        if(task.review)task.review.author=task.delegatedTo || task.review.actor;
+        positions.set(task.lane,position+1);
+        db.prepare("UPDATE tasks SET data=? WHERE number=?").run(JSON.stringify({branch:"",briefPath:"",resultPath:"",milestone:"",position,...task}),row.number);
+      }
+      for (const row of db.prepare("SELECT number,data FROM epics").all()) { const epic=JSON.parse(row.data);epic.completionPolicy="inherit";db.prepare("UPDATE epics SET data=? WHERE number=?").run(JSON.stringify(epic),row.number); }
+      db.prepare("INSERT INTO migrations VALUES(21)").run();
+    }
   });
   if (!db.prepare("PRAGMA table_info(actors)").all().some((column) => column.name === "role")) db.exec("ALTER TABLE actors ADD COLUMN role TEXT NOT NULL DEFAULT 'worker'");
   const readTransaction = (fn) => {
@@ -426,10 +444,18 @@ export function createStore(path, { clock = Date.now } = {}) {
         .map((row) => [`LANE-${row.number}`, row.role]),
     );
   const latestArchive = db.prepare("SELECT kind FROM events WHERE task_id=? AND kind IN ('archive_task','reject_task') ORDER BY sequence DESC LIMIT 1");
+  const permalink = (query) => `${db.prepare("SELECT value FROM settings WHERE key='workspace_url'").get()?.value?.replace(/\/$/, "") ?? process.env.TASKNBOARD_SERVER_URL?.replace(/\/$/, "") ?? ""}/${query}`;
+  const commentText=(body="")=>{if(body.startsWith("{")){try{return JSON.parse(body).body ?? body;}catch{}}return body;};
   /** A task with its lane role and current archive category. */
   const withRole = (t, roles = laneRoleMap()) => ({
     ...t,
     role: roles.get(t.lane),
+    url: permalink(`?board=${t.boardId}&task=${t.id}`),
+    position: t.position ?? 0,
+    labelColors: Object.fromEntries(t.labels.flatMap((label) => { const row = db.prepare("SELECT color FROM label_colors WHERE label=?").get(label.toLowerCase()); return row ? [[label,row.color]] : []; })),
+    lease: t.lease ? { ...t.lease, expiresInSeconds: Math.max(0, Math.ceil((t.lease.expiresAt - clock()) / 1000)) } : null,
+    ...dependencies(t, roles),
+    completionPolicy:completionPolicy(t),
     archiveCategory: t.archived
       ? (latestArchive.get(t.id)?.kind === "reject_task" ? "rejected" : "archived")
       : null,
@@ -498,6 +524,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         archivedTasks: laneCounts.get(lane.id)?.archived ?? 0,
       })),
       inProgress: inProgress.get(board.id) ?? 0,
+      url: permalink(`?board=${board.id}`),
     }));
   };
   const taskKey = (board, n) => `${board.prefix}-${n}`;
@@ -547,6 +574,19 @@ export function createStore(path, { clock = Date.now } = {}) {
     return row && JSON.parse(row.data);
   };
   const getEpic = (id) => findEpic(id) ?? fail("NOT_FOUND", "Epic not found", 404);
+  const completionPolicy = (task) => {
+    const board = getBoard(task.boardId);
+    const strictness = {human:5,any_agent_other_than_author:4,architect:3,auto_on_evidence:2,any_agent:1};
+    const overrides = task.labels.map((label)=>label.toLowerCase()).filter((label) => Object.hasOwn(board.policy.labelCompletionPolicies,label)).sort((a,b) => strictness[board.policy.labelCompletionPolicies[b]]-strictness[board.policy.labelCompletionPolicies[a]] || a.localeCompare(b));
+    if (overrides.length) return {mode:board.policy.labelCompletionPolicies[overrides[0]],source:`label:${overrides[0]}`};
+    const epic = task.epic && findEpic(task.epic);
+    if (epic && epic.completionPolicy !== "inherit") return {mode:epic.completionPolicy,source:`epic:${epic.id}`};
+    return {mode:board.policy.humanCompletionOnly ? "human" : board.policy.completionMode,source:"board"};
+  };
+  const mayComplete = (task,identity,policy=completionPolicy(task)) => identity.kind === "human" ||
+    policy.mode === "any_agent" ||
+    (policy.mode === "architect" && identity.role === "architect") ||
+    (policy.mode === "any_agent_other_than_author" && getLane(task.lane).role === "in_review" && Boolean(task.review?.author) && identity.id !== task.review.author);
   /** A prefix is free unless another board uses it now. Former prefixes are free. */
   const checkBoardPrefix = (prefix, exceptBoardId) => {
     const owner = db
@@ -596,7 +636,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         .all(identity.id)
         .map((r) => r.view_id),
     );
-    return views.map((v) => ({ ...v, favorite: favorites.has(v.id) }));
+    return views.map((v) => ({ ...v, favorite: favorites.has(v.id),url:permalink(`?view=${v.id}`) }));
   };
   /**
    * Filters may name only existing epics and lanes. Archived epics stay valid.
@@ -653,7 +693,12 @@ export function createStore(path, { clock = Date.now } = {}) {
     );
     for (const t of tasks)
       if (!t.archived && counts.has(t.epic)) counts.get(t.epic)[roles.get(t.lane)]++;
-    return epics.map((e) => ({ ...e, counts: counts.get(e.id) }));
+    return epics.map((e) => {
+      const ids = tasks.filter((task) => task.epic === e.id).map((task) => task.id);
+      const latest = ids.length ? db.prepare(`SELECT body,actor,created_at AS createdAt FROM events WHERE kind='add_comment' AND task_id IN (${ids.map(() => "?").join(",")}) ORDER BY sequence DESC LIMIT 1`).get(...ids) : null;
+      const status=commentText(latest?.body);
+      return { ...e, counts: counts.get(e.id), status, statusAt: latest?.createdAt ?? null, url: permalink(`?board=${e.boardId ?? ""}&epic=${e.id}`) };
+    });
   };
   /** A task may join only an existing, active epic. Returns its current key. */
   const assignableEpic = (id, boardId) => {
@@ -807,7 +852,31 @@ export function createStore(path, { clock = Date.now } = {}) {
           a.id.localeCompare(b.id, undefined, { numeric: true }),
       );
   };
-  const detail = (t) => {
+  const dependencies = (t, roles = laneRoleMap()) => {
+    const blockers = db.prepare("SELECT other.data FROM task_links l JOIN tasks self ON self.number=l.to_number JOIN tasks other ON other.number=l.from_number WHERE l.kind='blocks' AND json_extract(self.data,'$.id')=?").all(t.id).map((row) => JSON.parse(row.data))
+      .filter((other) => !other.archived && !["in_review", "done"].includes(roles.get(other.lane)))
+      .map((other) => ({ id: other.id, title: other.title, lane: other.lane, role: roles.get(other.lane), archived: false, type: "blocked_by" }));
+    return { blocked: blockers.length > 0, blockers };
+  };
+  const finishEvidence = (task,identity) => {
+    const effective=completionPolicy(task);
+    if(task.archived || getLane(task.lane).role!=="in_review" || effective.mode!=="auto_on_evidence")return false;
+    const artifactPresent=Boolean(task.review?.artifactUrl || task.review?.artifacts?.length);
+    const merged=artifactPresent && areTaskCommitsOnDefaultBranch(getBoard(task.boardId).repository,task.commits ?? []);
+    task.autoCompletion={eligible:merged,reason:merged ? "" : "Automatic completion requires an artifact and linked commits on the configured default branch"};
+    if(!merged)return false;
+    task.lane=firstLane(task.boardId,"done");task.lease=null;task.delegatedTo="";task.delegatedBy="";
+    task.completion={actor:identity.id,humanCompletionOnly:getBoard(task.boardId).policy.humanCompletionOnly,approvedBy:"evidence",...effective,automatic:true};
+    return true;
+  };
+  const undoInfo = (t, identity) => {
+    const row = db.prepare("SELECT * FROM task_history WHERE task_number=? ORDER BY version DESC LIMIT 1").get(taskNumber(t.id));
+    const creator=t.creator ?? db.prepare("SELECT actor FROM events WHERE task_id=? AND kind='created' ORDER BY sequence LIMIT 1").get(t.id)?.actor ?? null;
+    const untouched = creator!==null && !db.prepare("SELECT sequence FROM events WHERE task_id=? AND actor<>? LIMIT 1").get(t.id, creator);
+    const eligible = !!identity && creator === identity.id && row?.version === t.version && row.actor === identity.id && (clock() - Date.parse(row.created_at) <= 600000 || untouched);
+    return { eligible, sequence: row?.sequence ?? null, reason: eligible ? "" : "Only the creator can undo their latest action within ten minutes or on an untouched task" };
+  };
+  const detail = (t, identity) => {
     const events = db
       .prepare(
         "SELECT sequence, actor, kind, body, created_at AS createdAt FROM events WHERE task_id=? ORDER BY sequence",
@@ -819,6 +888,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         events.filter((event) => event.kind === "add_comment").length,
       ),
       links: linksOf(t),
+      undo: undoInfo(t, identity),
       events,
     };
   };
@@ -894,7 +964,7 @@ export function createStore(path, { clock = Date.now } = {}) {
     const now = clock();
     const expiresAt = t.lease?.expiresAt ?? null;
     const remainingMs = expiresAt === null ? 0 : expiresAt - now;
-    const lease = { actor: t.lease?.actor ?? null, expiresAt, remainingMs, now, active: expiresAt !== null && remainingMs > 0 };
+    const lease = { actor: t.lease?.actor ?? null, expiresAt, remainingMs, expiresInSeconds: Math.max(0, Math.ceil(remainingMs / 1000)), now, active: expiresAt !== null && remainingMs > 0 };
     const state = expiresAt === null
       ? `No lease exists; now=${now}`
       : `Lease holder=${lease.actor}; expiresAt=${expiresAt}; now=${now}; remainingMs=${remainingMs}`;
@@ -907,7 +977,7 @@ export function createStore(path, { clock = Date.now } = {}) {
    */
   function execute(command, input, actor) {
     if (
-      ["upload_image", "update_profile"].includes(command) ||
+      ["upload_image", "upload_artifact", "update_profile"].includes(command) ||
       !JSON.stringify(input ?? null).includes("data:image/")
     )
       return run(command, input, actor);
@@ -951,6 +1021,62 @@ export function createStore(path, { clock = Date.now } = {}) {
         400,
       );
     const p = parsed.data;
+    if (command === "critical_path") return readTransaction(() => {
+      const goal = get(p.id); const tasks = new Map(); const edges = []; const cycles = [];
+      const visit = (task, chain) => {
+        if (chain.includes(task.id)) { cycles.push([...chain, task.id]); return; }
+        if (tasks.has(task.id)) return;
+        tasks.set(task.id, withRole(task));
+        for (const blocker of dependencies(task).blockers) { edges.push({ from: blocker.id, to: task.id }); visit(get(blocker.id), [...chain, task.id]); }
+      };
+      visit(goal, []);
+      return { goal: goal.id, tasks: [...tasks.values()], edges, cycles };
+    });
+    if (command === "list_activity") return readTransaction(() => {
+      if (p.boardId) getBoard(p.boardId);
+      const cutoff = new Date(clock() - p.hours * 3600000).toISOString();
+      const events = db.prepare("SELECT e.sequence,e.task_id AS taskId,e.actor,e.kind,e.body,e.created_at AS createdAt,t.data FROM events e JOIN tasks t ON json_extract(t.data,'$.id')=e.task_id WHERE e.created_at>=? ORDER BY e.sequence DESC").all(cutoff)
+        .filter((row) => (!p.boardId || JSON.parse(row.data).boardId === p.boardId) && (!p.agent || row.actor === p.agent)).slice(0,p.limit).map(({data,...row}) => ({...row,url:permalink(`?board=${JSON.parse(data).boardId}&task=${row.taskId}`)}));
+      const running = all().filter((task) => !task.archived && task.delegatedTo && getLane(task.lane).role === "in_progress" && (!p.boardId || task.boardId === p.boardId) && (!p.agent || [task.delegatedTo,task.delegatedBy].includes(p.agent)))
+        .map((task) => ({ ...withRole(task), elapsedSeconds: Math.max(0,Math.floor((clock()-Date.parse(task.delegatedAt ?? task.updatedAt))/1000)), lastActivityAt: db.prepare("SELECT created_at FROM events WHERE task_id=? AND kind IN ('heartbeat','add_comment') ORDER BY sequence DESC LIMIT 1").get(task.id)?.created_at ?? task.delegatedAt ?? task.updatedAt,
+          lastActivity:db.prepare("SELECT kind,body,created_at AS createdAt FROM events WHERE task_id=? AND kind IN ('heartbeat','add_comment') ORDER BY sequence DESC LIMIT 1").get(task.id) ?? null,
+          lastComment:commentText(db.prepare("SELECT body FROM events WHERE task_id=? AND kind='add_comment' ORDER BY sequence DESC LIMIT 1").get(task.id)?.body),
+        }));
+      return { events, running, hours:p.hours };
+    });
+    if (["list_milestones","create_milestone","update_milestone","archive_milestone"].includes(command)) return transaction(() => {
+      const read = () => db.prepare("SELECT data FROM milestones ORDER BY number").all().map((row) => JSON.parse(row.data));
+      const present = (milestone) => ({ ...milestone, url:permalink(`?board=${milestone.boardId}&milestone=${milestone.id}`) });
+      if (command === "list_milestones") return { milestones: read().filter((milestone) => (p.includeArchived || !milestone.archived) && (!p.boardId || milestone.boardId === p.boardId)).map(present) };
+      humanOnly(identity,"manage milestones");
+      let milestone;
+      const now = new Date(clock()).toISOString();
+      if (command === "create_milestone") {
+        getBoard(p.boardId);
+        const inserted = db.prepare("INSERT INTO milestones(data) VALUES('{}')").run();
+        milestone = { ...p,id:`MILESTONE-${inserted.lastInsertRowid}`,version:1,archived:false,createdAt:now,updatedAt:now };
+      } else {
+        milestone = read().find((milestone) => milestone.id === p.id);
+        if (!milestone) fail("NOT_FOUND","Milestone not found",404);
+        if (milestone.version !== p.expectedVersion) fail("VERSION_CONFLICT",`Milestone changed. Current version: ${milestone.version}`);
+        if (milestone.archived) fail("ARCHIVED","Milestone is archived");
+        Object.assign(milestone, p.patch ?? {archived:true}, {version:milestone.version+1,updatedAt:now});
+      }
+      db.prepare("UPDATE milestones SET data=? WHERE number=?").run(JSON.stringify(milestone),Number(milestone.id.split("-")[1]));
+      event(milestone.id,identity,command,JSON.stringify(p));
+      return present(milestone);
+    });
+    if (command === "set_label_color") return transaction(() => { humanOnly(identity,"set label colours"); db.prepare("INSERT INTO label_colors(label,color) VALUES(?,?) ON CONFLICT(label) DO UPDATE SET color=excluded.color").run(p.label.toLowerCase(),p.color); return { label:p.label,color:p.color }; });
+    const batches = { claim_tasks: ["claim_task", "tasks"], add_comments: ["add_comment", "comments"], submit_reviews: ["submit_review", "reviews"] };
+    if (batches[command]) return transaction(() => ({ tasks: p[batches[command][1]].map((args) => run(batches[command][0], args, identity)) }));
+    if (command === "upload_artifact") {
+      const [, mime, encoded] = p.dataUrl.match(/^data:([^;]+);base64,(.*)$/);
+      const bytes = Buffer.from(encoded,"base64");
+      if (!bytes.length || bytes.length > 8 * 1024 * 1024 || (imageSignatures[mime] && !imageSignatures[mime](bytes))) fail("VALIDATION","Artifact bytes do not match the file type or size limit",400);
+      if (mime === "application/json") { try { JSON.parse(bytes.toString("utf8")); } catch { fail("VALIDATION","Artifact contains invalid JSON",400); } }
+      const artifactId = transaction(() => saveImage(mime,bytes,identity.id));
+      return { id: artifactId, title: p.title, url: `/files/${artifactId}`, mime, bytes: bytes.length };
+    }
     if (["bulk_create_tasks", "bulk_move_tasks"].includes(command)) return transaction(() => ({ tasks: p.tasks.map((task) => run(command === "bulk_create_tasks" ? "create_task" : "update_task", command === "bulk_create_tasks" ? task : { ...task, patch: { lane: p.lane } }, identity)) }));
     if (command === "list_boards")
       return readTransaction(() => ({ boards: boardsFor(identity, allBoards()) }));
@@ -968,6 +1094,7 @@ export function createStore(path, { clock = Date.now } = {}) {
           repository: p.repository,
           agentReasoning: p.agentReasoning,
           agentSandbox: p.agentSandbox,
+          policy: p.policy,
           version: 1,
           createdAt: now,
           updatedAt: now,
@@ -990,6 +1117,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         if (p.patch.prefix !== undefined)
           checkBoardPrefix(p.patch.prefix, board.id);
         const previousPrefix = board.prefix;
+        if (p.patch.policy) p.patch.policy = { ...board.policy,...p.patch.policy };
         Object.assign(board, p.patch);
         board.version++;
         board.updatedAt = new Date(clock()).toISOString();
@@ -1108,7 +1236,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         actors: actorRoster(),
         leaseSeconds: 900,
         boards: boardsFor(identity, allBoards()),
-        schemaVersion: 20,
+        schemaVersion: 21,
       };
     if (command === "update_profile")
       return transaction(() => {
@@ -1180,6 +1308,7 @@ export function createStore(path, { clock = Date.now } = {}) {
             (!p.lane || t.lane === p.lane) &&
             (p.assignee === undefined || t.assignee === p.assignee) &&
             (p.owner === undefined || t.assignee === p.owner) &&
+            (p.delegated === undefined || Boolean(t.delegatedTo) === p.delegated) &&
             (!p.label || t.labels.includes(p.label)) &&
             (!p.boardId || t.boardId === p.boardId) &&
             (!epic || (t.epic || "none") === epic) &&
@@ -1188,13 +1317,13 @@ export function createStore(path, { clock = Date.now } = {}) {
         const page = rows.slice(p.offset, p.offset + p.limit);
         const counts = commentCounts(page.map((t) => t.id));
         return {
-          tasks: page.map((t) => p.compact ? { id: t.id, title: t.title, version: t.version, lane: t.lane, role: t.role, assignee: t.assignee, labels: t.labels, delegatedTo: t.delegatedTo ?? "" } : withCommentCount(t, counts.get(t.id) ?? 0)),
+          tasks: page.map((t) => p.fields ? Object.fromEntries(p.fields.map((field) => [field,t[field]])) : p.compact ? { id: t.id, title: t.title, version: t.version, lane: t.lane, role: t.role, epic:t.epic, assignee: t.assignee, labels: t.labels, delegatedTo: t.delegatedTo ?? "", lease:t.lease } : { ...withCommentCount(t, counts.get(t.id) ?? 0),undo:undoInfo(t,identity) }),
           total: rows.length,
         };
       });
     }
     if (command === "get_task")
-      return readTransaction(() => detail(get(p.id)));
+      return readTransaction(() => detail(get(p.id),identity));
     if (command === "find_similar_tasks")
       return readTransaction(() => {
         if (p.boardId) getBoard(p.boardId);
@@ -1204,7 +1333,8 @@ export function createStore(path, { clock = Date.now } = {}) {
         const tasks = all()
           .filter(
             (t) =>
-              !t.archived &&
+              (p.includeArchived || !t.archived) &&
+              (p.includeDone || roles.get(t.lane) !== "done") &&
               t.id !== excluded &&
               (!p.boardId || t.boardId === p.boardId),
           )
@@ -1237,6 +1367,8 @@ export function createStore(path, { clock = Date.now } = {}) {
                     lane: t.lane,
                     role: roles.get(t.lane),
                     archived: Boolean(t.archived),
+                    url:permalink(`?board=${t.boardId}&task=${t.id}`),
+                    lease: t.lease ? { ...t.lease,expiresInSeconds:Math.max(0,Math.ceil((t.lease.expiresAt-clock())/1000)) } : null,
                   },
                 ]
               : [];
@@ -1247,17 +1379,14 @@ export function createStore(path, { clock = Date.now } = {}) {
       const items = db.prepare(`SELECT e.sequence, e.task_id AS taskId, e.actor, e.kind, e.body, e.created_at AS createdAt, t.data
         FROM events e JOIN tasks t ON json_extract(t.data, '$.id')=e.task_id
         JOIN actors a ON a.id=e.actor
-        WHERE e.sequence>? AND a.kind='human' AND e.actor<>? AND e.kind IN ('add_comment','request_changes','reject_task','update_task') ORDER BY e.sequence`)
+        WHERE e.sequence>? AND e.actor<>? AND e.kind IN ('add_comment','submit_review','request_changes','reject_task','update_task','delegate_task','archive_task','restore_task','link_commits','unblocked','dispatch_requested','auto_complete') ORDER BY e.sequence`)
         .all(p.after, identity.id).filter((row) => {
           const task = JSON.parse(row.data);
-          if (row.kind === "update_task") {
-            const target = JSON.parse(row.body).lane;
-            const role = target && laneRoleMap().get(target);
-            if (role !== "done") return false;
-          }
           const creator = task.creator ?? db.prepare("SELECT actor FROM events WHERE task_id=? AND kind='created' ORDER BY sequence LIMIT 1").get(task.id)?.actor;
-          return identity.role === "architect" || [creator, task.assignee, task.delegatedBy, task.delegatedTo].includes(identity.id);
-        }).slice(0, p.limit).map(({ data, ...row }) => row);
+          const prior = db.prepare("SELECT before_data FROM task_history WHERE sequence=?").get(row.sequence)?.before_data;
+          const previous = prior ? JSON.parse(prior) : {};
+          return identity.role === "architect" || [creator, task.assignee, task.delegatedBy, task.delegatedTo,previous.delegatedBy,previous.delegatedTo].includes(identity.id);
+        }).slice(0, p.limit).map(({ data, ...row }) => ({...row,url:permalink(`?board=${JSON.parse(data).boardId}&task=${row.taskId}`)}));
       return { items, cursor: items.at(-1)?.sequence ?? p.after };
     });
     if (command === "list_inbox")
@@ -1377,21 +1506,21 @@ export function createStore(path, { clock = Date.now } = {}) {
               counts.set(label, (counts.get(label) ?? 0) + 1);
         return {
           labels: [...counts]
-            .map(([name, tasks]) => ({ name, tasks }))
+            .map(([name, tasks]) => ({ name, tasks, color:db.prepare("SELECT color FROM label_colors WHERE label=?").get(name.toLowerCase())?.color ?? null }))
             .sort((a, b) => a.name.localeCompare(b.name)),
         };
       });
     if (command === "rename_label")
       return transaction(() => {
         const swap = (values) => [
-          ...new Set(values.flatMap((v) => (v !== p.from ? [v] : p.to ? [p.to] : []))),
+          ...new Set(values.flatMap((v) => (v.toLowerCase() !== p.from.toLowerCase() ? [v] : p.to ? [p.to] : []))),
         ];
         // A workspace-wide edit open to people and agents: active tasks change
         // whoever holds their claim, and advance their version so stale
         // drafts and leases are caught by the usual version check.
         let tasks = 0;
         for (const t of all()) {
-          if (t.archived || !t.labels.includes(p.from)) continue;
+          if (t.archived || !t.labels.some((label)=>label.toLowerCase()===p.from.toLowerCase())) continue;
           t.labels = swap(t.labels);
           t.version++;
           t.updatedAt = new Date(clock()).toISOString();
@@ -1406,7 +1535,7 @@ export function createStore(path, { clock = Date.now } = {}) {
           for (const v of allViews()) {
             if (
               !v.filters.conditions.some(
-                (c) => c.field === "label" && c.values.includes(p.from),
+                (c) => c.field === "label" && c.values.some((label)=>label.toLowerCase()===p.from.toLowerCase()),
               )
             )
               continue;
@@ -1419,6 +1548,20 @@ export function createStore(path, { clock = Date.now } = {}) {
             event(v.id, identity, command, JSON.stringify({ from: p.from, to: p.to }));
             views++;
           }
+        const oldColor = db.prepare("SELECT color FROM label_colors WHERE label=?").get(p.from.toLowerCase());
+        if (oldColor && p.to) db.prepare("INSERT OR IGNORE INTO label_colors(label,color) VALUES(?,?)").run(p.to.toLowerCase(),oldColor.color);
+        const archivedLabelRemains=all().some((task) => task.labels.some((label)=>label.toLowerCase()===p.from.toLowerCase()));
+        if (!archivedLabelRemains) db.prepare("DELETE FROM label_colors WHERE label=?").run(p.from.toLowerCase());
+        const strictness={human:5,any_agent_other_than_author:4,architect:3,auto_on_evidence:2,any_agent:1};
+        for (const board of allBoards()) {
+          const policies=board.policy.labelCompletionPolicies;
+          const from=p.from.toLowerCase(),to=p.to.toLowerCase();
+          if (!Object.hasOwn(policies,from)) continue;
+          const source=policies[from];if(!archivedLabelRemains)delete policies[from];
+          if (to && (!Object.hasOwn(policies,to) || strictness[source]>strictness[policies[to]])) Object.defineProperty(policies,to,{value:source,enumerable:true,writable:true,configurable:true});
+          board.version++;board.updatedAt=new Date(clock()).toISOString();saveBoard(board);
+          event(board.id,identity,"rename_label",JSON.stringify({from:p.from,to:p.to}));
+        }
         return { from: p.from, to: p.to, tasks, views };
       });
     if (command === "create_epic")
@@ -1429,6 +1572,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         const now = new Date(clock()).toISOString();
         const epic = {
           id: `EPIC-${result.lastInsertRowid}`,
+          completionPolicy:p.completionPolicy,
           title: p.title,
           boardId: p.boardId ?? "",
           description: p.description,
@@ -1486,12 +1630,15 @@ export function createStore(path, { clock = Date.now } = {}) {
       if (identity.kind !== "human")
         fail("FORBIDDEN", "Human access required", 403);
       return transaction(() => ({
-        schemaVersion: 20,
+        schemaVersion: 21,
         exportedAt: new Date(clock()).toISOString(),
         boards: allBoards().map((board) => ({ ...board, lanes: lanesOf(board.id) })),
         actors: actorRoster(),
         epics: allEpics(),
         views: allViews(),
+        milestones: db.prepare("SELECT data FROM milestones ORDER BY number").all().map((row) => JSON.parse(row.data)),
+        labelColors: Object.fromEntries(db.prepare("SELECT label,color FROM label_colors ORDER BY label").all().map((row) => [row.label,row.color])),
+        taskHistory: db.prepare("SELECT * FROM task_history ORDER BY task_number,version").all(),
         viewFavorites: db
           .prepare("SELECT actor, view_id FROM view_favorites ORDER BY actor, view_id")
           .all()
@@ -1550,7 +1697,14 @@ export function createStore(path, { clock = Date.now } = {}) {
           lease: null,
           delegatedTo: "",
           archived: false,
+          position: all().filter((task) => task.boardId === board.id && task.lane === (lane?.id ?? firstLane(board.id,"todo"))).length,
         };
+        if (getLane(t.lane).role === "in_progress" && board.policy.requireBriefForProgress && !t.briefPath)
+          fail("POLICY_REQUIRED","Board policy requires a brief path before In progress");
+        if (t.milestone) {
+          const milestone = db.prepare("SELECT data FROM milestones WHERE number=?").get(Number(t.milestone.split("-")[1]));
+          if (!milestone || JSON.parse(milestone.data).boardId !== t.boardId || JSON.parse(milestone.data).archived) fail("VALIDATION","milestone: Choose an active milestone of this board",400);
+        }
         db.prepare("UPDATE tasks SET data=? WHERE number=?").run(
           JSON.stringify(t),
           result.lastInsertRowid,
@@ -1562,25 +1716,62 @@ export function createStore(path, { clock = Date.now } = {}) {
           event(blocker.id, identity, "link_task", JSON.stringify({ type: "blocks", target: t.id }));
         }
         event(t.id, identity, "created");
-        return detail(t);
+        db.prepare("INSERT INTO task_history(task_number,version,actor,sequence,created_at,before_data,fields) VALUES(?,?,?,?,?,?,?)").run(taskNumber(t.id),1,identity.id,db.prepare("SELECT MAX(sequence) AS sequence FROM events WHERE task_id=?").get(t.id).sequence,t.createdAt,null,JSON.stringify(Object.keys(t)));
+        return detail(t,identity);
       }
       const t = get(p.id);
+      const before = structuredClone(t);
+      const beforeLinks = db.prepare("SELECT from_number,to_number,kind FROM task_links WHERE from_number=? OR to_number=?").all(taskNumber(t.id),taskNumber(t.id));
+      const beforePositions = command === "reorder_task" ? all().filter((task) => task.lane === t.lane && !task.archived).map((task) => ({id:task.id,position:task.position ?? 0})) : null;
       let link;
-      if (t.archived && command !== "restore_task") fail("ARCHIVED", "Task is archived");
+      if (t.archived && !["restore_task","undo_task"].includes(command)) fail("ARCHIVED", "Task is archived");
       // An owned active claim is a read-only retry, even with a stale version.
       // All commands that change task data still require the current version.
       if (command === "claim_task" && active(t) && t.lease.actor === identity.id)
-        return detail(t);
+        return detail(t,identity);
       if ((command !== "add_comment" || p.expectedVersion !== undefined) && t.version !== p.expectedVersion)
         fail(
           "VERSION_CONFLICT",
           `Task changed. Read it again. Current version: ${t.version}`,
+          409,
+          (() => {
+            const history = db.prepare("SELECT fields,sequence FROM task_history WHERE task_number=? AND version>? ORDER BY version").all(taskNumber(t.id),p.expectedVersion ?? 0);
+            return { currentVersion:t.version, changedFields:[...new Set(history.flatMap((row) => JSON.parse(row.fields)))], events:history.length ? db.prepare("SELECT sequence,actor,kind,body,created_at AS createdAt FROM events WHERE task_id=? AND sequence>=? ORDER BY sequence").all(t.id,history[0].sequence) : [] };
+          })(),
         );
-      if (command === "restore_task") {
+      if (command === "undo_task") {
+        if (!undoInfo(t,identity).eligible) fail("FORBIDDEN",undoInfo(t,identity).reason,403);
+        const previous = db.prepare("SELECT before_data FROM task_history WHERE task_number=? ORDER BY version DESC LIMIT 1").get(taskNumber(t.id));
+        const undone = db.prepare("SELECT sequence,kind,body FROM events WHERE sequence=?").get(undoInfo(t,identity).sequence);
+        link = { undoneSequence:undone.sequence,kind:undone.kind };
+        if (undone.kind === "add_comment") db.prepare("UPDATE events SET kind='comment_undone' WHERE sequence=?").run(undone.sequence);
+        if (previous.before_data) {
+          const old = JSON.parse(previous.before_data); const restoredLinks = old._links; const restoredPositions = old._positions; delete old._links; delete old._positions;
+          for (const key of Object.keys(t)) delete t[key];
+          Object.assign(t,old,{version:before.version});
+          if (restoredLinks) {
+            db.prepare("DELETE FROM task_links WHERE from_number=? OR to_number=?").run(taskNumber(t.id),taskNumber(t.id));
+            for (const row of restoredLinks) db.prepare("INSERT INTO task_links(from_number,to_number,kind) VALUES(?,?,?)").run(row.from_number,row.to_number,row.kind);
+          }
+          for (const position of restoredPositions ?? []) {
+            if (position.id === t.id) continue;
+            const other = get(position.id); other.position = position.position; other.version++; other.updatedAt = new Date(clock()).toISOString(); save(other);
+            event(other.id,identity,"undo_task",JSON.stringify({position:position.position,taskId:t.id}));
+          }
+        }
+        else { t.archived = true; t.lease = null; t.delegatedTo = ""; t.delegatedBy = ""; }
+      } else if (command === "restore_task") {
         const creator = t.creator ?? db.prepare("SELECT actor FROM events WHERE task_id=? AND kind='created' ORDER BY sequence LIMIT 1").get(t.id)?.actor;
         if (identity.kind !== "human" && identity.role !== "architect" && creator !== identity.id)
           fail("FORBIDDEN", "Workers can restore only tasks they created", 403);
         if (!t.archived) fail("INVALID_TRANSITION", "Only archived tasks can be restored");
+        if(identity.kind === "agent" && identity.role !== "architect") {
+          const lastArchive=db.prepare("SELECT actor,created_at FROM events WHERE task_id=? AND kind IN ('archive_task','reject_task') ORDER BY sequence DESC LIMIT 1").get(t.id);
+          const untouched=!db.prepare("SELECT sequence FROM events WHERE task_id=? AND actor<>? LIMIT 1").get(t.id,identity.id);
+          const recent=lastArchive && clock()-Date.parse(lastArchive.created_at)<=600000;
+          if(lastArchive?.actor!==identity.id || (!recent&&!untouched))
+            fail("FORBIDDEN","Workers can restore only their own archive within ten minutes or on a task nobody else touched",403);
+        }
         t.archived = false;
         t.lease = null;
         t.delegatedTo = "";
@@ -1611,19 +1802,27 @@ export function createStore(path, { clock = Date.now } = {}) {
         // Anyone may reply, claimed or not; the comment changes no task field.
       } else {
         const planner = identity.role === "architect";
+        const effectivePolicy = completionPolicy(t);
+        const completing = command === "update_task" && p.patch.lane && getLane(p.patch.lane).role === "done";
+        if (completing && identity.kind === "agent" && effectivePolicy.mode === "auto_on_evidence")
+          fail("POLICY_REQUIRED","Automatic completion requires submit_review with artifacts and commits on the default branch");
+        if (completing && identity.kind === "agent" && !mayComplete(t,identity,effectivePolicy))
+          fail("FORBIDDEN",`Completion policy ${effectivePolicy.mode} from ${effectivePolicy.source} does not permit this actor to complete the task`,403);
+        const reviewApproval = completing && Object.keys(p.patch).length===1 && effectivePolicy.mode === "any_agent_other_than_author" && getLane(t.lane).role === "in_review" && mayComplete(t,identity,effectivePolicy);
         const creator = t.creator ?? db.prepare("SELECT actor FROM events WHERE task_id=? AND kind='created' ORDER BY sequence LIMIT 1").get(t.id)?.actor;
         const creatorArchive = command === "archive_task" && creator === identity.id;
         if (command === "archive_task" && identity.kind !== "human" && !planner && !creatorArchive)
           fail("FORBIDDEN", "Workers can archive only tasks they created", 403);
         const creatorEvidence = ["submit_review", "link_commits"].includes(command) && creator === identity.id;
+        const delegatedAccess = ["submit_review","link_commits","update_task","reorder_task"].includes(command) && [t.delegatedTo,t.delegatedBy].includes(identity.id);
         const resumeLaneMove = command === "update_task" &&
           Object.keys(p.patch).length === 1 && p.patch.lane !== undefined &&
           !active(t) && t.lease?.actor === identity.id &&
           ["todo", "in_progress"].includes(getLane(t.lane).role);
-        if (!planner && !creatorEvidence && active(t) && t.lease.actor !== identity.id)
+        if (!planner && !creatorEvidence && !delegatedAccess && !reviewApproval && active(t) && t.lease.actor !== identity.id)
           leaseFailure("LEASE_CONFLICT", `Task is claimed by ${t.lease.actor}`, t);
         if (
-          identity.kind === "agent" && !planner && !creatorEvidence && !creatorArchive && !resumeLaneMove && command !== "delegate_task" &&
+          identity.kind === "agent" && !planner && !creatorEvidence && !delegatedAccess && !reviewApproval && !creatorArchive && !resumeLaneMove && command !== "delegate_task" &&
           (!active(t) || t.lease.actor !== identity.id)
         )
           leaseFailure("LEASE_REQUIRED", "Claim this task before changing it", t);
@@ -1646,7 +1845,7 @@ export function createStore(path, { clock = Date.now } = {}) {
           )
             fail(
               "FORBIDDEN",
-              "Agents cannot reassign tasks; use submit_review for review or update_task for completion",
+              "Agents cannot reassign tasks; use submit_review for review",
               403,
             );
           if (
@@ -1665,8 +1864,11 @@ export function createStore(path, { clock = Date.now } = {}) {
           }
           if (resumeLaneMove) t.lease = { actor: identity.id, expiresAt: clock() + 900000 };
           Object.assign(t, p.patch);
+          if (getLane(before.lane).role === "done" && target && target.role !== "done") t.completion=null;
+          if (target?.role === "done") t.completion = { actor:identity.id,humanCompletionOnly:getBoard(t.boardId).policy.humanCompletionOnly,approvedBy:identity.kind === "human" ? "human" : "agent",...effectivePolicy,automatic:false };
           if (target?.role === "todo") t.lease = null;
-          if (["in_review", "done"].includes(getLane(t.lane).role)) { t.lease = null; t.delegatedTo = ""; }
+          if (["in_review", "done"].includes(getLane(t.lane).role)) t.lease = null;
+          if (getLane(t.lane).role === "done") { t.delegatedTo = ""; t.delegatedBy = ""; }
         }
         if (command === "set_standup_notes") {
           t.standup = { highlight: p.highlight, blocker: p.blocker };
@@ -1679,17 +1881,25 @@ export function createStore(path, { clock = Date.now } = {}) {
             );
           t.lane = firstLane(t.boardId, "in_review");
           t.lease = null;
-          t.delegatedTo = "";
+          if (getBoard(t.boardId).policy.requireReviewArtifact && !p.artifactUrl && !p.artifacts.length)
+            fail("POLICY_REQUIRED","Board policy requires at least one review artifact");
           t.review = {
             summary: p.summary,
             artifactUrl: p.artifactUrl,
             actor: identity.id,
+            author:t.delegatedTo || identity.id,
+            artifacts:p.artifacts,
+            commitRange:p.commitRange,
+            verifiedBy:p.verifiedBy,
+            ...(p.via ? {via:p.via} : {}),
           };
+          finishEvidence(t,identity);
         }
         if (command === "delegate_task") {
           if (!["todo", "in_progress"].includes(getLane(t.lane).role)) fail("INVALID_TRANSITION", "Only open tasks can be delegated");
           t.delegatedTo = p.delegatedTo;
           t.delegatedBy = identity.id;
+          t.delegatedAt = new Date(clock()).toISOString();
           t.lane = firstLane(t.boardId, "in_progress");
           t.lease = null;
         }
@@ -1702,7 +1912,8 @@ export function createStore(path, { clock = Date.now } = {}) {
         }
         if (command === "link_commits") {
           t.commits = [...new Set([...(t.commits ?? []), ...p.commits.map((sha) => sha.toLowerCase())])];
-          link = { commits: p.commits };
+          link = { commits: p.commits, ...(p.via ? {via:p.via} : {}) };
+          if(finishEvidence(t,identity))link.completion=t.completion;
         }
         if (command === "link_task" || command === "unlink_task") {
           const other = get(p.target);
@@ -1788,6 +1999,26 @@ export function createStore(path, { clock = Date.now } = {}) {
           t.delegatedBy = "";
         }
       }
+      if (getLane(t.lane).role === "in_progress" && getBoard(t.boardId).policy.requireBriefForProgress && !t.briefPath)
+        fail("POLICY_REQUIRED","Board policy requires a brief path before In progress");
+      if (t.milestone && command === "update_task" && p.patch.milestone !== undefined) {
+        const milestone = db.prepare("SELECT data FROM milestones WHERE number=?").get(Number(t.milestone.split("-")[1]));
+        if (!milestone || JSON.parse(milestone.data).boardId !== t.boardId || JSON.parse(milestone.data).archived) fail("VALIDATION","milestone: Choose an active milestone of this board",400);
+      }
+      if (command === "reorder_task") {
+        const siblings = all().filter((task) => !task.archived && task.lane === t.lane && task.id !== t.id).sort((a,b) => (a.position ?? 0)-(b.position ?? 0) || taskNumber(a.id)-taskNumber(b.id));
+        const index = Math.min(p.position,siblings.length);
+        siblings.splice(index,0,t);
+        for (let position = 0; position < siblings.length; position++) {
+          const other = siblings[position];
+          if (other.id === t.id) { t.position = position; continue; }
+          if (other.position === position) continue;
+          const previousOther = structuredClone(other);
+          other.position = position; other.version++; other.updatedAt = new Date(clock()).toISOString(); save(other);
+          event(other.id,identity,"reorder_task",JSON.stringify({position}));
+          db.prepare("INSERT INTO task_history(task_number,version,actor,sequence,created_at,before_data,fields) VALUES(?,?,?,?,?,?,?)").run(taskNumber(other.id),other.version,identity.id,db.prepare("SELECT MAX(sequence) AS sequence FROM events WHERE task_id=?").get(other.id).sequence,other.updatedAt,JSON.stringify(previousOther),JSON.stringify(["position"]));
+        }
+      }
       t.version++;
       t.updatedAt = new Date(clock()).toISOString();
       save(t);
@@ -1795,18 +2026,25 @@ export function createStore(path, { clock = Date.now } = {}) {
         t.id,
         identity,
         command,
-        p.body ?? p.reason ?? (command === "delegate_task" ? JSON.stringify({ delegatedTo: p.delegatedTo }) : undefined) ??
+        (p.body && p.via ? JSON.stringify({body:p.body,via:p.via}) : p.body) ?? p.reason ?? (command === "delegate_task" ? JSON.stringify({ delegatedTo: p.delegatedTo,delegatedBy:identity.id }) : undefined) ??
           (command === "submit_review"
-            ? JSON.stringify(t.review)
+            ? JSON.stringify({...t.review,...(t.completion?.automatic ? {completion:t.completion} : {}),...(t.autoCompletion ? {autoCompletion:t.autoCompletion} : {})})
             : command === "set_standup_notes"
               ? JSON.stringify(t.standup)
               : command === "update_task"
-                ? JSON.stringify(p.patch)
+                ? JSON.stringify({ ...p.patch, ...(p.patch.lane && getLane(p.patch.lane).role === "done" ? {completion:t.completion} : {}) })
                 : link
                   ? JSON.stringify(link)
                   : ""),
       );
-      return detail(t);
+      const sequence = db.prepare("SELECT MAX(sequence) AS sequence FROM events WHERE task_id=?").get(t.id).sequence;
+      const changed = Object.keys(t).filter((field) => JSON.stringify(t[field]) !== JSON.stringify(before[field]));
+      db.prepare("INSERT INTO task_history(task_number,version,actor,sequence,created_at,before_data,fields) VALUES(?,?,?,?,?,?,?)").run(taskNumber(t.id),t.version,identity.id,sequence,t.updatedAt,JSON.stringify({...before,_links:beforeLinks,...(beforePositions ? {_positions:beforePositions} : {})}),JSON.stringify(changed.filter((field) => !["version","updatedAt"].includes(field))));
+      if (!before.archived && !["in_review","done"].includes(getLane(before.lane).role) && (t.archived || ["in_review","done"].includes(getLane(t.lane).role))) {
+        const dependents = db.prepare("SELECT other.data FROM task_links l JOIN tasks other ON other.number=l.to_number WHERE l.from_number=? AND l.kind='blocks'").all(taskNumber(t.id));
+        for (const row of dependents) { const dependent = JSON.parse(row.data); if (!dependent.archived && !dependencies(dependent).blocked) event(dependent.id,identity,"unblocked",JSON.stringify({blocker:t.id})); }
+      }
+      return detail(t,identity);
     });
   }
   /** Read one stored image for the file route. IDs are unguessable. */
@@ -1848,11 +2086,25 @@ export function createStore(path, { clock = Date.now } = {}) {
       addActor(identity);
       event(get(taskId).id, identity, kind, body);
     });
+  const completeEvidenceTasks = (boardIds,actor) => {
+    const identity=validActor(actor);registerActors([identity]);const completed=[];
+    for(const candidate of all().filter(task=>boardIds.has(task.boardId)&&!task.archived&&getLane(task.lane).role==="in_review"&&completionPolicy(task).mode==="auto_on_evidence"))transaction(()=>{
+      const task=get(candidate.id),before=structuredClone(task);
+      if(!finishEvidence(task,identity))return;
+      task.version++;task.updatedAt=new Date(clock()).toISOString();save(task);
+      event(task.id,identity,"auto_complete",JSON.stringify({completion:task.completion}));
+      const sequence=db.prepare("SELECT MAX(sequence) AS sequence FROM events WHERE task_id=?").get(task.id).sequence;
+      db.prepare("INSERT INTO task_history(task_number,version,actor,sequence,created_at,before_data,fields) VALUES(?,?,?,?,?,?,?)").run(taskNumber(task.id),task.version,identity.id,sequence,task.updatedAt,JSON.stringify(before),JSON.stringify(["lane","completion","lease","delegatedTo","delegatedBy"]));
+      completed.push(detail(task,identity));
+    });
+    return completed;
+  };
   return {
     execute,
     boards: allBoards,
     registerActors,
     recordEvent,
+    completeEvidenceTasks,
     image,
     setting,
     settingKeys,

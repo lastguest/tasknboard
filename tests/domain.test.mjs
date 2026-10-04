@@ -92,8 +92,10 @@ test("claim exclusion, agent ownership, heartbeat and review lifecycle", (t) => 
   assert.equal(task.role, "done");
   assert.equal(task.events.length, 5);
 });
-test("an agent completes its claimed task and releases its lease", (t) => {
+test("an agent completes its claimed task when board policy allows it", (t) => {
   const s = fixture(t);
+  const board = s.execute("list_boards", {}, human).boards[0];
+  s.execute("update_board", {id:board.id,expectedVersion:board.version,patch:{policy:{...board.policy,humanCompletionOnly:false}}},human);
   let task = s.make();
   const complete = (actor, expectedVersion = task.version, patch = { lane: LANE.done }) =>
     s.execute("update_task", { id: task.id, expectedVersion, patch }, actor);
@@ -113,12 +115,14 @@ test("an agent completes its claimed task and releases its lease", (t) => {
   assert.equal(task.version, claimedVersion + 1);
   assert.equal(task.events.at(-1).kind, "update_task");
   assert.equal(task.events.at(-1).actor, a.id);
-  assert.deepEqual(JSON.parse(task.events.at(-1).body), { lane: LANE.done });
+  assert.deepEqual(JSON.parse(task.events.at(-1).body), { lane: LANE.done,completion:{actor:a.id,humanCompletionOnly:false,approvedBy:"agent",mode:"any_agent",source:"board",automatic:false} });
   assert.throws(() => complete(a), { code: "LEASE_REQUIRED" });
   assert.throws(() => s.execute("heartbeat", { id: task.id, expectedVersion: task.version }, a), { code: "LEASE_REQUIRED" });
 });
-test("an expired owner completes a task with a versioned lane-only move", (t) => {
+test("an expired owner completes a task when board policy allows it", (t) => {
   const s = fixture(t);
+  const board = s.execute("list_boards", {}, human).boards[0];
+  s.execute("update_board", {id:board.id,expectedVersion:board.version,patch:{policy:{...board.policy,humanCompletionOnly:false}}},human);
   let task = s.make();
   task = s.execute("claim_task", { id: task.id, expectedVersion: task.version }, a);
   s.advance();
@@ -252,7 +256,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
     { id: "TasknBoard Agent", kind: "human", token: "must-not-be-kept" },
   ]);
   const info = s.execute("workspace_info", {}, human);
-  assert.equal(info.schemaVersion, 20);
+  assert.equal(info.schemaVersion, 21);
   assert.equal(info.boards[0].id, "BOARD-1");
   assert.equal(Object.hasOwn(info, "settings"), false);
   assert.deepEqual(info.actor, {
@@ -283,7 +287,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
   );
   assert.equal(s.execute("list_tasks", {}, human).total, 0);
   const backup = s.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 20);
+  assert.equal(backup.schemaVersion, 21);
   assert.equal(backup.boards[0].id, "BOARD-1");
   assert.deepEqual(backup.actors, info.actors);
 });
@@ -664,8 +668,8 @@ test("labels are listed, renamed, merged and removed across the workspace", (t) 
     human,
   );
   assert.deepEqual(s.execute("list_labels", {}, b).labels, [
-    { name: "Bug", tasks: 2 },
-    { name: "UX", tasks: 1 },
+    { name: "Bug", tasks: 2, color: null },
+    { name: "UX", tasks: 1, color: null },
   ]);
 
   // Agents may rename too; renaming into an existing label merges it.

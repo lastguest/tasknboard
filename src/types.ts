@@ -8,14 +8,11 @@ export type TaskEvent = {
   kind: string;
   body: string;
   createdAt: string;
+  via?: string;
 };
 /** How a task relates to another, read from the first task's side. */
 export type LinkType =
-  | "relates"
-  | "blocks"
-  | "blocked_by"
-  | "duplicates"
-  | "duplicated_by";
+  "relates" | "blocks" | "blocked_by" | "duplicates" | "duplicated_by";
 export const linkTypes: { id: LinkType; title: string }[] = [
   { id: "blocks", title: "Blocks" },
   { id: "blocked_by", title: "Blocked by" },
@@ -55,20 +52,49 @@ export type Task = {
   priority: Priority;
   assignee: string;
   creator?: string;
+  completionPolicy?: { mode: CompletionPolicy; source: string };
+  autoCompletion?: { eligible: boolean; reason: string };
+  completion?: {
+    actor: string;
+    mode: CompletionPolicy;
+    source: string;
+    approvedBy: string;
+    automatic?: boolean;
+  };
   labels: string[];
+  labelColors?: Record<string, string>;
   /** An epic ID, or "" when the task is in no epic. */
   epic: string;
+  milestone?: string;
+  branch?: string;
+  briefPath?: string;
+  resultPath?: string;
+  position?: number;
+  blocked?: boolean;
+  blockers?: TaskLink[];
+  undo?: { eligible: boolean; sequence: number | null; reason: string };
+  url?: string;
   version: number;
   archived: boolean;
   commentCount: number;
   /** The latest archive action; null on active tasks. */
   archiveCategory: "archived" | "rejected" | null;
-  lease: null | { actor: string; expiresAt: number };
+  lease: null | { actor: string; expiresAt: number; expiresInSeconds?: number };
   delegatedTo?: string;
   delegatedBy?: string;
+  delegatedAt?: string;
   updatedAt: string;
   standup?: { highlight: string; blocker: string };
-  review?: { summary: string; artifactUrl: string; actor: string };
+  review?: {
+    summary: string;
+    artifactUrl: string;
+    actor: string;
+    author?: string;
+    artifacts?: { title: string; url: string; mime?: string }[];
+    commitRange?: string;
+    verifiedBy?: { agent: string; checks: string }[];
+    via?: string;
+  };
   /** Absent until a pull request is linked. */
   pullRequests?: TaskPullRequest[];
   commits?: string[];
@@ -77,6 +103,7 @@ export type Task = {
   events?: TaskEvent[];
 };
 export type Epic = {
+  completionPolicy?: CompletionPolicy | "inherit";
   id: string;
   boardId?: string;
   title: string;
@@ -89,6 +116,8 @@ export type Epic = {
   updatedAt: string;
   /** Non-archived tasks per lane role, derived by the server. */
   counts: Record<LaneRole, number>;
+  status?: string;
+  statusAt?: string | null;
 };
 
 export type {
@@ -135,6 +164,35 @@ export type Actor = {
   gravatarEmail?: string;
 };
 /** A board that owns task IDs and scopes task queries. */
+export type BoardPolicy = {
+  humanCompletionOnly: boolean;
+  completionMode: Exclude<CompletionPolicy, "human">;
+  labelCompletionPolicies: Record<string, CompletionPolicy>;
+  requireBriefForProgress: boolean;
+  requireReviewArtifact: boolean;
+  autoDispatch: boolean;
+};
+export type CompletionPolicy =
+  | "human"
+  | "any_agent"
+  | "architect"
+  | "any_agent_other_than_author"
+  | "auto_on_evidence";
+export const completionPolicies: { id: CompletionPolicy; title: string }[] = [
+  { id: "human", title: "Human approval" },
+  { id: "any_agent", title: "Any authorized agent" },
+  { id: "architect", title: "Architect approval" },
+  { id: "any_agent_other_than_author", title: "Independent agent approval" },
+  { id: "auto_on_evidence", title: "Automatic completion with evidence" },
+];
+export const defaultBoardPolicy: BoardPolicy = {
+  humanCompletionOnly: true,
+  completionMode: "any_agent",
+  labelCompletionPolicies: {},
+  requireBriefForProgress: false,
+  requireReviewArtifact: false,
+  autoDispatch: false,
+};
 export type BoardRecord = {
   id: string;
   name: string;
@@ -145,6 +203,7 @@ export type BoardRecord = {
   repository: string;
   agentReasoning?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   agentSandbox?: "read-only" | "workspace-write" | "danger-full-access";
+  policy: BoardPolicy;
   /** Retired prefixes whose task keys still resolve on this board. */
   formerPrefixes: string[];
   /** Whether the caller lists this board in the sidebar. Each person sets it. */
@@ -202,7 +261,9 @@ export const activeLease = (t: Task, now = Date.now()) =>
   t.lease && t.lease.expiresAt > now ? t.lease : null;
 
 export const canArchiveTask = (task: Task, actor: Actor) =>
-  actor.kind === "human" || actor.role === "architect" || task.creator === actor.id;
+  actor.kind === "human" ||
+  actor.role === "architect" ||
+  task.creator === actor.id;
 
 /** Only render review artifacts that are plain web links. */
 export function safeUrl(value: string | undefined) {

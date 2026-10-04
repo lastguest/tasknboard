@@ -96,5 +96,5 @@ test("archive retains version checks and rejects repeat archive", (t) => {
   assert.throws(() => archive(s, s.task, creator), { code: "VERSION_CONFLICT" });
   const archived = archive(s, task, creator);
   assert.throws(() => archive(s, archived, creator), { code: "ARCHIVED" });
-  assert.deepEqual(s.execute("get_task", { id: task.id }, human), archived);
+  assert.deepEqual(s.execute("get_task", { id: task.id }, creator), archived);
 });

@@ -170,6 +170,43 @@ export const commands: Command[] = [
     },
   },
   {
+    name: "delegate",
+    usage: "/delegate <agent session>",
+    summary: "Delegate the selected task without an expiring claim",
+    plan: (arg, task) => {
+      const t = selected(task);
+      const delegatedTo = required(arg, "/delegate <agent session>");
+      return versioned("delegate_task", t, { delegatedTo }, `${t.id} delegated to ${delegatedTo}.`);
+    },
+  },
+  {
+    name: "undo",
+    usage: "/undo",
+    summary: "Undo your own most recent task action",
+    plan: (_, task) => {
+      const t = selected(task);
+      return versioned("undo_task", t, {}, `Your action on ${t.id} was undone.`);
+    },
+  },
+  {
+    name: "branch",
+    usage: "/branch [name]",
+    summary: "Set or clear the task branch for merge attribution",
+    plan: (arg, task) => update(selected(task), { branch: arg }, "Task branch updated."),
+  },
+  {
+    name: "brief",
+    usage: "/brief [repository path]",
+    summary: "Set or clear the task brief file",
+    plan: (arg, task) => update(selected(task), { briefPath: arg }, "Task brief updated."),
+  },
+  {
+    name: "result",
+    usage: "/result [repository path]",
+    summary: "Set or clear the task result file",
+    plan: (arg, task) => update(selected(task), { resultPath: arg }, "Task result updated."),
+  },
+  {
     name: "priority",
     usage: "/priority <low|medium|high>",
     summary: "Set the priority of the selected task",

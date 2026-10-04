@@ -25,7 +25,7 @@ const editBoard = async (page: Page) => {
   return page.getByRole("dialog", { name: "Edit board" });
 };
 const column = (page: Page, name: string) =>
-  page.locator("section.column", { has: page.getByRole("heading", { level: 2, name, exact: true }) });
+  page.locator("section.column", { has: page.getByRole("heading", { level: 2, name: new RegExp(`^${RegExp.escape(name)}(?: · .+)?$`) }) });
 
 test("a person adds a lane, moves a task through it, and deletes it into another lane", async ({ page }) => {
   const task = await command("create_task", { boardId: "BOARD-1", title: `Lane ${key()}` });
@@ -49,6 +49,7 @@ test("a person adds a lane, moves a task through it, and deletes it into another
   await expect(dialog).toBeHidden();
 
   await expect(column(page, "Testing")).toBeVisible();
+  await expect(column(page, "Testing").getByRole("heading", { level: 2 })).toHaveText("Testing · In progress");
   await card.click({ button: "right" });
   await page.getByRole("menu").getByRole("menuitemradio", { name: "Testing", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: `Moved ${task.id}` })).toBeVisible();

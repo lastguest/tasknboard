@@ -4,20 +4,20 @@
  */
 
 /** Task properties a view condition can test. */
-export const viewFields = ["role", "lane", "priority", "assignee", "label", "epic"];
+export const viewFields = ["role", "lane", "priority", "assignee", "label", "epic", "delegated"];
 /** Condition operators: the task has any of the values, or none of them. */
 export const viewOps = ["is", "is_not"];
 /** An assignee value that stands for whoever is looking at the view. */
 export const ME = "@me";
 export const viewLayouts = ["board", "list"];
 export const viewGroups = ["lane", "assignee", "priority", "epic", "none"];
-export const viewOrders = ["created", "updated", "priority", "title"];
+export const viewOrders = ["created", "updated", "priority", "title", "position"];
 
 export const emptyFilters = () => ({ query: "", conditions: [] });
 export const defaultDisplay = () => ({
   layout: "board",
   groupBy: "lane",
-  orderBy: "created",
+  orderBy: "priority",
 });
 
 /**
@@ -25,6 +25,7 @@ export const defaultDisplay = () => ({
  * no epic, or no labels.
  */
 function valuesOf(task, field) {
+  if (field === "delegated") return [String(Boolean(task.delegatedTo))];
   if (field === "label") return task.labels.length ? task.labels : [""];
   if (field === "epic") return [task.epic || ""];
   return [task[field] || ""];
@@ -56,11 +57,12 @@ const taskNumber = (task) => Number(task.id.slice(task.id.lastIndexOf("-") + 1))
 export function sortTasks(tasks, orderBy) {
   const byCreated = (a, b) => taskNumber(a) - taskNumber(b);
   const compare = {
+    position: (a,b) => (a.position ?? 0) - (b.position ?? 0) || byCreated(a,b),
     created: byCreated,
     updated: (a, b) =>
       b.updatedAt.localeCompare(a.updatedAt) || byCreated(a, b),
     priority: (a, b) =>
-      priorityRank[a.priority] - priorityRank[b.priority] || byCreated(a, b),
+      priorityRank[a.priority] - priorityRank[b.priority] || (a.position ?? 0) - (b.position ?? 0) || byCreated(a, b),
     title: (a, b) =>
       a.title.localeCompare(b.title, undefined, { sensitivity: "base" }) ||
       byCreated(a, b),

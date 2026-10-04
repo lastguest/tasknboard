@@ -36,6 +36,8 @@ import {
   token,
 } from "./api";
 import { Standup } from "./Standup";
+import { Milestones, RunningNow } from "./PlanningPanels";
+import { canCompleteTask } from "./completion";
 import { BoardControls, BoardEditor, type BoardPage, SidebarBoards } from "./Boards";
 import {
   EpicEditor,
@@ -130,6 +132,8 @@ const viewTitles: Record<Exclude<View, "epic" | "saved">, string> = {
 const overviews: View[] = ["inbox", "agents", "epics", "views", "pulls"];
 const SELECTED_BOARD_KEY = "tasknboard.selectedBoardId";
 const readSelectedBoardId = () => {
+  const linkedBoard = new URLSearchParams(location.search).get("board");
+  if (linkedBoard && /^BOARD-\d+$/.test(linkedBoard)) return linkedBoard;
   try {
     return localStorage.getItem(SELECTED_BOARD_KEY) ?? "";
   } catch {
@@ -732,6 +736,20 @@ export default function App() {
     setPage("saved");
     seedView(saved);
   }
+  const permalinkLoaded = useRef(false);
+  useEffect(() => {
+    if (permalinkLoaded.current || !workspaceInfoLoaded || !sync.loaded) return;
+    const parameters = new URLSearchParams(location.search);
+    const board = parameters.get("board");
+    if (board && board !== currentBoard?.id && boards.some((entry) => entry.id === board)) { selectBoard(board); return; }
+    permalinkLoaded.current = true;
+    const task = parameters.get("task");
+    const epic = parameters.get("epic");
+    const savedView = parameters.get("view");
+    if (task) void openTaskById(task);
+    else if (epic) { setEpicId(epic); setView("epic"); }
+    else if (savedView) { const target = views.find((entry) => entry.id === savedView); if (target) openSavedView(target); }
+  }, [workspaceInfoLoaded, sync.loaded, currentBoard?.id, boards, views]);
   // Someone else saved the open view: follow them unless you have changes.
   useEffect(() => {
     if (
@@ -1058,6 +1076,9 @@ export default function App() {
 
   async function move(task: Task, lane: string) {
     if (pending.has(task.id) || task.lane === lane) return;
+    if (!canCompleteTask(actor, task) && findLane(boards, lane)?.role === "done") {
+      setMoveError("The completion policy does not permit this actor to complete the task."); return;
+    }
     const name = findLane(boards, lane)?.name ?? lane;
     setPending((p) => new Map(p).set(task.id, lane));
     setMoveError("");
@@ -1088,6 +1109,18 @@ export default function App() {
       });
       void refresh();
     }
+  }
+
+  async function reorder(source: Task, before: Task) {
+    const task = tasks.find((entry) => entry.id === source.id);
+    if (!task || task.id === before.id) return;
+    if (task.lane !== before.lane) { await move(task, before.lane); return; }
+    const laneTasks = sortTasks(tasks.filter((entry) => entry.lane === task.lane && entry.id !== task.id), display.orderBy);
+    try {
+      await command("reorder_task", { id: task.id, expectedVersion: task.version, position: laneTasks.findIndex((entry) => entry.id === before.id) });
+      setDisplay((value) => ({ ...value, orderBy: "position" }));
+      await refresh();
+    } catch (failure) { setMoveError(errorOf(failure).message); }
   }
 
   async function created(task: Task) {
@@ -1304,7 +1337,7 @@ export default function App() {
           items: (
             boards.find((board) => board.id === task.boardId)?.lanes ?? []
           ).map((lane) => {
-            const locked = lane.role === "done" && doneLocked(task.role);
+            const locked = lane.role === "done" && (actor.kind === "agent" ? !canCompleteTask(actor, task) : doneLocked(task.role));
             return {
               label: locked ? `${lane.name} (after review)` : lane.name,
               icon: <RoleIcon role={lane.role} />,
@@ -2065,6 +2098,7 @@ export default function App() {
                 onEdit={() => setEpicDialog({ epic: currentEpic })}
               />
             )}
+            {currentBoard && view === "board" && <><RunningNow boardId={currentBoard.id} onOpen={(id) => void openTaskById(id)} /><Milestones boardId={currentBoard.id} tasks={tasks} canManage={canPlan} onOpen={(id) => void openTaskById(id)} onSaved={saved} /></>}
             {currentSaved && (
               <ViewSummary
                 view={currentSaved}
@@ -2372,6 +2406,8 @@ export default function App() {
                     epics={view === "epic" ? undefined : epicsById}
                     onOpen={openTask}
                     onMove={view === "archived" ? undefined : move}
+                    onReorder={view === "archived" ? undefined : reorder}
+                    doneMode={actor.kind === "human" ? () => "review" : (task) => canCompleteTask(actor, task) ? "direct" : "human"}
                     onEpic={view === "archived" ? undefined : setEpic}
                     onNew={view === "archived" ? undefined : newTask}
                     onMenu={view === "archived" ? undefined : taskMenu}

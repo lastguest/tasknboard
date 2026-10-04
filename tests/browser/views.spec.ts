@@ -82,7 +82,7 @@ test("Views save filters and display, favourite into the sidebar, and delete", a
   await changes.getByRole("button", { name: "Save view" }).click();
   await expect(changes).toBeHidden();
   const saved = (await command("list_views")).views.find((v: { id: string }) => v.id === view.id);
-  expect(saved.display).toEqual({ layout: "list", groupBy: "priority", orderBy: "created" });
+  expect(saved.display).toEqual({ layout: "list", groupBy: "priority", orderBy: "priority" });
   expect(saved.version).toBe(2);
 
   // Reset brings back the saved settings.

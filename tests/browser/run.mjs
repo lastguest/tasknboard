@@ -27,6 +27,8 @@ async function freePort() {
   await new Promise((resolveClose, reject) =>
     socket.close((error) => (error ? reject(error) : resolveClose())),
   );
+  // Browsers block several service ports up to 10080, even on loopback.
+  if (address.port <= 10080) return freePort();
   return address.port;
 }
 

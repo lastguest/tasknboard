@@ -106,8 +106,8 @@ export function startSupervisor({ worker, input = process.stdin, output = proces
         if (message.method === "initialize" && !initialization) continue;
         const ambiguous = message.method === "tools/call";
         fail(id, ambiguous
-          ? "The MCP worker stopped before the result arrived. The action can have completed. Read the task before any new write."
-          : "The MCP worker stopped before the result arrived. Read the current state after reconnection.", ambiguous);
+          ? "The MCP worker stopped and is reconnecting. The action can have completed. Read the task before any new write."
+          : "The MCP worker stopped and is reconnecting. Read the current state after reconnection.", ambiguous);
       }
       pending.clear();
       if (!stopped) {

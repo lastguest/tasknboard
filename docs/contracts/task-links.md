@@ -1,16 +1,16 @@
 # Task links contract
 
 A link records how two tasks relate. Links inform people and agents.
-The server does not use them to accept or reject a lane change.
+Open blockers set `blocked` and appear in `blockers`. Review or completion of a blocker sends an unblocked notification. Links do not refuse lane changes. `critical_path({ id })` returns open blockers, directed edges, and cycles for a goal task.
 
 ## Types
 
 Each link is read from one task's side. The other task reads the inverse type.
 
-| Type | Inverse |
-| --- | --- |
-| `relates` | `relates` |
-| `blocks` | `blocked_by` |
+| Type         | Inverse         |
+| ------------ | --------------- |
+| `relates`    | `relates`       |
+| `blocks`     | `blocked_by`    |
 | `duplicates` | `duplicated_by` |
 
 Two tasks have at most one link. A task cannot link to itself.
@@ -25,7 +25,7 @@ Two tasks have at most one link. A task cannot link to itself.
   two tasks, in either direction. A missing link fails with `NOT_FOUND`.
 
 Both commands are writes on task `id`. They need its current version and
-follow the normal lease rules: an agent needs its own active claim, and
+follow the normal lease rules: an agent needs its own active claim or durable delegation access, and
 another actor's active claim blocks a human. `target` accepts a former key.
 
 The write advances the version of task `id` only. Each task appends one

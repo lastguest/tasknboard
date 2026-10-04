@@ -401,7 +401,7 @@ test("a custom command path and prompt are used, and disabled agents or events n
   configure(store, { enabled: true, command: join(home, "missing") });
   const missing = make("Missing");
   launcher.runTask(missing);
-  await waitFor(() => calls.length >= 1);
+  await waitFor(() => events(store, missing.id).includes("agent_not_started"));
   assert.equal(calls.length, 1);
   const note = store
     .execute("get_task", { id: missing.id }, human)

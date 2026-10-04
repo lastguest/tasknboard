@@ -4,6 +4,7 @@ import {
   epicPalette,
   epicProgress,
   epicStyle,
+  completionPolicies,
   type Epic,
 } from "./types";
 import { ApiError, command, errorOf } from "./api";
@@ -44,9 +45,9 @@ export function EpicProgress({ epic }: { epic: Epic }) {
         aria-valuenow={done}
         aria-valuetext={`${done} of ${total} tasks done`}
       >
-        <span style={{ width: `${percent}%` }} />
+        {(["done", "in_review", "in_progress", "todo"] as const).map((role) => <span key={role} title={`${role}: ${epic.counts[role]}`} style={{ width: `${total ? epic.counts[role] / total * 100 : 0}%`, background: role === "done" ? "#9de3c1" : role === "in_review" ? "#bca0f4" : role === "in_progress" ? "#e8bd5a" : "#88909e" }} />)}
       </div>
-      <span className="epic-progress-text">
+      <span className="epic-progress-text" title={`${percent}% done · ${epic.counts.in_review} review · ${epic.counts.in_progress} in progress · ${epic.counts.todo} to do`}>
         {total ? `${done} of ${total} done` : "No tasks yet"}
       </span>
     </div>
@@ -112,6 +113,7 @@ export function EpicsPage({
                   </button>
                 </h2>
                 {summary && <p className="epic-card-summary">{summary}</p>}
+                {epic.status && <p className="small" title={epic.statusAt ?? undefined}>Latest: {plainText(epic.status).split("\n")[0]}</p>}
                 <EpicProgress epic={epic} />
                 <dl className="epic-counts">
                   {(
@@ -289,6 +291,7 @@ export function EpicEditor({
   const [title, setTitle] = useState(epic?.title ?? "");
   const [description, setDescription] = useState(epic?.description ?? "");
   const [color, setColor] = useState(epic?.color ?? suggestedColor);
+  const [completionPolicy, setCompletionPolicy] = useState(epic?.completionPolicy ?? "inherit");
   const [pending, setPending] = useState<null | "save" | "archive">(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [archiveStep, setArchiveStep] = useState(false);
@@ -297,6 +300,7 @@ export function EpicEditor({
     ...(title.trim() !== (base?.title ?? "") ? { title } : {}),
     ...(description !== (base?.description ?? "") ? { description } : {}),
     ...(color !== (base?.color ?? suggestedColor) ? { color } : {}),
+    ...(completionPolicy !== (base?.completionPolicy ?? "inherit") ? { completionPolicy } : {}),
   };
   const dirty = Object.keys(patch).length > 0;
 
@@ -339,7 +343,7 @@ export function EpicEditor({
             expectedVersion: base.version,
             patch,
           })
-        : await command<Epic>("create_epic", { boardId, title, description, color });
+        : await command<Epic>("create_epic", { boardId, title, description, color, completionPolicy });
       onSaved(saved, !base);
     } catch (e) {
       setError(errorOf(e));
@@ -459,6 +463,10 @@ export function EpicEditor({
           />
         </label>
         <ColorField value={color} title={title} onChange={setColor} />
+        <label className="field">Completion policy<select aria-label="Completion policy" value={completionPolicy} onChange={(event) => setCompletionPolicy(event.target.value as typeof completionPolicy)}>
+          <option value="inherit">Use board and label policies</option>
+          {completionPolicies.map((policy) => <option key={policy.id} value={policy.id}>{policy.title}</option>)}
+        </select></label>
         <div className="field">
           <label className="field-label" htmlFor="epic-description">
             Description

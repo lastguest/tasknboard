@@ -6,7 +6,16 @@ import { desktopApp } from "./AppUpdates";
 import { RoleIcon } from "./Board";
 import { Dialog } from "./Dialogs";
 import { Icon } from "./Icons";
-import { roles, roleTitle, type BoardRecord, type Lane, type LaneRole } from "./types";
+import {
+  completionPolicies,
+  defaultBoardPolicy,
+  roles,
+  roleTitle,
+  type CompletionPolicy,
+  type BoardRecord,
+  type Lane,
+  type LaneRole,
+} from "./types";
 
 export function BoardControls({
   canEdit,
@@ -56,7 +65,9 @@ const SIDEBAR_BOARDS_KEY = "tasknboard.sidebarBoards";
 type SidebarLayout = { open: boolean; expanded: string[] };
 const readSidebarLayout = (): SidebarLayout | null => {
   try {
-    const stored = JSON.parse(localStorage.getItem(SIDEBAR_BOARDS_KEY) ?? "null");
+    const stored = JSON.parse(
+      localStorage.getItem(SIDEBAR_BOARDS_KEY) ?? "null",
+    );
     return typeof stored?.open === "boolean" && Array.isArray(stored.expanded)
       ? stored
       : null;
@@ -125,7 +136,9 @@ export function SidebarBoards({
           className="nav-label nav-section-toggle"
           id="boards-label"
           aria-expanded={open}
-          onClick={() => update((current) => ({ ...current, open: !current.open }))}
+          onClick={() =>
+            update((current) => ({ ...current, open: !current.open }))
+          }
         >
           Boards
           <Icon name={open ? "chevronDown" : "chevronRight"} size={12} />
@@ -177,13 +190,17 @@ export function SidebarBoards({
                 >
                   {board.inProgress}
                 </small>
-                <Icon name={expanded ? "chevronDown" : "chevronRight"} size={12} />
+                <Icon
+                  name={expanded ? "chevronDown" : "chevronRight"}
+                  size={12}
+                />
               </button>
               {expanded &&
                 boardPages.map(([id, icon, label]) => {
                   const selected =
                     board.id === selectedBoardId &&
-                    (page === id || (id === "epics" && page === "epic") ||
+                    (page === id ||
+                      (id === "epics" && page === "epic") ||
                       (id === "views" && page === "saved"));
                   return (
                     <button
@@ -248,8 +265,16 @@ export function BoardEditor({
   const [description, setDescription] = useState(board?.description ?? "");
   const [prefix, setPrefix] = useState(board?.prefix ?? "");
   const [repository, setRepository] = useState(board?.repository ?? "");
-  const [agentReasoning, setAgentReasoning] = useState(board?.agentReasoning ?? "medium");
-  const [agentSandbox, setAgentSandbox] = useState(board?.agentSandbox ?? "workspace-write");
+  const [agentReasoning, setAgentReasoning] = useState(
+    board?.agentReasoning ?? "medium",
+  );
+  const [agentSandbox, setAgentSandbox] = useState(
+    board?.agentSandbox ?? "workspace-write",
+  );
+  const [policy, setPolicy] = useState(board?.policy ?? defaultBoardPolicy);
+  const [overrideLabel, setOverrideLabel] = useState("");
+  const [overridePolicy, setOverridePolicy] =
+    useState<CompletionPolicy>("human");
   const [pending, setPending] = useState(false);
   const [picking, setPicking] = useState(false);
   const [pickError, setPickError] = useState("");
@@ -280,7 +305,8 @@ export function BoardEditor({
     normalizedDescription !== board.description ||
     normalizedRepository !== (board.repository ?? "") ||
     agentReasoning !== (board.agentReasoning ?? "medium") ||
-    agentSandbox !== (board.agentSandbox ?? "workspace-write");
+    agentSandbox !== (board.agentSandbox ?? "workspace-write") ||
+    JSON.stringify(policy) !== JSON.stringify(board.policy);
 
   async function pickFolder() {
     setPicking(true);
@@ -319,6 +345,7 @@ export function BoardEditor({
             patch: {
               agentReasoning,
               agentSandbox,
+              policy,
               ...(normalizedName !== board.name && { name: normalizedName }),
               ...(normalizedPrefix !== board.prefix && {
                 prefix: normalizedPrefix,
@@ -338,6 +365,7 @@ export function BoardEditor({
             repository: normalizedRepository,
             agentReasoning,
             agentSandbox,
+            policy,
           });
       onSaved(saved, board);
     } catch (cause) {
@@ -393,7 +421,10 @@ export function BoardEditor({
               </span>
             </p>
           )}
-          <div className="form-actions" hidden={confirming && Boolean(retiredBy)}>
+          <div
+            className="form-actions"
+            hidden={confirming && Boolean(retiredBy)}
+          >
             <span className="spacer" />
             <button
               type="button"
@@ -532,12 +563,14 @@ export function BoardEditor({
             )}
           </div>
           <span className="field-hint" id={`${repositoryId}-hint`}>
-            Optional. When you assign a task on this board to an agent
-            configured on the Agents page, the desktop app starts that agent
-            here. Leave empty to start agents by hand.
+            Optional. Run agent uses this folder. Linked brief and result files
+            are read from this folder.
           </span>
           {attempted && repositoryError && (
-            <span className="field-hint inline-error" id={`${repositoryId}-error`}>
+            <span
+              className="field-hint inline-error"
+              id={`${repositoryId}-error`}
+            >
               {repositoryError}
             </span>
           )}
@@ -549,20 +582,216 @@ export function BoardEditor({
         </div>
         <label className="field">
           <span className="field-label">Agent reasoning</span>
-          <select value={agentReasoning} onChange={(event) => setAgentReasoning(event.target.value as typeof agentReasoning)}>
-            {["minimal", "low", "medium", "high", "xhigh", "max"].map((value) => <option key={value} value={value}>{value}</option>)}
+          <select
+            value={agentReasoning}
+            onChange={(event) =>
+              setAgentReasoning(event.target.value as typeof agentReasoning)
+            }
+          >
+            {["minimal", "low", "medium", "high", "xhigh", "max"].map(
+              (value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ),
+            )}
           </select>
-          <span className="field-hint">Codex uses this reasoning effort for tasks on this board.</span>
+          <span className="field-hint">
+            Codex uses this reasoning effort for tasks on this board.
+          </span>
         </label>
         <label className="field">
           <span className="field-label">Agent sandbox</span>
-          <select value={agentSandbox} onChange={(event) => setAgentSandbox(event.target.value as typeof agentSandbox)}>
+          <select
+            value={agentSandbox}
+            onChange={(event) =>
+              setAgentSandbox(event.target.value as typeof agentSandbox)
+            }
+          >
             <option value="read-only">Read only</option>
             <option value="workspace-write">Workspace write</option>
             <option value="danger-full-access">Full access</option>
           </select>
-          <span className="field-hint">Codex uses this sandbox for tasks on this board. Full access removes file restrictions.</span>
+          <span className="field-hint">
+            Codex uses this sandbox for tasks on this board. Full access removes
+            file restrictions.
+          </span>
         </label>
+        <fieldset className="workflow-panel">
+          <legend>Board policies</legend>
+          <label>
+            <input
+              type="checkbox"
+              checked={policy.humanCompletionOnly}
+              onChange={(event) =>
+                setPolicy({
+                  ...policy,
+                  humanCompletionOnly: event.target.checked,
+                })
+              }
+            />{" "}
+            Only a human completes a task
+          </label>
+          {!policy.humanCompletionOnly && (
+            <label>
+              Agent completion policy
+              <select
+                aria-label="Agent completion policy"
+                value={policy.completionMode}
+                onChange={(event) =>
+                  setPolicy({
+                    ...policy,
+                    completionMode: event.target
+                      .value as typeof policy.completionMode,
+                  })
+                }
+              >
+                {completionPolicies
+                  .filter((entry) => entry.id !== "human")
+                  .map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.title}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          )}
+          <p className="field-hint">
+            An epic can override this policy. Label policies take precedence
+            over the epic and board policies. A human can review and reopen
+            tasks.
+          </p>
+          <section aria-label="Label completion policies">
+            <strong>Label completion policies</strong>
+            {Object.entries(policy.labelCompletionPolicies).map(
+              ([label, mode]) => (
+                <div key={label} className="label-policy-row">
+                  <span>{label}</span>
+                  <select
+                    aria-label={`Completion policy for ${label}`}
+                    value={mode}
+                    onChange={(event) =>
+                      setPolicy({
+                        ...policy,
+                        labelCompletionPolicies: {
+                          ...policy.labelCompletionPolicies,
+                          [label]: event.target.value as CompletionPolicy,
+                        },
+                      })
+                    }
+                  >
+                    {completionPolicies.map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.title}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="quiet"
+                    aria-label={`Remove completion policy for ${label}`}
+                    onClick={() => {
+                      const next = { ...policy.labelCompletionPolicies };
+                      delete next[label];
+                      setPolicy({ ...policy, labelCompletionPolicies: next });
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ),
+            )}
+            <label>
+              Policy label
+              <input
+                value={overrideLabel}
+                maxLength={40}
+                onChange={(event) => setOverrideLabel(event.target.value)}
+              />
+            </label>
+            <label>
+              Label approval
+              <select
+                aria-label="Label approval"
+                value={overridePolicy}
+                onChange={(event) =>
+                  setOverridePolicy(event.target.value as CompletionPolicy)
+                }
+              >
+                {completionPolicies.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="secondary"
+              disabled={!overrideLabel.trim()}
+              onClick={() => {
+                setPolicy({
+                  ...policy,
+                  labelCompletionPolicies: {
+                    ...policy.labelCompletionPolicies,
+                    [overrideLabel.trim()]: overridePolicy,
+                  },
+                });
+                setOverrideLabel("");
+              }}
+            >
+              Add label policy
+            </button>
+          </section>
+          {policy.completionMode === "auto_on_evidence" &&
+            !policy.humanCompletionOnly && (
+              <p className="field-hint">
+                Automatic completion requires a review artifact and linked
+                commits on the configured default branch. Set origin/HEAD in the
+                repository.
+              </p>
+            )}
+          <label>
+            <input
+              type="checkbox"
+              checked={policy.requireBriefForProgress}
+              onChange={(event) =>
+                setPolicy({
+                  ...policy,
+                  requireBriefForProgress: event.target.checked,
+                })
+              }
+            />{" "}
+            Require a brief path for work in progress
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={policy.requireReviewArtifact}
+              onChange={(event) =>
+                setPolicy({
+                  ...policy,
+                  requireReviewArtifact: event.target.checked,
+                })
+              }
+            />{" "}
+            Require an artifact for review
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={policy.autoDispatch}
+              onChange={(event) =>
+                setPolicy({ ...policy, autoDispatch: event.target.checked })
+              }
+            />{" "}
+            Dispatch automatically on assignment
+          </label>
+          <p className="field-hint">
+            Automatic dispatch is off by default. A connected agent session
+            receives a notification instead of a new process.
+          </p>
+        </fieldset>
       </form>
       {board && (
         <LaneSettings
@@ -582,7 +811,10 @@ const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 type LaneWrite =
   | { name: "create_lane"; args: { name: string; role: LaneRole } }
-  | { name: "update_lane"; args: { id: string; patch: { name?: string; position?: number } } }
+  | {
+      name: "update_lane";
+      args: { id: string; patch: { name?: string; position?: number } };
+    }
   | { name: "delete_lane"; args: { id: string; moveTo: string } };
 
 /**
@@ -598,7 +830,10 @@ function LaneSettings({
 }) {
   const headingId = useId();
   const [names, setNames] = useState<Record<string, string>>({});
-  const [deleting, setDeleting] = useState<null | { id: string; moveTo: string }>(null);
+  const [deleting, setDeleting] = useState<null | {
+    id: string;
+    moveTo: string;
+  }>(null);
   const [newName, setNewName] = useState("");
   const [newRole, setNewRole] = useState<LaneRole>("todo");
   const [pending, setPending] = useState(false);
@@ -644,7 +879,12 @@ function LaneSettings({
     const done = () => setNames(({ [lane.id]: _, ...rest }) => rest);
     // An emptied or unchanged name goes back to the saved one.
     if (!name || name === lane.name) done();
-    else if (await write({ name: "update_lane", args: { id: lane.id, patch: { name } } }))
+    else if (
+      await write({
+        name: "update_lane",
+        args: { id: lane.id, patch: { name } },
+      })
+    )
       done();
   }
   // Esc closes the dialog without a blur, so save a typed name on unmount.
@@ -657,7 +897,10 @@ function LaneSettings({
   async function add(event: React.FormEvent) {
     event.preventDefault();
     const name = newName.trim();
-    if (name && (await write({ name: "create_lane", args: { name, role: newRole } })))
+    if (
+      name &&
+      (await write({ name: "create_lane", args: { name, role: newRole } }))
+    )
       setNewName("");
   }
 
@@ -673,7 +916,9 @@ function LaneSettings({
       <ol className="lane-list">
         {lanes.map((lane, index) => {
           const tasks = lane.tasks;
-          const targets = lanes.filter((l) => l.id !== lane.id && l.role === lane.role);
+          const targets = lanes.filter(
+            (l) => l.id !== lane.id && l.role === lane.role,
+          );
           const name = names[lane.id] ?? lane.name;
           return (
             <li key={lane.id} className="lane-row">
@@ -686,7 +931,10 @@ function LaneSettings({
                   value={name}
                   disabled={pending}
                   onChange={(event) =>
-                    setNames((current) => ({ ...current, [lane.id]: event.target.value }))
+                    setNames((current) => ({
+                      ...current,
+                      [lane.id]: event.target.value,
+                    }))
                   }
                   onBlur={() => void rename(lane)}
                   onKeyDown={(event) => {
@@ -696,7 +944,9 @@ function LaneSettings({
                     }
                   }}
                 />
-                <span className="kind-tag lane-role-tag">{roleTitle(lane.role)}</span>
+                <span className="kind-tag lane-role-tag">
+                  {roleTitle(lane.role)}
+                </span>
                 <span
                   className="count"
                   aria-label={`${tasks} ${tasks === 1 ? "task" : "tasks"}`}
@@ -746,7 +996,9 @@ function LaneSettings({
                     className="icon-button danger"
                     aria-label={`Delete ${lane.name}`}
                     disabled={pending || !targets.length}
-                    onClick={() => setDeleting({ id: lane.id, moveTo: targets[0].id })}
+                    onClick={() =>
+                      setDeleting({ id: lane.id, moveTo: targets[0].id })
+                    }
                   >
                     <Icon name="trash" size={14} />
                   </button>
@@ -759,9 +1011,9 @@ function LaneSettings({
                   aria-label={`Delete ${lane.name}`}
                 >
                   <label>
-                    Delete {lane.name} and move its{" "}
-                    {plural(tasks, "task")}
-                    {lane.archivedTasks > 0 && ` and ${plural(lane.archivedTasks, "archived task")}`}{" "}
+                    Delete {lane.name} and move its {plural(tasks, "task")}
+                    {lane.archivedTasks > 0 &&
+                      ` and ${plural(lane.archivedTasks, "archived task")}`}{" "}
                     to{" "}
                     <select
                       aria-label="Move tasks to"
@@ -830,7 +1082,11 @@ function LaneSettings({
           type="submit"
           className="secondary"
           disabled={pending || !newName.trim() || lanes.length >= laneLimit}
-          title={lanes.length >= laneLimit ? `A board has at most ${laneLimit} lanes.` : undefined}
+          title={
+            lanes.length >= laneLimit
+              ? `A board has at most ${laneLimit} lanes.`
+              : undefined
+          }
         >
           <Icon name="plus" size={14} /> Add lane
         </button>

@@ -9,11 +9,13 @@ import {
   linkTitle,
   linkTypes,
   priorities,
+  roleTitle,
   safeUrl,
   type Actor,
   type BoardRecord,
   type Epic,
   epicStyle,
+  epicPalette,
   type Lane,
   type LaneRole,
   type LinkType,
@@ -23,11 +25,13 @@ import {
 } from "./types";
 import { ApiError, command, errorOf, token } from "./api";
 import { formatUtcTimestamp } from "./formatting";
-import { Assignee, Label, PullCount, RoleIcon } from "./Board";
+import { Assignee, ClaimChip, Label, PullCount, RoleIcon } from "./Board";
 import { Icon } from "./Icons";
 import { ContextMenu, type MenuState } from "./ContextMenu";
 import { CliHelper } from "./CliHelper";
 import { Markdown, MarkdownEditor } from "./Markdown";
+import { ReviewEvidence, SubmitReview, TaskPlanning, TaskTraceability } from "./WorkflowPanels";
+import { canCompleteTask, completionTitles } from "./completion";
 import { EpicTag } from "./Epics";
 import {
   GitHubSettings,
@@ -166,12 +170,12 @@ export type ChoiceOption = {
 };
 
 /** Lane choices shared by the task sidebar and the list view. */
-export function statusChoices(lanes: Lane[], current?: LaneRole): ChoiceOption[] {
-  const locked = current !== undefined && doneLocked(current);
+export function statusChoices(lanes: Lane[], current?: LaneRole, directDone = false, forbidDone = false): ChoiceOption[] {
+  const locked = forbidDone || (!directDone && current !== undefined && doneLocked(current));
   return lanes.map((lane) => ({
     value: lane.id,
     label:
-      lane.role === "done" && locked ? `${lane.name} (after review)` : lane.name,
+      lane.role === "done" && locked ? `${lane.name} (${forbidDone ? "policy approval" : "after review"})` : `${lane.name}${lane.name.toLowerCase() === roleTitle(lane.role).toLowerCase() ? "" : ` · ${roleTitle(lane.role)}`}`,
     disabled: lane.role === "done" && locked,
     icon: <RoleIcon role={lane.role} />,
   }));
@@ -183,12 +187,14 @@ export function StatusPicker({
   lanes,
   pending,
   onMove,
+  doneMode = "review",
 }: {
   task: Task;
   /** The lanes of the task's board. */
   lanes: Lane[];
   pending?: string;
   onMove: (t: Task, lane: string) => void;
+  doneMode?: "review" | "direct" | "human";
 }) {
   const [open, setOpen] = useState(false);
   const laneId = pending ?? task.lane;
@@ -211,7 +217,7 @@ export function StatusPicker({
         <SearchableChoiceDialog
           title={`Status of ${task.id}`}
           searchLabel="Search status"
-          options={statusChoices(lanes, task.role)}
+          options={statusChoices(lanes, task.role, doneMode === "direct", doneMode === "human")}
           selected={[laneId]}
           onSelect={(value) => {
             setOpen(false);
@@ -477,6 +483,7 @@ export function ErrorNote({
     <div className="inline-error" role="alert">
       <Icon name="alert" size={16} />
       <span>{describeError(error, kept)}</span>
+      {error.code === "VERSION_CONFLICT" && error.details && <details><summary>Changes since your version</summary><pre>{JSON.stringify({ changedFields: error.details.changedFields, events: error.details.events }, null, 2)}</pre></details>}
       {reload && (
         <button
           type="button"
@@ -546,6 +553,7 @@ function eventDetail(
   if (!e.body) return "";
   try {
     const body = JSON.parse(e.body);
+    if (e.kind === "add_comment" && typeof body.body === "string") return `${body.via ? `Via ${body.via}\n\n` : ""}${body.body}`;
     if (e.kind === "update_task")
       return Object.entries(body)
         .map(([k, v]) =>
@@ -611,6 +619,7 @@ function Activity({
           <li key={e.sequence} className={`event kind-${e.kind}`}>
             <div className="event-head">
               <Person id={e.actor} />
+              {e.via && <span>via {e.via}</span>}
               <span>{kindText[e.kind] ?? e.kind.replaceAll("_", " ")}</span>
               <time dateTime={e.createdAt}>
                 {formatUtcTimestamp(e.createdAt)}
@@ -678,6 +687,9 @@ type Draft = {
   assignee: string;
   labels: string[];
   epic: string;
+  branch: string;
+  briefPath: string;
+  resultPath: string;
 };
 const draftKeys = [
   "title",
@@ -688,6 +700,7 @@ const draftKeys = [
   "assignee",
   "labels",
   "epic",
+  "branch", "briefPath", "resultPath",
 ] as const;
 const draftOf = (t: Task | null, epic = "", lane = ""): Draft =>
   t
@@ -700,6 +713,7 @@ const draftOf = (t: Task | null, epic = "", lane = ""): Draft =>
         assignee: t.assignee,
         labels: [...t.labels],
         epic: t.epic ?? "",
+        branch: t.branch ?? "", briefPath: t.briefPath ?? "", resultPath: t.resultPath ?? "",
       }
     : {
         title: "",
@@ -710,6 +724,7 @@ const draftOf = (t: Task | null, epic = "", lane = ""): Draft =>
         assignee: "",
         labels: [],
         epic,
+        branch: "", briefPath: "", resultPath: "",
       };
 
 function sameValue(left: unknown, right: unknown) {
@@ -809,6 +824,7 @@ export function TaskEditor({
   const [changeStep, setChangeStep] = useState(false);
   const [changeReason, setChangeReason] = useState("");
   const [delegatedTo, setDelegatedTo] = useState("");
+  const [commentVia, setCommentVia] = useState("");
   const [archiveStep, setArchiveStep] = useState(false);
   const [archiveError, setArchiveError] = useState<ApiError | null>(null);
   const [claimError, setClaimError] = useState<ApiError | null>(null);
@@ -869,7 +885,8 @@ export function TaskEditor({
       );
     }),
   ];
-  const laneOptions = statusChoices(lanes, current?.role);
+  const canComplete = current ? canCompleteTask(actor, current) : actor.kind === "human";
+  const laneOptions = statusChoices(lanes, current?.role, actor.kind === "agent" && canComplete, actor.kind === "agent" && !canComplete);
   const priorityOptions: ChoiceOption[] = priorities.map((priority) => ({
     value: priority.id,
     label: priority.title,
@@ -1065,6 +1082,7 @@ export function TaskEditor({
       const next = await command<Task>("add_comment", {
         id: current.id,
         body: comment,
+        via: commentVia,
       });
       setCurrent(next);
       setComment("");
@@ -1193,8 +1211,8 @@ export function TaskEditor({
     setPending("dispatch");
     setReviewError(null);
     try {
-      await command("agent-event", { event: "task_assigned", taskId: current.id });
-      setNotice("Agent run queued.");
+      const result = await command<{ notified?: boolean }>("agent-event", { event: "task_assigned", taskId: current.id });
+      setNotice(result.notified ? "The connected agent received the run request." : "Agent run queued.");
     } catch (error) {
       setReviewError(errorOf(error));
     } finally {
@@ -1445,6 +1463,9 @@ export function TaskEditor({
           {current && draftLane?.role === "done" && current.role !== "done" && (
             <p className="small">Saving marks this task Done.</p>
           )}
+          {(["branch", "briefPath", "resultPath"] as const).map((key) => <label key={key} className="field">{key === "branch" ? "Branch" : key === "briefPath" ? "Brief path" : "Result path"}<input value={draft[key]} readOnly={archived} onChange={(event) => set(key)(event.target.value)} placeholder={key === "branch" ? "codex/T406" : `tasks/T406${key === "resultPath" ? ".result" : ""}.md`} /></label>)}
+          {current && <TaskTraceability task={current} />}
+          {current && <TaskPlanning task={current} canUndo={!dirty && !pending} onSaved={(next) => { setCurrent(next); setDraft(draftOf(next)); onChanged(next); }} onOpen={(id) => { if (dirty) setDiscard({ open: id }); else onOpenTask?.(id); }} />}
         </form>
         <aside
           className="editor-side"
@@ -1569,7 +1590,7 @@ export function TaskEditor({
                     {draft.labels.length ? (
                       <span className="task-labels">
                       {draft.labels.map((label) => (
-                        <Label label={label} key={label} />
+                        <Label label={label} key={label} color={current?.labelColors?.[label]} />
                       ))}
                       </span>
                     ) : (
@@ -1703,6 +1724,7 @@ export function TaskEditor({
               />
             )}
             <section className="side-block" aria-label="Claim">
+              <ClaimChip task={current} />
               <h3>
                 <Icon name="lock" size={14} /> Claim
               </h3>
@@ -1756,6 +1778,10 @@ export function TaskEditor({
               )}
             </section>
             <section className="side-block" aria-label="Review">
+              {current.completionPolicy && <p className="small">Completion: {completionTitles[current.completionPolicy.mode]} · {current.completionPolicy.source}</p>}
+              {current.completionPolicy?.mode === "auto_on_evidence" && <p className="small">Submission completes the task after artifacts and linked commits pass verification on the default branch.</p>}
+              {current.autoCompletion && !current.autoCompletion.eligible && current.role !== "done" && <p className="small">Waiting: {current.autoCompletion.reason}</p>}
+              {current.completion && <p className="small">Completed by {current.completion.actor} · {current.completion.mode} · {current.completion.source}{current.completion.approvedBy ? ` · approved by ${current.completion.approvedBy}` : ""}{current.completion.automatic ? " · automatic" : ""}</p>}
               <h3>
                 <Icon name="check" size={14} /> Review
               </h3>
@@ -1771,6 +1797,7 @@ export function TaskEditor({
                     Submitted by <PersonName id={current.review.actor} />
                   </p>
                   <p className="review-summary">{current.review.summary}</p>
+                  <ReviewEvidence task={current} />
                   {artifact && parsePullRef(artifact) && (
                     <a
                       className="artifact-link"
@@ -1799,7 +1826,8 @@ export function TaskEditor({
               ) : (
                 <p className="small">No review evidence yet.</p>
               )}
-              {!archived && current.role === "in_review" && actor.kind === "human" && (
+              <SubmitReview task={current} actor={actor} onSaved={(next) => { setCurrent(next); setDraft((draft) => ({ ...draft, lane: next.lane })); onChanged(next); }} />
+              {!archived && (current.role === "in_review" || (actor.kind === "agent" && canComplete && current.role === "in_progress")) && canComplete && (
                 <div className="review-actions">
                   <button
                     type="button"
@@ -1809,14 +1837,14 @@ export function TaskEditor({
                   >
                     {pending === "review" ? "Saving…" : "Mark Done"}
                   </button>
-                  <button
+                  {actor.kind === "human" && <button
                     type="button"
                     className="secondary"
                     disabled={Boolean(pending)}
                     onClick={() => setChangeStep(true)}
                   >
                     Request changes
-                  </button>
+                  </button>}
                 </div>
               )}
               {!archived && current.role === "in_review" && changeStep && (
@@ -1884,6 +1912,7 @@ export function TaskEditor({
               laneName={laneName}
             />
             {!archived && <form className="comment-form" onSubmit={postComment}>
+              <label className="small">Via<input value={commentVia} onChange={(event) => setCommentVia(event.target.value)} placeholder="sonnet#run-id" /></label>
               <div
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -2809,7 +2838,7 @@ function ProfileSettings({
   );
 }
 
-type LabelUse = { name: string; tasks: number };
+type LabelUse = { name: string; tasks: number; color?: string };
 
 /** Rename, merge or remove a label on every active task in the workspace. */
 function LabelSettings({
@@ -2868,6 +2897,18 @@ function LabelSettings({
     } finally {
       setBusy(false);
     }
+  }
+
+  async function setColor(label: string, color: string) {
+    setBusy(true);
+    setNote(null);
+    try {
+      await command("set_label_color", { label, color });
+      await Promise.all([load(), onChanged()]);
+      setNote({ ok: true, text: `Updated the color of “${label}”.` });
+    } catch (error) {
+      setNote({ ok: false, text: errorOf(error).message });
+    } finally { setBusy(false); }
   }
 
   if (!connected)
@@ -2955,13 +2996,18 @@ function LabelSettings({
           <div key={label.name} className="settings-row">
             <div className="settings-row-text">
               <span className="settings-row-title">
-                <Label label={label.name} />
+                <Label label={label.name} color={label.color} />
               </span>
               <span className="settings-row-hint">
                 {label.tasks} {label.tasks === 1 ? "task" : "tasks"}
               </span>
             </div>
             <div className="settings-row-control">
+              <select aria-label={`Color of ${label.name}`} value={label.color ?? "aurora"} disabled={busy}
+                onChange={(event) => void setColor(label.name, event.target.value)}>
+                {epicPalette.map((swatch) => <option key={swatch.id} value={swatch.id}>{swatch.name}</option>)}
+                {label.color?.startsWith("#") && <option value={label.color}>Custom {label.color}</option>}
+              </select>
               <button
                 type="button"
                 className="secondary small-button"

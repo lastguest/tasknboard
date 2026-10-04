@@ -34,13 +34,13 @@ test("a different actor receives the active holder and time remaining from the s
   for (const [command, extra] of [["claim_task", {}], ["update_task", { patch: { title: "Other work" } }]]) {
     assert.throws(() => s.execute(command, { id: claimed.id, expectedVersion: claimed.version, ...extra }, other), (error) => {
       assert.equal(error.code, "LEASE_CONFLICT");
-      assert.deepEqual(error.details.lease, { actor: owner.id, expiresAt: claimed.lease.expiresAt, now: s.now(), remainingMs: 898766, active: true });
+      assert.deepEqual(error.details.lease, { actor: owner.id, expiresAt: claimed.lease.expiresAt, now: s.now(), remainingMs: 898766, expiresInSeconds: 899, active: true });
       assert.match(error.message, /holder=claude/);
       assert.match(error.message, /remainingMs=898766/);
       return true;
     });
   }
-  assert.deepEqual(s.execute("get_task", { id: claimed.id }, human), claimed);
+  assert.deepEqual(s.execute("get_task", { id: claimed.id }, human), {...claimed,lease:{...claimed.lease,expiresInSeconds:899}});
 });
 
 test("expired claims retain their holder and expiration in errors and require a versioned new claim", (t) => {
@@ -50,7 +50,7 @@ test("expired claims retain their holder and expiration in errors and require a 
   for (const [command, extra] of [["heartbeat", {}], ["release_task", {}], ["update_task", { patch: { title: "Expired work" } }]]) {
     assert.throws(() => s.execute(command, { id: claimed.id, expectedVersion: claimed.version, ...extra }, owner), (error) => {
       assert.equal(error.code, "LEASE_REQUIRED");
-      assert.deepEqual(error.details.lease, { actor: owner.id, expiresAt: claimed.lease.expiresAt, now: s.now(), remainingMs: 0, active: false });
+      assert.deepEqual(error.details.lease, { actor: owner.id, expiresAt: claimed.lease.expiresAt, now: s.now(), remainingMs: 0, expiresInSeconds: 0, active: false });
       assert.match(error.message, /expiresAt=1900000/);
       return true;
     });
@@ -69,7 +69,7 @@ test("missing claims report a distinct state", (t) => {
   const s = fixture(t);
   assert.throws(() => s.execute("heartbeat", { id: s.task.id, expectedVersion: s.task.version }, owner), (error) => {
     assert.equal(error.code, "LEASE_REQUIRED");
-    assert.deepEqual(error.details.lease, { actor: null, expiresAt: null, remainingMs: 0, now: s.now(), active: false });
+    assert.deepEqual(error.details.lease, { actor: null, expiresAt: null, remainingMs: 0, expiresInSeconds: 0, now: s.now(), active: false });
     assert.match(error.message, /No lease exists/);
     return true;
   });

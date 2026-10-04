@@ -28,14 +28,15 @@ const taskCommands = new Set([
   "get_task", "update_task", "set_standup_notes", "claim_task", "heartbeat",
   "release_task", "delegate_task", "request_changes", "reject_task", "link_commits", "add_comment",
   "submit_review", "archive_task", "restore_task", "link_task", "unlink_task", "link_pull_requests",
-  "unlink_pull_request",
+  "unlink_pull_request", "undo_task", "reorder_task", "critical_path",
 ]);
 
 export function normalizeArguments(command: string, value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const args = value as Record<string, unknown>;
-  if (command === "bulk_move_tasks" && Array.isArray(args.tasks))
-    return { ...args, tasks: args.tasks.map((task) => normalizeArguments("update_task", task)) };
+  const batchField = ({ bulk_move_tasks: "tasks", claim_tasks: "tasks", add_comments: "comments", submit_reviews: "reviews" } as Record<string, string>)[command];
+  if (batchField && Array.isArray(args[batchField]))
+    return { ...args, [batchField]: args[batchField].map((task) => normalizeArguments("update_task", task)) };
   if (!taskCommands.has(command) || !Object.hasOwn(args, "taskId")) return args;
   if (Object.hasOwn(args, "id") && args.id !== args.taskId)
     throw Object.assign(new Error("id and taskId must identify the same task."), { code: "USAGE" });

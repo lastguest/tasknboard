@@ -6,6 +6,7 @@ import { Markdown } from "./Markdown";
 import { ApiError, command, errorOf, taskNumber } from "./api";
 import { standupNotes, type Actor, type Lane, type Task } from "./types";
 import { Avatar, displayName, usePeople } from "./People";
+import { RecentMovement } from "./PlanningPanels";
 
 type Stage = { key: string; name: string; assignee?: string };
 type Focus = "all" | "highlight" | "blocker";
@@ -333,6 +334,7 @@ export function Standup({
   };
   return (
     <div className="standup-shell">
+      <RecentMovement agent={stage.assignee} onOpen={(id) => { const task = tasks.find((entry) => entry.id === id); if (task) void openTask(task); }} />
       <header className="standup-bar">
         {stage.assignee && (
           <Avatar

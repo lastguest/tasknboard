@@ -75,6 +75,10 @@ test("CLI task aliases normalize once and reject conflicting keys", () => {
     assert.deepEqual(normalizeArguments(name, { taskId: "TNB-1" }), { taskId: "TNB-1" });
   assert.throws(() => requireExpectedVersion("claim_task", { id: "TNB-1" }), /tasknboard help claim_task/);
   assert.throws(() => requireExpectedVersion("bulk_move_tasks", { tasks: [{ id: "TNB-1" }], lane: "LANE-12" }), /tasks.0.expectedVersion is required/);
+  for (const [name, field] of [["claim_tasks", "tasks"], ["add_comments", "comments"], ["submit_reviews", "reviews"]]) {
+    assert.deepEqual(normalizeArguments(name, { [field]: [{ taskId: "TNB-1", via: "sonnet#run-1" }] }), { [field]: [{ id: "TNB-1", via: "sonnet#run-1" }] });
+    assert.throws(() => normalizeArguments(name, { [field]: [{ id: "TNB-1", taskId: "TNB-2" }] }), { code: "USAGE" });
+  }
 });
 
 test("CLI identity keeps human terminal commands and requires script attribution", () => {
@@ -140,7 +144,7 @@ test("slash commands map to versioned workspace requests", () => {
     boardId: "UNKNOWN",
   });
   assert.equal(planInput("/exit", undefined).kind, "quit");
-  assert.deepEqual(matchCommands("/re").map((c) => c.name), ["reject", "release", "review", "refresh"]);
+  assert.deepEqual(matchCommands("/re").map((c) => c.name), ["reject", "result", "release", "review", "refresh"]);
   assert.deepEqual(matchCommands("/move x"), []);
   for (const [input, t] of [["/archive", task()], ["/move", task()], ["/move Done", task()], ["/comment hi", undefined], ["/nope", task()]])
     assert.throws(() => planInput(input, t), UsageError, input);
@@ -218,7 +222,7 @@ test("the board runs commands, keeps the prompt on a conflict, and refreshes", a
   };
   await settle();
   assert.match(ui.lastFrame(), /Studio · you \(human\) · All boards/);
-  assert.match(ui.lastFrame(), /● Product · In review 1\n❯ TNB-1\s+\[BOARD-1\]\s+● Ship it[^]*● Engineering · Backlog 1\n\s+ENG-1/);
+  assert.match(ui.lastFrame(), /● Product · In review \(in_review\) 1\n❯ TNB-1\s+\[BOARD-1\]\s+● Ship it[^]*● Engineering · Backlog \(todo\) 1\n\s+ENG-1/);
 
   await type("/do");
   assert.match(ui.lastFrame(), /❯ \/done\s+Mark the reviewed task Done/);
@@ -257,7 +261,7 @@ test("task detail names the task's lane and each linked task's lane", async (t) 
   await settle();
   ui.stdin.write("\r");
   await settle();
-  assert.match(ui.lastFrame(), /In review · medium priority · unassigned · v4/);
+  assert.match(ui.lastFrame(), /In review \(in_review\) · medium priority · unassigned · v4/);
   assert.match(ui.lastFrame(), /Blocks ENG-4 Deploy · In progress/);
 });
 

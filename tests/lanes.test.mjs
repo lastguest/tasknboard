@@ -223,6 +223,8 @@ test("lane roles keep the claim flow and the human review gate", (t) => {
 
 test("agents complete claimed work in any done lane on the same board", (t) => {
   const s = fixture(t);
+  const initialBoard = s.board();
+  s.execute("update_board", { id: initialBoard.id,expectedVersion:initialBoard.version,patch:{policy:{...initialBoard.policy,humanCompletionOnly:false}} },human);
   s.addLane("Released", "done");
   const otherBoard = s.execute("create_board", { name: "Ops", prefix: "OPS" }, human);
   let task = s.make();
@@ -307,7 +309,7 @@ test("the lane upgrade moves tasks, history and views from statuses to lanes", (
   ]);
   assert.equal(migratedView.display.groupBy, "lane");
   assert.equal(migratedView.version, view.version);
-  assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 20);
+  assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 21);
   const backup = store.execute("export_workspace", {}, human);
   assert.deepEqual(
     backup.boards[1].lanes,

@@ -72,6 +72,12 @@ const eventVerb: Record<string, string> = {
   reject_task: "rejected",
   set_standup_notes: "set stand-up notes",
   archive_task: "archived",
+  restore_task: "restored",
+  undo_task: "undid an action",
+  delegate_task: "delegated",
+  request_changes: "requested changes",
+  link_commits: "linked commits",
+  task_unblocked: "unblocked the task",
   link_task: "linked",
   unlink_task: "unlinked",
   link_pull_requests: "linked pull requests",
@@ -95,7 +101,7 @@ function eventText(body: string) {
         .filter(([key, v]) => key !== "actor" && v !== "")
         .map(
           ([key, v]) =>
-            `${key}: ${Array.isArray(v) ? v.join(", ") : String(v)}`,
+            `${key}: ${v && typeof v === "object" ? JSON.stringify(v) : String(v)}`,
         )
         .join(" · ");
   } catch {}
@@ -118,7 +124,7 @@ function taskLines(
   out.push({ text: `Board ${clean(task.boardId)}`, dim: true });
   out.push({
     text: [
-      clean(lanes.get(task.lane)?.name ?? task.lane),
+      task.archived ? "Archived" : `${clean(lanes.get(task.lane)?.name ?? task.lane)} (${task.role})`,
       `${task.priority} priority`,
       task.assignee ? `@${clean(task.assignee)}` : "unassigned",
       task.labels.map(clean).join(", "),
@@ -138,11 +144,24 @@ function taskLines(
       color: "#e8bd5a",
     });
   }
+  if (task.lease && !lease) out.push({ text: `Claim expired · ${clean(task.lease.actor)}`, color: danger });
+  if (task.delegatedTo) out.push({ text: `Delegated to ${clean(task.delegatedTo)}${task.delegatedBy ? ` by ${clean(task.delegatedBy)}` : ""}`, color: accent });
+  if (task.blocked) out.push({ text: "Blocked by open dependencies", color: danger });
+  if (task.url) out.push({ text: clean(task.url), dim: true });
+  block("Branch", task.branch ?? "");
+  block("Brief file", task.briefPath ?? "");
+  block("Result file", task.resultPath ?? "");
+  if (task.completionPolicy) block("Completion policy", `${task.completionPolicy.mode} · ${task.completionPolicy.source}`);
+  if (task.autoCompletion && !task.autoCompletion.eligible) block("Automatic completion", task.autoCompletion.reason);
   block("Context", task.description);
   block("Acceptance criteria", task.acceptance);
   if (task.review) {
     const url = safeUrl(task.review.artifactUrl);
     block("Review", `${task.review.summary}${url ? `\n${url}` : ""}`);
+    block("Evidence", task.review.artifacts?.map(item => `${item.title}: ${item.url}`).join("\n") ?? "");
+    block("Commit range", task.review.commitRange ?? "");
+    block("Verified by", task.review.verifiedBy?.map(item => `${item.agent}: ${item.checks}`).join("\n") ?? "");
+    block("Via", task.review.via ?? "");
   }
   if (task.links?.length)
     block(
@@ -268,7 +287,7 @@ function TaskList({
               color={roleColor[row.lane.role]}
               wrap="truncate-end"
             >
-              ● {clean(row.title)} <Text dimColor>{row.count}</Text>
+              ● {clean(row.title)} ({row.lane.role}) <Text dimColor>{row.count}</Text>
             </Text>
           );
         const t = row.task;
@@ -278,6 +297,8 @@ function TaskList({
           t.assignee ? `@${clean(t.assignee)}` : "",
           t.commentCount ? `${t.commentCount} ✎` : "",
           lease ? "◆ claimed" : "",
+          t.delegatedTo ? `delegated: ${clean(t.delegatedTo)}` : "",
+          t.blocked ? "blocked" : "",
         ]
           .filter(Boolean)
           .join("  ");

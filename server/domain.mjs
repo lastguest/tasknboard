@@ -80,6 +80,7 @@ const viewValue = {
   assignee: z.union([z.literal(ME), z.string().max(80)]),
   label: z.union([z.literal(""), z.string().trim().min(1).max(40)]),
   epic: taskEpic,
+  delegated: z.enum(["true","false"]),
 };
 const viewCondition = z
   .object({
@@ -162,7 +163,7 @@ const pullRequest = z
 const label = z.string().trim().min(1).max(40);
 const labels = z.array(label)
   .transform((values) => [...new Set(values)]);
-const artifact = z.string().trim().max(1000).refine((value) => value === "" || (/^https?:\/\//.test(value) && z.url().safeParse(value).success) || /^(?:commit:)?[a-f0-9]{7,40}$/i.test(value) || (!/^[a-z]+:/i.test(value) && !/^[\\/]/.test(value) && !value.split(/[\\/]/).includes("..")), "HTTP(S), commit SHA, or repository-relative path required");
+const artifact = z.string().trim().max(1000).refine((value) => value === "" || /^\/files\/[a-f0-9]{32}$/.test(value) || (/^https?:\/\//.test(value) && z.url().safeParse(value).success) || /^(?:commit:)?[a-f0-9]{7,40}$/i.test(value) || (!/^[a-z]+:/i.test(value) && !/^[\\/]/.test(value) && !value.split(/[\\/]/).includes("..")), "HTTP(S), commit SHA, or repository-relative path required");
 const agentReasoning = z.enum(["minimal", "low", "medium", "high", "xhigh", "max"]);
 const agentSandbox = z.enum(["read-only", "workspace-write", "danger-full-access"]);
 const patch = z
@@ -448,8 +449,50 @@ export const schemas = {
   workspace_info: z.object({}).strict(),
   export_workspace: z.object({}).strict(),
 };
-schemas.bulk_create_tasks = z.object({ tasks: z.array(schemas.create_task).min(1).max(100) }).strict();
 schemas.bulk_move_tasks = z.object({ tasks: z.array(z.object({ id, expectedVersion: version }).strict()).min(1).max(100), lane: laneId }).strict();
+const via = z.string().trim().max(200);
+const completionModes = ["human","any_agent","architect","any_agent_other_than_author","auto_on_evidence"];
+const completionMode = z.enum(completionModes);
+const labelPolicies = z.record(label,completionMode).transform((policies) => {
+  const strictness={human:5,any_agent_other_than_author:4,architect:3,auto_on_evidence:2,any_agent:1};const result=Object.create(null);
+  for(const [name,mode] of Object.entries(policies)){const key=name.toLowerCase();if(!result[key]||strictness[mode]>strictness[result[key]])result[key]=mode;}
+  return result;
+});
+const taskPath = z.string().trim().max(1000).refine((value) => !value.split(/[\\/]/).includes(".."), "Paths cannot contain parent traversal");
+const milestoneId = z.string().regex(/^MILESTONE-\d+$/);
+const policy = z.object({ requireBriefForProgress: z.boolean().default(false), requireReviewArtifact: z.boolean().default(false), autoDispatch: z.boolean().default(false), humanCompletionOnly: z.boolean().default(true), completionMode:completionMode.exclude(["human"]).default("any_agent"),labelCompletionPolicies:labelPolicies.default({}) }).strict();
+const metadata = { branch: z.string().trim().max(300), briefPath: taskPath, resultPath: taskPath, milestone: z.union([z.literal(""), milestoneId]) };
+schemas.create_task = schemas.create_task.extend(Object.fromEntries(Object.entries(metadata).map(([key, schema]) => [key, schema.default("")])));
+schemas.update_task = z.object({ id, expectedVersion: version, patch: patch.extend(Object.fromEntries(Object.entries(metadata).map(([key, schema]) => [key, schema.optional()]))) }).strict();
+schemas.create_board = schemas.create_board.extend({ policy: policy.default({ requireBriefForProgress: false, requireReviewArtifact: false, autoDispatch: false, humanCompletionOnly: true,completionMode:"any_agent",labelCompletionPolicies:{} }) });
+schemas.update_board = schemas.update_board.extend({ patch: schemas.update_board.shape.patch.extend({ policy: z.object({requireBriefForProgress:z.boolean().optional(),requireReviewArtifact:z.boolean().optional(),autoDispatch:z.boolean().optional(),humanCompletionOnly:z.boolean().optional(),completionMode:completionMode.exclude(["human"]).optional(),labelCompletionPolicies:labelPolicies.optional()}).strict().refine((value)=>Object.keys(value).length>0,"Empty policy").optional() }) });
+schemas.create_epic = schemas.create_epic.extend({ completionPolicy:z.enum(["inherit",...completionModes]).default("inherit") });
+schemas.update_epic = schemas.update_epic.extend({ patch:schemas.update_epic.shape.patch.extend({completionPolicy:z.enum(["inherit",...completionModes]).optional()}) });
+schemas.add_comment = schemas.add_comment.extend({ via: via.optional() });
+schemas.link_commits = schemas.link_commits.extend({ via: via.optional() });
+schemas.submit_review = schemas.submit_review.extend({
+  artifacts: z.array(z.object({ title: text, url: artifact.refine((value) => value.length > 0, "Artifact URL required"), mime:z.enum(["image/png","image/jpeg","image/webp","image/gif","text/plain","application/json"]).optional() }).strict()).max(50).default([]),
+  commitRange: z.string().trim().max(300).default(""),
+  verifiedBy: z.array(z.object({ agent: via.min(1), checks: z.string().trim().min(1).max(5000) }).strict()).max(50).default([]),
+  via: via.optional(),
+});
+schemas.list_tasks = schemas.list_tasks.extend({ fields: z.array(z.enum(["id","title","role","lane","epic","version","boardId","priority","assignee","labels","delegatedTo","delegatedBy","blocked","blockers","branch","briefPath","resultPath","milestone","position","lease","archived","review","url","completionPolicy","completion","autoCompletion"])).min(1).max(30).optional(), delegated: z.boolean().optional() });
+schemas.find_similar_tasks = schemas.find_similar_tasks.extend({ includeArchived: z.boolean().default(false), includeDone: z.boolean().default(false) });
+schemas.bulk_create_tasks = z.object({ tasks: z.array(schemas.create_task).min(1).max(100) }).strict();
+schemas.claim_tasks = z.object({ tasks: z.array(schemas.claim_task).min(1).max(100) }).strict();
+schemas.add_comments = z.object({ comments: z.array(schemas.add_comment).min(1).max(100) }).strict();
+schemas.submit_reviews = z.object({ reviews: z.array(schemas.submit_review).min(1).max(100) }).strict();
+schemas.undo_task = z.object({ id, expectedVersion: version }).strict();
+schemas.reorder_task = z.object({ id, expectedVersion: version, position: lanePosition }).strict();
+schemas.critical_path = z.object({ id }).strict();
+schemas.list_activity = z.object({ hours: z.number().positive().max(8760).default(24), boardId: boardId.optional(), agent: via.optional(), limit: z.number().int().min(1).max(1000).default(100) }).strict();
+const criteria = z.array(z.object({ text: text, checked: z.boolean().default(false) }).strict()).max(100);
+schemas.list_milestones = z.object({ boardId: boardId.optional(), includeArchived: z.boolean().default(false) }).strict();
+schemas.create_milestone = z.object({ boardId, title: text, criteria: criteria.default([]) }).strict();
+schemas.update_milestone = z.object({ id: milestoneId, expectedVersion: version, patch: z.object({ title: text.optional(), criteria: criteria.optional() }).strict().refine((value) => Object.keys(value).length > 0, "Empty patch") }).strict();
+schemas.archive_milestone = z.object({ id: milestoneId, expectedVersion: version }).strict();
+schemas.set_label_color = z.object({ label, color: epicColor }).strict();
+schemas.upload_artifact = z.object({ title: text, dataUrl: z.string().max(12 * 1024 * 1024).regex(/^data:(image\/(?:png|jpeg|webp|gif)|text\/plain|application\/json);base64,[A-Za-z0-9+/]+={0,2}$/) }).strict();
 export class DomainError extends Error {
   constructor(code, message, status = 409, details) {
     super(message);

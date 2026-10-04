@@ -118,7 +118,7 @@ test("schema 20 archives rejected tasks, removes their lanes and preserves IDs a
   const convertedView = store.execute("list_views", {}, human).views.find((item) => item.id === view.id);
   assert.deepEqual(convertedView.filters, view.filters);
   assert.equal(convertedView.version, view.version + 1);
-  assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 20);
+  assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 21);
   const added = store.execute("create_lane", { boardId: board.id, expectedVersion: board.version, name: "Next", role: "todo" }, human);
   assert.equal(added.lanes.at(-1).id, "LANE-101");
   store.close(); store = createStore(path);

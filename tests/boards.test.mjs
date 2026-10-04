@@ -427,7 +427,7 @@ test("the board migration preserves legacy keys and epic references", (t) => {
       version: 2,
     }),
   );
-  db.exec("DROP TABLE boards; DROP TABLE board_prefixes; DELETE FROM migrations WHERE version=11");
+  db.exec("DROP TABLE boards; DROP TABLE board_prefixes; DELETE FROM migrations WHERE version IN (11,21)");
   db.close();
 
   store = createStore(path);
@@ -443,9 +443,11 @@ test("the board migration preserves legacy keys and epic references", (t) => {
     "inSidebar",
     "lanes",
     "name",
+    "policy",
     "prefix",
     "repository",
     "updatedAt",
+    "url",
     "version",
   ]);
   const upgraded = store.execute("get_task", { id: "APP-1" }, human);
@@ -483,12 +485,12 @@ test("the board migration preserves legacy keys and epic references", (t) => {
     "APP-2",
   );
   const backup = store.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 20);
+  assert.equal(backup.schemaVersion, 21);
   assert.equal(Object.hasOwn(backup, "workspace"), false);
   assert.equal(backup.tasks[0].boardId, defaultBoard.id);
   // Exports hold stored records; formerPrefixes, inSidebar, inProgress, and
   // lane task counts are derived.
-  const { formerPrefixes, inSidebar, inProgress, lanes, ...storedBoard } = defaultBoard;
+  const { formerPrefixes, inSidebar, inProgress, lanes, url, ...storedBoard } = defaultBoard;
   assert.deepEqual(backup.boards, [
     { ...storedBoard, lanes: lanes.map(({ tasks, archivedTasks, ...lane }) => lane) },
   ]);
@@ -621,7 +623,7 @@ test("task links upgrade an existing version 13 database without changing boards
   db.close();
   store = createStore(path);
   try {
-    assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 20);
+    assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 21);
     assert.equal(store.execute("list_boards", {}, human).boards[0].description, board.description);
     assert.equal(store.execute("get_task", { id: first.id }, human).version, first.version);
     const linked = store.execute("link_task", {
