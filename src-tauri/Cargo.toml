@@ -1,6 +1,6 @@
 [package]
 name = "tasknboard"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 # Tauri links the iOS app against the static library.

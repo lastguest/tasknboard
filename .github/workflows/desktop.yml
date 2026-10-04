@@ -17,16 +17,26 @@ concurrency:
 permissions:
   contents: read
 
-# The run number makes each build newer than the last, so the updater can compare them.
 env:
-  TASKNBOARD_VERSION: 0.1.${{ github.run_number }}
   TASKNBOARD_GITHUB_CLIENT_ID: ${{ vars.TASKNBOARD_GITHUB_CLIENT_ID }}
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read the package version
+        id: package
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
   windows:
+    needs: version
     runs-on: windows-latest
     timeout-minutes: 30
     env:
+      TASKNBOARD_VERSION: ${{ needs.version.outputs.version }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     steps:
       - name: Check the GitHub OAuth client ID
@@ -116,9 +126,11 @@ jobs:
           retention-days: 30
 
   macos:
+    needs: version
     runs-on: macos-26
     timeout-minutes: 30
     env:
+      TASKNBOARD_VERSION: ${{ needs.version.outputs.version }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     steps:
       - name: Check the GitHub OAuth client ID
@@ -192,13 +204,14 @@ jobs:
     if: >-
       !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
       (needs.windows.result == 'success' || needs.macos.result == 'success')
-    needs: [windows, macos]
+    needs: [version, windows, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
       actions: read
     env:
+      TASKNBOARD_VERSION: ${{ needs.version.outputs.version }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:

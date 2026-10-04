@@ -153,8 +153,8 @@ The app does not install an update without a valid signature.
 A failed check is written to the log only, so offline use does not show errors.
 Development builds from `desktop:dev` do not check for updates.
 
-Each CI build gets the version `0.1.<run number>`, so a newer run always has a higher version.
-Local builds keep the version `0.1.0`, so they offer the latest published build.
+CI and local builds use the version in `package.json`.
+Before a release, increase that version and keep the npm lock, Cargo metadata, and Tauri configuration versions equal.
 
 The update feed is signed with an Ed25519 (minisign) key pair.
 The public key is `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`.
