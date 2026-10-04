@@ -422,14 +422,14 @@ test("WebMCP writes refresh after a read already in flight", async ({ page }) =>
   const gate = new Promise<void>((resolve) => { release = resolve; });
   let held = false;
   await page.route("**/api/list_tasks", async (route) => {
-    if (held) return route.continue();
+    if (held || route.request().postDataJSON()?.archived) return route.continue();
     held = true;
     const oldResponse = await route.fetch();
     await gate;
     await route.fulfill({ response: oldResponse });
   });
   await page.goto(baseURL);
-  await expect.poll(() => page.evaluate(() => (window as any).testTools.size)).toBe(18);
+  await expect.poll(() => page.evaluate(() => (window as any).testTools.has("create_task"))).toBe(true);
   const title = `WebMCP ${key()}`;
   const write = page.waitForResponse((response) => response.url().endsWith("/api/create_task"));
   await page.evaluate((title) => {
@@ -444,12 +444,16 @@ test("WebMCP writes refresh after a read already in flight", async ({ page }) =>
 test("Hidden tabs close the change stream and visible tabs refresh immediately", async ({ page }) => {
   // The page reads on load and again when the change stream opens.
   let loaded = 0;
-  page.on("response", (response) => { if (response.url().endsWith("/api/list_tasks")) loaded++; });
+  page.on("response", (response) => {
+    if (response.url().endsWith("/api/list_tasks") && !response.request().postDataJSON()?.archived) loaded++;
+  });
   await connect(page);
   await expect.poll(() => loaded).toBe(2);
   await page.clock.install();
   let reads = 0;
-  page.on("request", (request) => { if (request.url().endsWith("/api/list_tasks")) reads++; });
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/list_tasks") && !request.postDataJSON()?.archived) reads++;
+  });
   const streamClosed = page.waitForEvent("requestfailed", (request) => request.url().endsWith("/api/stream"));
   await page.evaluate(() => {
     Object.defineProperty(document, "hidden", { configurable: true, value: true });
