@@ -8,6 +8,7 @@ export class ApiError extends Error {
     message: string,
     readonly code: string,
     readonly status: number,
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -49,7 +50,7 @@ export async function command<T>(
       0,
     );
   }
-  let value: { code?: string; message?: string } & Record<string, unknown>;
+  let value: { code?: string; message?: string; details?: Record<string, unknown> } & Record<string, unknown>;
   try {
     value = await res.json();
   } catch {
@@ -64,6 +65,7 @@ export async function command<T>(
       value.message || `Request failed (${res.status})`,
       value.code || (res.status === 401 ? "UNAUTHORIZED" : "HTTP_ERROR"),
       res.status,
+      value.details,
     );
   return value as T;
 }

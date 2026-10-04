@@ -121,7 +121,8 @@ test("a busy agent queues the next assignment and starts it when the run ends", 
   await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].args[0], "exec");
-  assert.ok(calls[0].args.includes("--dangerously-bypass-approvals-and-sandbox"));
+  assert.ok(!calls[0].args.includes("--dangerously-bypass-approvals-and-sandbox"));
+  assert.equal(calls[0].args[calls[0].args.indexOf("--sandbox") + 1], "workspace-write");
   calls[0].child.emit("exit", 0);
   await waitFor(() => calls.length >= 2);
   assert.equal(calls.length, 2);
@@ -131,12 +132,53 @@ test("a busy agent queues the next assignment and starts it when the run ends", 
     .events.findLast((e) => e.kind === "agent_started");
   await writeFile(started.body.split("Log: ")[1].replace(/\.$/, ""), "booting\nNot logged in\n");
   calls[1].child.emit("exit", 1);
-  await settle();
+  await waitFor(() => events(store, second.id).includes("agent_stopped"), "the second run records its exit");
   const stopped = store
     .execute("get_task", { id: second.id }, human)
     .events.find((e) => e.kind === "agent_stopped");
   assert.match(stopped.body, /exited with code 1: Not logged in\. Log:/);
   assert.ok(!events(store, first.id).includes("agent_stopped"));
+});
+
+test("custom prompts always include the task description and acceptance criteria", async (t) => {
+  const { store, launcher, calls, board } = await fixture(t, { client: "codex" });
+  const config = readConfig(store, "bot");
+  config.events.task_assigned.prompt = "Do the assigned work.";
+  writeConfig(store, "bot", config);
+  const task = store.execute("create_task", {
+    boardId: board.id, title: "Fix the export", assignee: "bot",
+    description: "Preserve the authored layout.", acceptance: "The export opens the saved board.",
+  }, human);
+  launcher.assigned(task);
+  await waitFor(() => calls.length === 1);
+  const prompt = calls[0].args.at(-1);
+  assert.match(prompt, /Fix the export/);
+  assert.match(prompt, /Preserve the authored layout/);
+  assert.match(prompt, /The export opens the saved board/);
+});
+
+test("external dispatch prevents a second assignment run", async (t) => {
+  const { store, launcher, calls, board } = await fixture(t);
+  const task = store.execute("create_task", {
+    boardId: board.id, title: "Delegated work", assignee: "bot",
+  }, human);
+  store.execute("delegate_task", { id: task.id, expectedVersion: task.version, delegatedTo: "codex/cli" }, human);
+  launcher.assigned(task);
+  await settle();
+  assert.equal(calls.length, 0);
+});
+
+test("Codex uses the reasoning and sandbox settings of its task's board", async (t) => {
+  const { store, launcher, calls, board } = await fixture(t, { client: "codex" });
+  store.execute("update_board", {
+    id: board.id, expectedVersion: board.version,
+    patch: { agentReasoning: "high", agentSandbox: "read-only" },
+  }, human);
+  const task = store.execute("create_task", { boardId: board.id, title: "Plan", assignee: "bot" }, human);
+  launcher.assigned(task);
+  await waitFor(() => calls.length === 1);
+  assert.ok(calls[0].args.includes('model_reasoning_effort="high"'));
+  assert.equal(calls[0].args[calls[0].args.indexOf("--sandbox") + 1], "read-only");
 });
 
 test("no run starts without a folder, for unknown agents, or for claimed tasks", async (t) => {
@@ -282,7 +324,8 @@ test("each CLI gets its model, profile, extra arguments, and environment", async
       "--model", "m1", "--agent", "p1", "--verbose",
     ],
     codex: (prompt, folder) => [
-      "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check",
+      "exec", "--sandbox", "workspace-write", "-c", 'approval_policy="never"',
+      "-c", 'model_reasoning_effort="medium"', "--skip-git-repo-check",
       "-C", folder, "--model", "m1", "--profile", "p1", "--verbose", prompt,
     ],
     opencode: (prompt, folder) => [
@@ -435,6 +478,8 @@ test("a mention starts a bound agent with the comment, once per comment", async 
   assert.equal(calls.length, 2);
   assert.match(calls[1].args[1], /also this/);
   assert.deepEqual(mentionedIdentities("a@b.c @x.y. (@z) @@w"), ["x.y", "z"]);
+  assert.deepEqual(mentionedIdentities("@claude/architect, @codex/cli. @claude/architect"), ["claude/architect", "codex/cli"]);
+  assert.deepEqual(mentionedIdentities("@claude//architect @claude/../escape @claude/ @" + "a".repeat(81)), []);
 });
 
 test("the stand-up starts bound agents that have open tasks", async (t) => {
@@ -542,7 +587,7 @@ test("quitting records the stopped run, releases its claim, and starts it again 
   const second = make("Waiting");
   launcher.assigned(first);
   launcher.assigned(second);
-  await settle();
+  await waitFor(() => calls.length === 1, "the first run starts before shutdown");
   const claimed = store.execute("claim_task", { id: first.id, expectedVersion: 1 }, bot);
   assert.equal(claimed.lease.actor, "bot");
   launcher.stop();

@@ -509,6 +509,9 @@ const kindText: Record<string, string> = {
   heartbeat: "renewed the claim",
   release_task: "released the claim",
   submit_review: "submitted for review",
+  request_changes: "requested changes",
+  delegate_task: "delegated the task",
+  link_commits: "linked commits",
   archive_task: "archived the task",
   set_standup_notes: "updated stand-up notes",
   link_task: "linked a task",
@@ -569,6 +572,9 @@ function eventDetail(
           .join("\n") || "Notes cleared."
       );
     if (e.kind === "submit_review") return body.summary;
+    if (e.kind === "request_changes") return body.reason;
+    if (e.kind === "delegate_task") return `Delegated to ${body.delegatedTo}`;
+    if (e.kind === "link_commits") return body.commits.join(", ");
     if (e.kind === "link_task" || e.kind === "unlink_task")
       return `${linkTitle(body.type)} ${body.target}`;
     if (e.kind === "link_pull_requests" || e.kind === "unlink_pull_request")
@@ -793,6 +799,9 @@ export function TaskEditor({
   const [comment, setComment] = useState("");
   const [commentError, setCommentError] = useState<ApiError | null>(null);
   const [reviewError, setReviewError] = useState<ApiError | null>(null);
+  const [changeStep, setChangeStep] = useState(false);
+  const [changeReason, setChangeReason] = useState("");
+  const [delegatedTo, setDelegatedTo] = useState("");
   const [archiveStep, setArchiveStep] = useState(false);
   const [archiveError, setArchiveError] = useState<ApiError | null>(null);
   const [linkType, setLinkType] = useState<LinkType>("blocks");
@@ -1044,7 +1053,6 @@ export function TaskEditor({
     try {
       const next = await command<Task>("add_comment", {
         id: current.id,
-        expectedVersion: current.version,
         body: comment,
       });
       setCurrent(next);
@@ -1105,24 +1113,47 @@ export function TaskEditor({
     }
   }
 
-  /** Mark Done and Needs changes move the task to the first lane of a role. */
+  /** Review actions move the task and preserve the reason for changes. */
   async function review(role: LaneRole) {
     const lane = firstLane(lanes, role);
-    if (!current || pending || !lane) return;
+    if (!current || pending || !lane || (role === "in_progress" && !changeReason.trim())) return;
     setPending("review");
     setReviewError(null);
     try {
-      const next = await command<Task>("update_task", {
+      const next = await command<Task>(role === "done" ? "update_task" : "request_changes", {
         id: current.id,
         expectedVersion: current.version,
-        patch: { lane: lane.id },
+        ...(role === "done" ? { patch: { lane: lane.id } } : { reason: changeReason.trim() }),
       });
       setCurrent(next);
       setDraft((d) => ({ ...d, lane: next.lane }));
       setNotice(role === "done" ? "Marked Done." : `Moved to ${lane.name}.`);
       onChanged(next);
+      setChangeStep(false);
+      setChangeReason("");
     } catch (e) {
       setReviewError(errorOf(e));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function delegate() {
+    if (!current || pending || !delegatedTo.trim()) return;
+    setPending("review");
+    setReviewError(null);
+    try {
+      const next = await command<Task>("delegate_task", {
+        id: current.id,
+        expectedVersion: current.version,
+        delegatedTo: delegatedTo.trim(),
+      });
+      setCurrent(next);
+      setDraft((draft) => ({ ...draft, lane: next.lane }));
+      setDelegatedTo("");
+      onChanged(next);
+    } catch (error) {
+      setReviewError(errorOf(error));
     } finally {
       setPending(null);
     }
@@ -1587,6 +1618,12 @@ export function TaskEditor({
               onLink={(values) => writePulls("link_pull_requests", values)}
               onUnlink={(url) => void writePulls("unlink_pull_request", [url])}
             />
+            {Boolean(current.commits?.length) && (
+              <section className="side-block" aria-label="Commits">
+                <h3>Commits</h3>
+                {current.commits!.map((sha) => <p className="small" key={sha}><code>{sha}</code></p>)}
+              </section>
+            )}
             {pullError && (
               <ErrorNote
                 error={pullError}
@@ -1598,6 +1635,16 @@ export function TaskEditor({
               <h3>
                 <Icon name="lock" size={14} /> Claim
               </h3>
+              {current.delegatedTo && (
+                <p>Delegated to <PersonName id={current.delegatedTo} />. No lease renewal is required.</p>
+              )}
+              {current.role !== "done" && (
+                <div className="field">
+                  <label className="field-label" htmlFor={`${listId}-delegate`}>Delegate to</label>
+                  <input id={`${listId}-delegate`} value={delegatedTo} onChange={(event) => setDelegatedTo(event.target.value)} placeholder="Actor ID or external agent" disabled={Boolean(pending)} />
+                  <button type="button" className="secondary" disabled={Boolean(pending) || !delegatedTo.trim()} onClick={() => void delegate()}>Delegate work</button>
+                </div>
+              )}
               {!current.lease ? (
                 <p className="small">Not claimed.</p>
               ) : lease ? (
@@ -1662,7 +1709,7 @@ export function TaskEditor({
                     </a>
                   ) : (
                     current.review.artifactUrl && (
-                      <p className="small">Artifact link is not a web URL.</p>
+                      <p className="small">Artifact: <code>{current.review.artifactUrl}</code></p>
                     )
                   )}
                 </>
@@ -1683,10 +1730,20 @@ export function TaskEditor({
                     type="button"
                     className="secondary"
                     disabled={Boolean(pending)}
-                    onClick={() => review("in_progress")}
+                    onClick={() => setChangeStep(true)}
                   >
-                    Needs changes
+                    Request changes
                   </button>
+                </div>
+              )}
+              {current.role === "in_review" && changeStep && (
+                <div className="field">
+                  <label className="field-label" htmlFor={`${listId}-changes`}>Reason for changes</label>
+                  <textarea id={`${listId}-changes`} value={changeReason} onChange={(event) => setChangeReason(event.target.value)} rows={3} disabled={Boolean(pending)} />
+                  <div className="review-actions">
+                    <button type="button" className="primary" disabled={Boolean(pending) || !changeReason.trim()} onClick={() => void review("in_progress")}>Send to In progress</button>
+                    <button type="button" className="secondary" disabled={Boolean(pending)} onClick={() => setChangeStep(false)}>Cancel</button>
+                  </div>
                 </div>
               )}
               {reviewError && (

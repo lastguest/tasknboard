@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
@@ -9,6 +9,10 @@ import { createElement } from "react";
 import { render } from "ink-testing-library";
 import { planInput, matchCommands, UsageError } from "../cli/commands.ts";
 import { editLine, insert } from "../cli/editor.ts";
+import { cliActor } from "../cli/identity.ts";
+import { normalizeArguments, requireExpectedVersion } from "../cli/arguments.ts";
+import { commandExamples, commandHelp } from "../cli/help.ts";
+import { schemas } from "../server/domain.mjs";
 import { App, clean } from "../dist-cli/app.mjs";
 
 const run = promisify(execFile);
@@ -35,6 +39,45 @@ const deferred = () => {
   return { promise, resolve, reject };
 };
 const key = (patch = {}) => ({ ctrl: false, meta: false, shift: false, ...patch });
+
+test("CLI command help provides a valid example for every schema command", () => {
+  assert.deepEqual(Object.keys(commandExamples).sort(), Object.keys(schemas).sort());
+  for (const [name, schema] of Object.entries(schemas)) {
+    assert.equal(schema.safeParse(commandExamples[name]).success, true, name);
+    const help = commandHelp(name);
+    assert.match(help, new RegExp(`Usage: tasknboard ${name}`));
+    assert.ok(help.includes(JSON.stringify(commandExamples[name])), name);
+    assert.ok(help.includes(`tasknboard ${name} --file <path>`), name);
+    assert.ok(help.includes(`tasknboard ${name} --stdin`), name);
+    assert.match(help, /On Windows, use --file or --stdin/);
+    if (JSON.stringify(commandExamples[name]).includes("expectedVersion"))
+      assert.match(help, /current version as expectedVersion/);
+  }
+  assert.match(commandHelp("claim_task"), /Read get_task/);
+  assert.match(commandHelp("create_lane"), /board version/);
+  assert.throws(() => commandHelp("not_a_command"), { code: "USAGE" });
+});
+
+test("CLI task aliases normalize once and reject conflicting keys", () => {
+  for (const name of ["get_task", "update_task", "set_standup_notes", "claim_task", "heartbeat", "release_task", "delegate_task", "request_changes", "link_commits", "add_comment", "submit_review", "archive_task", "link_task", "unlink_task", "link_pull_requests", "unlink_pull_request"]) {
+    assert.deepEqual(normalizeArguments(name, { taskId: "TNB-1", expectedVersion: 3 }), { id: "TNB-1", expectedVersion: 3 });
+    assert.deepEqual(normalizeArguments(name, { id: "TNB-1", taskId: "TNB-1" }), { id: "TNB-1" });
+    assert.throws(() => normalizeArguments(name, { id: "TNB-1", taskId: "TNB-2" }), { code: "USAGE" });
+  }
+  assert.deepEqual(normalizeArguments("bulk_move_tasks", { tasks: [{ taskId: "TNB-1", expectedVersion: 3 }], lane: "LANE-12" }), { tasks: [{ id: "TNB-1", expectedVersion: 3 }], lane: "LANE-12" });
+  for (const name of ["update_board", "update_epic", "update_view", "update_lane"])
+    assert.deepEqual(normalizeArguments(name, { taskId: "TNB-1" }), { taskId: "TNB-1" });
+  assert.throws(() => requireExpectedVersion("claim_task", { id: "TNB-1" }), /tasknboard help claim_task/);
+  assert.throws(() => requireExpectedVersion("bulk_move_tasks", { tasks: [{ id: "TNB-1" }], lane: "LANE-12" }), /tasks.0.expectedVersion is required/);
+});
+
+test("CLI identity keeps human terminal commands and requires script attribution", () => {
+  assert.equal(cliActor("create_board", {}, true), undefined);
+  assert.equal(cliActor("list_tasks", {}, false), undefined);
+  assert.throws(() => cliActor("create_board", {}, false), { code: "ACTOR_REQUIRED" });
+  assert.deepEqual(cliActor("create_board", { TASKNBOARD_AGENT_ID: "claude" }, false), { id: "claude", kind: "agent" });
+  assert.throws(() => cliActor("workspace_info", { TASKNBOARD_AGENT_ID: "claude", TASKNBOARD_AGENT_ROLE: "admin" }, false), { code: "USAGE" });
+});
 
 test("slash commands map to versioned workspace requests", () => {
   const boards = [board({ id: "BOARD-1", lanes: lanes(1) })];
@@ -349,10 +392,70 @@ test("late board refreshes cannot replace tasks or errors for the selected board
   assert.doesNotMatch(ui.lastFrame(), /Old Product task|Stale Product request/);
 });
 
+test("one-shot JSON files and stdin preserve text and reject mixed input modes", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "tasknboard-cli-input-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const env = { ...process.env, TASKNBOARD_DB: join(directory, "cli.sqlite"), TASKNBOARD_AGENT_ID: "input-agent", TASKNBOARD_AGENT_ROLE: "architect" };
+  delete env.TASKNBOARD_SERVER_URL;
+  const cli = (args, input = "", environment = env) => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["dist-cli/tasknboard.mjs", ...args], { env: environment, stdio: "pipe" });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (data) => { stdout += data; });
+    child.stderr.setEncoding("utf8").on("data", (data) => { stderr += data; });
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ code, stdout, stderr }));
+    child.stdin.end(input);
+  });
+  const file = join(directory, "args with spaces.json");
+  await writeFile(file, '\uFEFF' + JSON.stringify({ name: "CLI safe input", prefix: "SAFE" }), "utf8");
+  const result = await cli(["create_board", "--file", file]);
+  assert.equal(result.code, 0, result.stderr);
+  const boardId = JSON.parse(result.stdout).id;
+  const text = 'more than >16 submeshes & pipes | caret ^ percent %PATH% "quotes" café 日本語\nsecond line';
+  await writeFile(file, JSON.stringify({ boardId, title: text }), "utf8");
+  const created = await cli(["create_task", "--file", file]);
+  assert.equal(created.code, 0, created.stderr);
+  const task = JSON.parse(created.stdout);
+  assert.equal(task.title, text);
+  const comment = await cli(["add_comment", "--stdin"], '\uFEFF' + JSON.stringify({ taskId: task.id, body: text }));
+  assert.equal(comment.code, 0, comment.stderr);
+  const detail = await cli(["get_task", "--stdin"], JSON.stringify({ id: task.id }));
+  assert.equal(detail.code, 0, detail.stderr);
+  assert.equal(JSON.parse(detail.stdout).events.filter((event) => event.kind === "add_comment").at(-1).body, text);
+  for (const args of [
+    ["create_task", "--file"],
+    ["create_task", "--file", file, "--stdin"],
+    ["create_task", "--stdin", "{}"],
+    ["create_task", "{}", "--file", file],
+    ["create_task", "--file", "--stdin"],
+    ["create_task", "--file", join(directory, "missing.json")],
+  ]) {
+    const failed = await cli(args);
+    assert.equal(failed.code, 1, args.join(" "));
+    assert.equal(JSON.parse(failed.stderr).code, "USAGE");
+    assert.equal(failed.stdout, "");
+  }
+  for (const input of ["", "[]", "{invalid", "{}\n{}"]) {
+    const failed = await cli(["create_task", "--stdin"], input);
+    assert.equal(JSON.parse(failed.stderr).code, "USAGE");
+  }
+  await writeFile(file, JSON.stringify({ boardId, title: "Must not write" }), "utf8");
+  const noActor = { ...env };
+  delete noActor.TASKNBOARD_AGENT_ID;
+  delete noActor.TASKNBOARD_AGENT_ROLE;
+  for (const args of [["create_task", "--file", file], ["create_task", "--stdin"]]) {
+    const failed = await cli(args, JSON.stringify({ boardId, title: "Must not write" }), noActor);
+    assert.equal(JSON.parse(failed.stderr).code, "ACTOR_REQUIRED");
+  }
+  const tasks = await cli(["list_tasks", "--stdin"], JSON.stringify({ boardId }));
+  assert.deepEqual(JSON.parse(tasks.stdout).tasks.map((task) => task.id), [task.id]);
+});
+
 test("one-shot commands print JSON and fail with a JSON error", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "tasknboard-cli-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const env = { ...process.env, TASKNBOARD_DB: join(directory, "cli.sqlite") };
+  const env = { ...process.env, TASKNBOARD_DB: join(directory, "cli.sqlite"), TASKNBOARD_AGENT_ID: "shell-agent", TASKNBOARD_AGENT_ROLE: "architect" };
   delete env.TASKNBOARD_SERVER_URL;
   // Run the executable itself, as the installed `tasknboard` command does.
   // Windows has no shebang: the installed command there calls node.
@@ -366,11 +469,58 @@ test("one-shot commands print JSON and fail with a JSON error", async (t) => {
   assert.ok(boards.boards.some((b) => b.id === createdBoard.id));
   const created = JSON.parse((await cli("create_task", JSON.stringify({ boardId: createdBoard.id, title: "From the shell" }))).stdout);
   assert.equal(created.boardId, createdBoard.id);
+  const detail = JSON.parse((await cli("get_task", JSON.stringify({ id: created.id }))).stdout);
+  assert.equal(detail.events[0].actor, "shell-agent");
+  const aliasDetail = JSON.parse((await cli("get_task", JSON.stringify({ taskId: created.id }))).stdout);
+  assert.equal(aliasDetail.id, created.id);
+  const comment = JSON.parse((await cli("add_comment", JSON.stringify({ taskId: created.id, body: "CLI alias works" }))).stdout);
+  assert.equal(comment.id, created.id);
+  await assert.rejects(cli("claim_task", JSON.stringify({ taskId: created.id })), (error) => {
+    assert.equal(JSON.parse(error.stderr).code, "USAGE");
+    assert.match(JSON.parse(error.stderr).message, /expectedVersion is required.*help claim_task/);
+    return true;
+  });
+  await assert.rejects(cli("get_task", JSON.stringify({ id: created.id, taskId: "ENG-999" })), (error) => {
+    assert.equal(JSON.parse(error.stderr).code, "USAGE");
+    assert.match(JSON.parse(error.stderr).message, /must identify the same task/);
+    return true;
+  });
+  assert.match((await cli("help", "claim_task")).stdout, /expectedVersion.*\n[^]*tasknboard claim_task/);
+  await assert.rejects(cli("get_task", "{}"), (error) => {
+    const failure = JSON.parse(error.stderr);
+    assert.equal(failure.code, "VALIDATION");
+    assert.match(failure.message, /tasknboard help get_task/);
+    return true;
+  });
+  const storedRoleEnv = { ...env };
+  delete storedRoleEnv.TASKNBOARD_AGENT_ROLE;
+  const storedInfo = JSON.parse((await run(process.execPath, ["dist-cli/tasknboard.mjs", "workspace_info"], { env: storedRoleEnv })).stdout);
+  assert.equal(storedInfo.actor.role, "architect");
+  const epic = JSON.parse((await run(process.execPath, ["dist-cli/tasknboard.mjs", "create_epic", JSON.stringify({ boardId: createdBoard.id, title: "Architect plan" })], { env: storedRoleEnv })).stdout);
+  assert.equal(epic.title, "Architect plan");
   const listed = JSON.parse((await cli("list_tasks", JSON.stringify({ boardId: createdBoard.id }))).stdout);
   assert.deepEqual(listed.tasks.map((t) => t.title), ["From the shell"]);
   assert.deepEqual(listed.tasks.map((t) => t.boardId), [createdBoard.id]);
   await assert.rejects(cli("get_task", "{not json"), (error) => {
     assert.equal(error.code, 1);
+    assert.equal(JSON.parse(error.stderr).code, "USAGE");
+    return true;
+  });
+  const scriptEnv = { ...env };
+  delete scriptEnv.TASKNBOARD_AGENT_ID;
+  delete scriptEnv.TASKNBOARD_AGENT_ROLE;
+  for (const command of ["create_task", "create_board", "add_comment", "update_profile"]) {
+    await assert.rejects(run(process.execPath, ["dist-cli/tasknboard.mjs", command, "{}"], { env: scriptEnv }), (error) => {
+      assert.equal(error.code, 1);
+      assert.equal(error.stdout, "");
+      assert.equal(JSON.parse(error.stderr).code, "ACTOR_REQUIRED");
+      return true;
+    });
+  }
+  const humanInfo = JSON.parse((await run(process.execPath, ["dist-cli/tasknboard.mjs", "workspace_info"], { env: scriptEnv })).stdout);
+  assert.equal(humanInfo.actor.kind, "human");
+  assert.deepEqual(JSON.parse((await cli("list_tasks", JSON.stringify({ boardId: createdBoard.id }))).stdout).tasks.map((t) => t.id), [created.id]);
+  await assert.rejects(run(process.execPath, ["dist-cli/tasknboard.mjs", "create_board", "{}"], { env: { ...env, TASKNBOARD_AGENT_ROLE: "admin" } }), (error) => {
     assert.equal(JSON.parse(error.stderr).code, "USAGE");
     return true;
   });

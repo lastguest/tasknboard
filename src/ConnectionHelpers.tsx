@@ -33,10 +33,12 @@ export function ConnectionHelpers({
   const [copied, setCopied] = useState("");
   const [copyError, setCopyError] = useState("");
   const [installing, setInstalling] = useState(false);
-  const valid = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(identity);
   const helper = connectionHelper(client, runtime, identity);
   const chosen = agentClients.find((c) => c.id === client)!;
   const plugin = client === "codex" || client === "claude";
+  const valid = (plugin
+    ? /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/
+    : /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,79}$/).test(identity);
   /** Identities already set up with each CLI. */
   const inUse = (clientId: AgentClient) =>
     Object.entries(settings.info?.agents ?? {})
@@ -171,7 +173,9 @@ export function ConnectionHelpers({
         <p id="agent-identity-help" className="small">
           {valid
             ? "Use a unique identity for each agent that runs at the same time."
-            : "Enter 1–80 letters, numbers, dots, underscores, or hyphens. Start with a letter or number."}
+            : plugin
+              ? "Enter 1–80 letters, numbers, dots, underscores, or hyphens. Plugin identities cannot contain slashes."
+              : "Enter 1–80 letters, numbers, dots, underscores, slashes, or hyphens. Start with a letter or number."}
         </p>
         <ol className="client-steps">
           {helper.steps.map((step) => (

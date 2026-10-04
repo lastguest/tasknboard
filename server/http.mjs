@@ -9,6 +9,7 @@ import { createClaudePlugin } from "./claude-plugin.mjs";
 import { createCodexPlugin } from "./codex-plugin.mjs";
 import { createAgentLauncher } from "./agent-launcher.mjs";
 import { createAgentLogs } from "./agent-logs.mjs";
+import { listMcpConnections, restartMcpConnection } from "./mcp-control.mjs";
 import {
   agentClients,
   agentEvents,
@@ -18,6 +19,7 @@ import {
 } from "./agent-config.mjs";
 import { createGitHub } from "./github.mjs";
 import { createChangeFeed } from "./changes.mjs";
+import { createCommitLinks } from "./commit-links.mjs";
 import { imageDataUrlLimit } from "./domain.mjs";
 import { dbPath, localActor, tokensFromEnvironment } from "./config.mjs";
 const host = process.env.HOST || "127.0.0.1",
@@ -58,6 +60,10 @@ const agentLogs = createAgentLogs({
 store.registerActors(
   Object.keys(tokens).length ? Object.values(tokens) : [localActor],
 );
+const commitLinks = createCommitLinks(store, {
+  onError: (error, repository) => console.error(`Commit scan failed for ${repository}: ${error.message}`),
+});
+commitLinks.start();
 const httpError = (code, message, status) =>
   Object.assign(new Error(message), { code, status });
 /** Agent settings live on this machine, like the plugins that use them. */
@@ -269,6 +275,21 @@ const server = createServer(async (req, res) => {
         }
         return;
       }
+      if (url.pathname === "/api/mcp-status") {
+        if (req.method !== "GET") {
+          json(res, 405, { message: "Use GET" });
+        } else if (actor.kind !== "human") {
+          json(res, 403, {
+            code: "FORBIDDEN",
+            message: "Only a person can view MCP status.",
+          });
+        } else {
+          json(res, 200, Object.keys(tokens).length
+            ? { supported: false, connections: [] }
+            : await listMcpConnections(dbPath));
+        }
+        return;
+      }
       if (req.method !== "POST") {
         json(res, 405, { message: "Use POST" });
         return;
@@ -296,6 +317,21 @@ const server = createServer(async (req, res) => {
         return;
       }
       const name = url.pathname.slice(5);
+      if (name === "mcp-restart") {
+        if (actor.kind !== "human")
+          throw httpError("FORBIDDEN", "Only a person can restart MCP connections.", 403);
+        if (Object.keys(tokens).length)
+          throw httpError("MCP_CONTROL_UNSUPPORTED", "Restart MCP connections from the local TasknBoard app.", 400);
+        if (
+          !args || typeof args !== "object" || Array.isArray(args) ||
+          Object.keys(args).length !== 1 ||
+          typeof args.id !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(args.id)
+        )
+          throw httpError("VALIDATION", "Provide only a valid MCP connection id.", 400);
+        json(res, 200, await restartMcpConnection(dbPath, args.id));
+        return;
+      }
       if (name === "codex-plugin") {
         if (actor.kind !== "human") {
           json(res, 403, {
@@ -360,14 +396,15 @@ const server = createServer(async (req, res) => {
       const result = await github.execute(name, args, actor);
       // Agent events compare the task with how it was before a person's edit.
       const before =
-        actor.kind === "human" && name === "update_task" && !result
+        actor.kind === "human" && ["update_task", "request_changes"].includes(name) && !result
           ? store.execute("get_task", { id: args.id }, actor)
           : null;
       const output = result ?? store.execute(name, args, actor);
       // A person's edits start agents; agents cannot reassign tasks.
       if (actor.kind === "human") {
         if (name === "create_task") launcher.assigned(output);
-        if (name === "update_task") launcher.changed(before, output);
+        if (name === "bulk_create_tasks") for (const task of output.tasks) launcher.assigned(task);
+        if (["update_task", "request_changes"].includes(name)) launcher.changed(before, output);
         if (name === "add_comment") launcher.commented(output, actor, args.body);
       }
       json(res, 200, output);
@@ -428,6 +465,7 @@ const server = createServer(async (req, res) => {
     json(res, e.status || 500, {
       code: e.code || "INTERNAL",
       message: e.status ? e.message : "Unexpected server error",
+      ...(e.status && e.details ? { details: e.details } : {}),
     });
     if (!e.status) console.error(e);
   }
@@ -443,7 +481,8 @@ function stop() {
   stopping = true;
   launcher.stop();
   changes.stop();
-  server.close(() => {
+  server.close(async () => {
+    await commitLinks.stop();
     store.close();
     process.exit(0);
   });

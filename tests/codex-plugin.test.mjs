@@ -58,10 +58,11 @@ test("plugin installs active runtime and identity, retries safely, and preserves
     "--json",
   ]);
   assert.equal(calls[0][2].env.HOME, home);
+  assert.deepEqual(calls[2][1], ["mcp", "remove", "tasknboard"]);
   assert.deepEqual(await plugin.install("codex-2"), result);
   await writeFile(join(directory, "plugin/.mcp.json"), "user edit");
   await assert.rejects(plugin.install("codex-2"), { code: "PLUGIN_CONFLICT" });
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 6);
 });
 
 test("plugin rejects unsupported hosts, invalid identities, missing CLI, and failed installs", async (t) => {

@@ -9,8 +9,8 @@ import type { Actor } from "./types";
  */
 
 // Matches the server's mention syntax (mentionedIdentities in agent-config).
-const mentionable = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
-const beforeCaret = /(^|[^\w@.-])@([a-zA-Z0-9._-]{0,79})$/;
+const mentionable = /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,79}$/;
+const beforeCaret = /(^|[^\w@./-])@([a-zA-Z0-9._/-]{0,79})$/;
 const LIMIT = 8;
 const WIDTH = 280;
 const HEIGHT = LIMIT * 32 + 10;

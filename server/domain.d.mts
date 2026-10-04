@@ -20,6 +20,8 @@ export type Board = {
   prefix: string;
   /** Absolute folder where assigned agents start work; "" means none. */
   repository: string;
+  agentReasoning: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  agentSandbox: "read-only" | "workspace-write" | "danger-full-access";
   /** Retired prefixes whose task keys still resolve on this board. */
   formerPrefixes: string[];
   /** Whether the caller lists this board in the sidebar. Each person sets it. */

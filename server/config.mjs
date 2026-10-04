@@ -7,7 +7,8 @@ export function tokensFromEnvironment() {
     if (
       token.length < 24 ||
       !actor.id ||
-      !["human", "agent"].includes(actor.kind)
+      !["human", "agent"].includes(actor.kind) ||
+      (actor.role !== undefined && !["architect", "worker"].includes(actor.role))
     )
       throw new Error("TASKNBOARD_TOKENS must map tokens (24+ chars) to {id,kind}");
   return records;

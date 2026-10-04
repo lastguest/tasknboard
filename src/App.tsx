@@ -1,8 +1,10 @@
 import { AppVersion } from "./AppUpdates";
 import { ConnectionHelpers } from "./ConnectionHelpers";
 import { AgentLogs } from "./AgentLogs";
+import { McpConnections } from "./McpConnections";
 import {
   AgentSettings,
+  AgentRoleSettings,
   useAgentSettings,
   type AgentSettingsInfo,
 } from "./AgentSettings";
@@ -283,7 +285,7 @@ export default function App() {
       const [next, epicList] = scopedBoardId
         ? await Promise.all([
             loadTasks(scopedBoardId),
-            // Epic names are workspace-wide; task counts use this board.
+            // Each board owns its epics and task counts.
             command<{ epics: Epic[] }>("list_epics", {
               includeArchived: true,
               boardId: scopedBoardId,
@@ -604,8 +606,9 @@ export default function App() {
         : view === "board"
           ? currentBoard?.name
           : viewTitles[view];
-  /** People manage epics and archive tasks; the server enforces both. */
+  /** People review tasks; people and architects manage boards and epics. */
   const isHuman = workspaceInfoLoaded && actor.kind === "human";
+  const canPlan = workspaceInfoLoaded && (isHuman || actor.role === "architect");
   // Logs exist where the desktop app starts agents.
   const [logsAvailable, setLogsAvailable] = useState(false);
   useEffect(() => {
@@ -785,7 +788,7 @@ export default function App() {
               icon: <Icon name="board" size={14} />,
               onSelect: () => openBoardPage(board.id, "board"),
             },
-            ...(isHuman
+            ...(canPlan
               ? [
                   {
                     label: "Edit board",
@@ -820,7 +823,7 @@ export default function App() {
             onSelect: () => selectBoard(board.id),
           })),
         },
-        ...(isHuman
+        ...(canPlan
           ? [
               {
                 items: [
@@ -1392,7 +1395,7 @@ export default function App() {
                       setEditor({ boardId: currentBoard.id, epic: epic.id }),
                   },
                 ]),
-            ...(isHuman && !epic.archived
+            ...(canPlan && !epic.archived
               ? [
                   {
                     label: "Edit epic",
@@ -1452,7 +1455,7 @@ export default function App() {
                   },
                 ]
               : []),
-            ...(view === "epics" && isHuman
+            ...(view === "epics" && canPlan
               ? [
                   {
                     label: "New epic",
@@ -1461,7 +1464,7 @@ export default function App() {
                   },
                 ]
               : []),
-            ...(currentEpic && isHuman && !currentEpic.archived
+            ...(currentEpic && canPlan && !currentEpic.archived
               ? [
                   {
                     label: "Edit epic",
@@ -1677,7 +1680,7 @@ export default function App() {
               selectedBoardId={selectedBoardId}
               page={view}
               collapsed={collapsed}
-              canManage={isHuman}
+              canManage={canPlan}
               onOpen={openBoardPage}
               onCreate={() => setBoardDialog({ board: null })}
               onMenu={boardMenu}
@@ -1688,7 +1691,7 @@ export default function App() {
                 <span className="nav-label" id="epics-label">
                   Epics
                 </span>
-                {isHuman && (
+                {canPlan && (
                   <button
                     type="button"
                     className="icon-button nav-add"
@@ -1955,7 +1958,7 @@ export default function App() {
                   )}
                 </h1>
                 {/* Board actions share the title row so the header doesn't spend a line on them. */}
-                {view === "board" && isHuman && (
+                {view === "board" && canPlan && (
                   <BoardControls
                     canEdit={!!currentBoard}
                     onCreate={() => setBoardDialog({ board: null })}
@@ -2036,7 +2039,7 @@ export default function App() {
             {currentEpic && (
               <EpicSummary
                 epic={currentEpic}
-                canManage={isHuman}
+                canManage={canPlan}
                 onEdit={() => setEpicDialog({ epic: currentEpic })}
               />
             )}
@@ -2089,13 +2092,14 @@ export default function App() {
               <EpicsPage
                 epics={activeEpics}
                 unfiled={tasks.filter((t) => !t.epic).length}
-                canManage={isHuman}
+                canManage={canPlan}
                 onOpen={openEpic}
                 onNew={() => setEpicDialog({ epic: null })}
                 onMenu={epicMenu}
               />
             ) : view === "agents" ? (
               <AgentsPage
+                canEditRoles={actor.kind === "human"}
                 tasks={tasks}
                 agents={agents}
                 onView={(name) => {
@@ -2424,6 +2428,7 @@ export default function App() {
         <EpicEditor
           key={epicDialog.epic?.id ?? "create"}
           epic={epicDialog.epic}
+          boardId={selectedBoardId}
           suggestedColor={epicPalette[epics.length % epicPalette.length].id}
           onClose={() => setEpicDialog(null)}
           onSaved={epicSaved}
@@ -2466,11 +2471,13 @@ function autoStartLabel(info: AgentSettingsInfo, identity: string) {
 }
 
 function AgentsPage({
+  canEditRoles,
   tasks,
   agents,
   onView,
   onMenu,
 }: {
+  canEditRoles: boolean;
   tasks: Task[];
   agents: Set<string>;
   onView: (name: string) => void;
@@ -2571,6 +2578,7 @@ function AgentsPage({
                   onContextMenu={(e) => onMenu(e, name)}
                 >
                   <Assignee name={name} agent />
+                  <AgentRoleSettings identity={name} canEdit={canEditRoles} />
                   <span>{assigned.length} assigned</span>
                   <span>
                     {assigned.filter((t) => t.role === "in_progress").length}{" "}
@@ -2608,6 +2616,7 @@ function AgentsPage({
           </p>
         )}
       </section>
+      <McpConnections />
       <section className="integration" aria-labelledby="mcp-title">
         <h2 id="mcp-title" className="section-title">
           Connect a coding agent

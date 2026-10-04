@@ -97,8 +97,8 @@ of the board. `lane` must be a `todo` lane of that board.
 task's board (`VALIDATION` otherwise). The existing lease and version rules
 apply first. Then:
 
-- An agent can move its claimed task only to a lane with role
-  `in_progress` (`FORBIDDEN` otherwise).
+- An agent can move its claimed task to a lane with role
+  `in_progress` or `done` (`FORBIDDEN` otherwise).
 - A human can move a task to a `done` lane only from a lane with role
   `in_review` or `done` (`INVALID_TRANSITION` otherwise).
 - A move to a lane with role `in_review` or `done` releases the claim.
@@ -112,7 +112,10 @@ apply first. Then:
 lane, and the claim ends.
 
 Agents cannot put a task in an `in_review` lane except through
-`submit_review`. Agents can never put a task in a `done` lane.
+`submit_review`. Agents can complete their claimed task directly with
+`update_task({ id, expectedVersion, patch: { lane } })`. Use the latest
+task version and a `done` lane ID from the task's board. Completion releases
+the claim.
 
 In the task page, **Mark Done** moves a task to the first `done` lane. **Needs
 changes** moves it to the first `in_progress` lane.

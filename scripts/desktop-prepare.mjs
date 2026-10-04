@@ -168,8 +168,9 @@ try {
     sourcemap: false,
   });
   await build({
-    entryPoints: [join(root, "server", "mcp.mjs")],
-    outfile: join(resourcesDir, "mcp.mjs"),
+    entryPoints: [join(root, "server", "mcp.mjs"), join(root, "server", "mcp-worker.mjs")],
+    outdir: resourcesDir,
+    outExtension: { ".js": ".mjs" },
     bundle: true,
     platform: "node",
     format: "esm",

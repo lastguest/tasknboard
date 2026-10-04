@@ -153,6 +153,9 @@ export function createCodexPlugin({
       };
       await invoke(["plugin", "marketplace", "add", directory, "--json"]);
       await invoke(["plugin", "add", `tasknboard@${marketplace}`, "--json"]);
+      // The plugin uses a direct SQLite connection and survives desktop restarts.
+      // Remove the obsolete standalone registration only after the plugin installs.
+      await invoke(["mcp", "remove", "tasknboard"]);
       return { installed: true, marketplace, identity };
     } catch (error) {
       if (error.status) throw error;

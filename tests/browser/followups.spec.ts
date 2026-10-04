@@ -71,9 +71,11 @@ test("Status menu saves and the server rejects an invalid drag", async ({ page }
   const task = await create(`Status ${key()}`);
   await connect(page);
   await search(page).fill(task.id);
-  const status = page.getByLabel(`Status of ${task.id}`);
-  await status.selectOption("LANE-2");
-  await expect(status).toHaveValue("LANE-2");
+  const card = page.locator(".task-card");
+  await expect(card.getByRole("combobox")).toHaveCount(0);
+  await card.click({ button: "right" });
+  await page.getByRole("menu").getByRole("menuitemradio", { name: "In progress", exact: true }).click();
+  await expect(page.locator('section[aria-labelledby="column-LANE-2"] .task-card')).toHaveCount(1);
   await expect(page.getByRole("status").filter({ hasText: `Moved ${task.id}` })).toBeVisible();
   const transfer = await page.evaluateHandle((id) => {
     const data = new DataTransfer();
@@ -82,7 +84,7 @@ test("Status menu saves and the server rejects an invalid drag", async ({ page }
   }, task.id);
   await page.locator('section[aria-labelledby="column-LANE-4"]').dispatchEvent("drop", { dataTransfer: transfer });
   await expect(page.getByRole("alert")).toContainText("must be reviewed before completion");
-  await expect(status).toHaveValue("LANE-2");
+  await expect(page.locator('section[aria-labelledby="column-LANE-2"] .task-card')).toHaveCount(1);
   await page.getByRole("group", { name: "Layout" }).getByRole("button", { name: "List" }).click();
   await page.getByRole("button", { name: `Status of ${task.id}: In progress. Choose status` }).click();
   const picker = page.getByRole("dialog", { name: `Status of ${task.id}` });

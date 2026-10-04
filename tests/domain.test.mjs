@@ -66,7 +66,7 @@ test("claim exclusion, agent ownership, heartbeat and review lifecycle", (t) => 
         {
           id: task.id,
           expectedVersion: task.version,
-          patch: { lane: LANE.done },
+          patch: { lane: LANE.in_review },
         },
         a,
       ),
@@ -92,6 +92,42 @@ test("claim exclusion, agent ownership, heartbeat and review lifecycle", (t) => 
   assert.equal(task.role, "done");
   assert.equal(task.events.length, 5);
 });
+test("an agent completes its claimed task and releases its lease", (t) => {
+  const s = fixture(t);
+  let task = s.make();
+  const complete = (actor, expectedVersion = task.version, patch = { lane: LANE.done }) =>
+    s.execute("update_task", { id: task.id, expectedVersion, patch }, actor);
+  assert.throws(() => complete(a), { code: "LEASE_REQUIRED" });
+  task = s.execute("claim_task", { id: task.id, expectedVersion: task.version }, a);
+  assert.throws(() => complete(b), { code: "LEASE_CONFLICT" });
+  assert.throws(() => complete(a, task.version - 1), { code: "VERSION_CONFLICT" });
+  assert.throws(() => complete(a, task.version, { lane: LANE.done, assignee: b.id }), { code: "FORBIDDEN" });
+  assert.deepEqual(s.execute("get_task", { id: task.id }, human), task);
+  const claimedVersion = task.version;
+  const claimedAssignee = task.assignee;
+  task = complete(a);
+  assert.equal(task.role, "done");
+  assert.equal(task.lane, LANE.done);
+  assert.equal(task.assignee, claimedAssignee);
+  assert.equal(task.lease, null);
+  assert.equal(task.version, claimedVersion + 1);
+  assert.equal(task.events.at(-1).kind, "update_task");
+  assert.equal(task.events.at(-1).actor, a.id);
+  assert.deepEqual(JSON.parse(task.events.at(-1).body), { lane: LANE.done });
+  assert.throws(() => complete(a), { code: "LEASE_REQUIRED" });
+  assert.throws(() => s.execute("heartbeat", { id: task.id, expectedVersion: task.version }, a), { code: "LEASE_REQUIRED" });
+});
+test("an expired claim does not permit an agent to complete a task", (t) => {
+  const s = fixture(t);
+  let task = s.make();
+  task = s.execute("claim_task", { id: task.id, expectedVersion: task.version }, a);
+  s.advance();
+  assert.throws(
+    () => s.execute("update_task", { id: task.id, expectedVersion: task.version, patch: { lane: LANE.done } }, a),
+    { code: "LEASE_REQUIRED" },
+  );
+  assert.deepEqual(s.execute("get_task", { id: task.id }, human), task);
+});
 test("anyone can comment on a task claimed by someone else", (t) => {
   const s = fixture(t);
   let task = s.make();
@@ -107,7 +143,7 @@ test("anyone can comment on a task claimed by someone else", (t) => {
     b,
   );
   assert.equal(task.lease.actor, a.id);
-  assert.equal(task.assignee, a.id);
+  assert.equal(task.assignee, "");
   assert.equal(task.role, "in_progress");
   assert.deepEqual(
     task.events.filter((e) => e.kind === "add_comment").map((e) => e.actor),
@@ -499,7 +535,7 @@ test("stand-up notes preserve claims, validate input and enforce versions/agent 
   );
   assert.deepEqual(task.lease, ownedLease);
   assert.equal(task.role, "in_progress");
-  assert.equal(task.assignee, a.id);
+  assert.equal(task.assignee, "");
   assert.equal(task.standup.blocker, "Needs test credentials");
   assert.equal(task.events.at(-1).kind, "set_standup_notes");
   assert.throws(

@@ -3,6 +3,60 @@ import { command, errorOf } from "./api";
 import { Icon } from "./Icons";
 import { Assignee } from "./Board";
 import { displayName, usePeople } from "./People";
+import type { Actor } from "./types";
+
+/** Humans grant planning access to registered agents. */
+export function AgentRoleSettings({ identity, canEdit }: { identity: string; canEdit: boolean }) {
+  const person = usePeople().get(identity);
+  const currentRole = person?.role === "architect" ? "architect" : "worker";
+  const [role, setRole] = useState<"architect" | "worker">(currentRole);
+  const [savedRole, setSavedRole] = useState(currentRole);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    setRole(currentRole);
+    setSavedRole(currentRole);
+  }, [currentRole]);
+  async function save() {
+    setPending(true);
+    setError("");
+    setNotice("");
+    try {
+      const profile = await command<Actor>("update_profile", { agentId: identity, role });
+      const nextRole = profile.role === "architect" ? "architect" : "worker";
+      setSavedRole(nextRole);
+      setRole(nextRole);
+      setNotice("Role saved.");
+    } catch (e) {
+      setError(errorOf(e).message);
+    } finally {
+      setPending(false);
+    }
+  }
+  return (
+    <div className="agent-role-settings">
+      <span className="small">Current role: {savedRole === "architect" ? "Architect" : "Worker"}</span>
+      {canEdit && person?.kind === "agent" && (
+        <>
+          <label className="field">
+            <span className="field-label">Agent role</span>
+            <select aria-label={`Role for ${identity}`} value={role} disabled={pending}
+              title="Architects can plan tasks, manage boards and epics, and submit reviews without claims."
+              onChange={(e) => { setRole(e.target.value as "architect" | "worker"); setNotice(""); setError(""); }}>
+              <option value="worker">Worker</option>
+              <option value="architect">Architect</option>
+            </select>
+          </label>
+          <button type="button" className="secondary small-button" disabled={pending || role === savedRole}
+            onClick={() => void save()}>{pending ? "Saving…" : "Save role"}</button>
+        </>
+      )}
+      {error && <p className="small inline-error" role="alert">{error}</p>}
+      {notice && <p className="small ok" role="status">{notice}</p>}
+    </div>
+  );
+}
 
 export type AgentClientId = "claude" | "codex" | "opencode" | "pi";
 export type AgentEventId =

@@ -1078,33 +1078,6 @@ footer {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
-.card-bottom .status-select {
-  width: auto;
-  min-width: 0;
-  margin: 0 0 0 auto;
-}
-.card-bottom .status-select select {
-  min-height: 24px;
-  min-width: 0;
-  padding: 0 6px;
-  max-width: 116px;
-  font-size: 11px;
-  background: transparent;
-  border-color: #33363c;
-  color: var(--muted);
-}
-@media (hover: hover) {
-  /* Drag is the pointer path; the menu stays reachable on hover and focus. */
-  .card-bottom .status-select {
-    opacity: 0;
-    transition: opacity 0.12s;
-  }
-  .task-card:hover .status-select,
-  .task-card:focus-within .status-select,
-  .task-card.is-pending .status-select {
-    opacity: 1;
-  }
-}
 .assignee {
   display: inline-flex;
   align-items: center;
@@ -1256,23 +1229,6 @@ footer {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.status-select {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  margin-top: 2px;
-}
-.status-select select {
-  min-height: 32px;
-  padding: 4px 8px;
-  font-size: 12px;
-  background: #191b1e;
-  width: auto;
-  min-width: 140px;
-}
 .moving {
   font-size: 11px;
   color: var(--muted);
@@ -1357,9 +1313,6 @@ footer {
 }
 .list-open:hover {
   text-decoration: underline;
-}
-.task-list .status-select {
-  margin: 0;
 }
 .status-picker-trigger,
 .status-cell {
@@ -2336,7 +2289,7 @@ footer {
 }
 .agent-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1.5fr) repeat(3, minmax(90px, 1fr)) auto;
+  grid-template-columns: minmax(120px, 1fr) minmax(170px, 1.3fr) repeat(3, minmax(70px, .7fr)) auto;
   gap: 14px;
   align-items: center;
   padding: 12px 14px;
@@ -2345,6 +2298,9 @@ footer {
 }
 .agent-row + .agent-row {
   border-top: 1px solid var(--border);
+}
+.agent-row.mcp-connection-row {
+  grid-template-columns: minmax(120px, 1fr) minmax(90px, 1fr) auto;
 }
 .agent-row .assignee {
   font-size: 14px;
@@ -4890,6 +4846,22 @@ footer {
 .sidebar.collapsed .app-version { padding-inline: 0; text-align: center; font-size: 9px; }
 
 /* Agent settings */
+.agent-role-settings {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  align-items: end;
+}
+.agent-role-settings > .small {
+  grid-column: 1 / -1;
+}
+.agent-role-settings .field {
+  margin: 0;
+  min-width: 0;
+}
+.agent-role-settings select {
+  min-width: 0;
+}
 .agent-row-actions {
   display: flex;
   gap: 8px;
@@ -5010,6 +4982,12 @@ footer {
   text-decoration: underline;
 }
 @media (max-width: 720px) {
+  .agent-row.mcp-connection-row {
+    grid-template-columns: 1fr auto;
+  }
+  .mcp-connection-row .agent-row-actions {
+    grid-column: 1 / -1;
+  }
   .agent-settings-grid,
   .env-rows li {
     grid-template-columns: 1fr;

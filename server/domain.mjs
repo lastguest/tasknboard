@@ -162,6 +162,9 @@ const pullRequest = z
 const label = z.string().trim().min(1).max(40);
 const labels = z.array(label)
   .transform((values) => [...new Set(values)]);
+const artifact = z.string().trim().max(1000).refine((value) => value === "" || (/^https?:\/\//.test(value) && z.url().safeParse(value).success) || /^(?:commit:)?[a-f0-9]{7,40}$/i.test(value) || (!/^[a-z]+:/i.test(value) && !/^[\\/]/.test(value) && !value.split(/[\\/]/).includes("..")), "HTTP(S), commit SHA, or repository-relative path required");
+const agentReasoning = z.enum(["minimal", "low", "medium", "high", "xhigh", "max"]);
+const agentSandbox = z.enum(["read-only", "workspace-write", "danger-full-access"]);
 const patch = z
   .object({
     title: text.optional(),
@@ -182,6 +185,9 @@ export const schemas = {
       role: laneRole.optional(),
       lane: laneId.optional(),
       assignee: z.string().max(80).optional(),
+      owner: z.string().max(80).optional(),
+      label: label.optional(),
+      compact: z.boolean().default(false),
       epic: z.union([z.literal("none"), epicId]).optional(),
       boardId: boardId.optional(),
       view: viewId.optional(),
@@ -211,6 +217,7 @@ export const schemas = {
       assignee: z.string().max(80).default(""),
       labels: labels.default([]),
       epic: taskEpic.default(""),
+      blockedBy: z.array(id).max(100).default([]),
     })
     .strict(),
   update_task: z.object({ id, expectedVersion: version, patch }).strict(),
@@ -225,10 +232,14 @@ export const schemas = {
   claim_task: z.object({ id, expectedVersion: version }).strict(),
   heartbeat: z.object({ id, expectedVersion: version }).strict(),
   release_task: z.object({ id, expectedVersion: version }).strict(),
+  delegate_task: z.object({ id, expectedVersion: version, delegatedTo: text }).strict(),
+  request_changes: z.object({ id, expectedVersion: version, reason: z.string().trim().min(1).max(10000) }).strict(),
+  list_notifications: z.object({ after: z.number().int().min(0).default(0), limit: z.number().int().min(1).max(100).default(50) }).strict(),
+  link_commits: z.object({ id, expectedVersion: version, commits: z.array(z.string().regex(/^[a-f0-9]{7,40}$/i)).min(1).max(100) }).strict(),
   add_comment: z
     .object({
       id,
-      expectedVersion: version,
+      expectedVersion: version.optional(),
       body: z.string().trim().min(1).max(10000),
     })
     .strict(),
@@ -237,12 +248,7 @@ export const schemas = {
       id,
       expectedVersion: version,
       summary: z.string().trim().min(1).max(10000),
-      artifactUrl: z
-        .union([
-          z.literal(""),
-          z.url().refine((s) => /^https?:\/\//.test(s), "HTTP(S) URL required"),
-        ])
-        .default(""),
+      artifactUrl: artifact.default(""),
     })
     .strict(),
   archive_task: z.object({ id, expectedVersion: version }).strict(),
@@ -269,6 +275,8 @@ export const schemas = {
     .strict(),
   update_profile: z
     .object({
+      agentId: z.string().trim().min(1).max(200).optional(),
+      role: z.enum(["architect", "worker"]).optional(),
       name: z.string().trim().max(80).optional(),
       // A small, already-resized picture. Only raster data URLs are accepted.
       avatar: z
@@ -293,7 +301,9 @@ export const schemas = {
         .optional(),
     })
     .strict()
-    .refine((v) => Object.keys(v).length > 0, "Empty profile"),
+    .refine((v) => Object.keys(v).length > 0, "Empty profile")
+    .refine((v) => (v.agentId === undefined) === (v.role === undefined), "agentId and role must be set together")
+    .refine((v) => v.agentId === undefined || Object.keys(v).every((key) => ["agentId", "role"].includes(key)), "Agent role updates accept only agentId and role"),
   // Images pasted into Markdown descriptions. Raster only; SVG can carry script.
   upload_image: z
     .object({
@@ -314,6 +324,7 @@ export const schemas = {
     .strict(),
   create_epic: z
     .object({
+      boardId: boardId.optional(),
       title: epicTitle,
       description: long.default(""),
       color: epicColor.optional(),
@@ -375,6 +386,8 @@ export const schemas = {
       prefix: keyPrefix,
       description: boardDescription.default(""),
       repository: boardRepository.default(""),
+      agentReasoning: agentReasoning.default("medium"),
+      agentSandbox: agentSandbox.default("workspace-write"),
     })
     .strict(),
   update_board: z
@@ -387,6 +400,8 @@ export const schemas = {
           prefix: keyPrefix.optional(),
           description: boardDescription.optional(),
           repository: boardRepository.optional(),
+          agentReasoning: agentReasoning.optional(),
+          agentSandbox: agentSandbox.optional(),
         })
         .strict()
         .refine((v) => Object.keys(v).length > 0, "Empty patch"),
@@ -430,13 +445,16 @@ export const schemas = {
   workspace_info: z.object({}).strict(),
   export_workspace: z.object({}).strict(),
 };
+schemas.bulk_create_tasks = z.object({ tasks: z.array(schemas.create_task).min(1).max(100) }).strict();
+schemas.bulk_move_tasks = z.object({ tasks: z.array(z.object({ id, expectedVersion: version }).strict()).min(1).max(100), lane: laneId }).strict();
 export class DomainError extends Error {
-  constructor(code, message, status = 409) {
+  constructor(code, message, status = 409, details) {
     super(message);
     this.code = code;
     this.status = status;
+    if (details !== undefined) this.details = details;
   }
 }
-export const fail = (code, message, status) => {
-  throw new DomainError(code, message, status);
+export const fail = (code, message, status, details) => {
+  throw new DomainError(code, message, status, details);
 };

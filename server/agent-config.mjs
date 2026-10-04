@@ -37,9 +37,14 @@ export const agentClients = {
     model: { hint: "A model ID such as gpt-5-codex." },
     profile: { label: "Profile", flag: "--profile", hint: "A profile from ~/.codex/config.toml." },
     // The prompt is the last argument, after any extra arguments.
-    args: ({ folder, model, profile }) => [
+    args: ({ folder, model, profile, reasoning = "medium", sandbox = "workspace-write" }) => [
       "exec",
-      "--dangerously-bypass-approvals-and-sandbox",
+      "--sandbox",
+      sandbox,
+      "-c",
+      'approval_policy="never"',
+      "-c",
+      `model_reasoning_effort="${reasoning}"`,
       "--skip-git-repo-check",
       "-C",
       folder,
@@ -94,7 +99,10 @@ export const agentEvents = [
       "A person assigned task {{task}} to you and started you to work on it now.",
       "Call get_task for {{task}}, then claim_task with its version. Do the work in this folder.",
       "Call heartbeat before the 15-minute lease expires, and add_comment to record progress.",
-      "When the acceptance criteria pass, call submit_review with a summary of the change and how you checked it.",
+      "When the acceptance criteria pass, record the change and checks with add_comment.",
+      "To complete the task directly, call list_boards for the board's done lane ID.",
+      "Call update_task with the latest expectedVersion and patch.lane set to that ID.",
+      "Use submit_review with a summary when human review is needed.",
       "If you cannot finish, add_comment with the reason, then release_task.",
     ].join("\n"),
   },
@@ -117,7 +125,10 @@ export const agentEvents = [
       "A reviewer sent task {{task}} back to you and asked for changes.",
       "Call get_task for {{task}} and read the review and the latest comments to find what to change, then claim_task with its version.",
       "Make the changes in this folder. Call heartbeat before the 15-minute lease expires.",
-      "When they are done, call submit_review with what changed since the last review.",
+      "When the acceptance criteria pass, record the changes and checks with add_comment.",
+      "To complete the task directly, call list_boards for the board's done lane ID.",
+      "Call update_task with the latest expectedVersion and patch.lane set to that ID.",
+      "Use submit_review with what changed since the last review when human review is needed.",
       "If you cannot finish, add_comment with the reason, then release_task.",
     ].join("\n"),
   },
@@ -282,8 +293,11 @@ export const renderPrompt = (template, values) =>
 export function mentionedIdentities(body) {
   const found = new Set();
   for (const match of String(body).matchAll(
-    /(^|[^\w@.-])@([a-zA-Z0-9][a-zA-Z0-9._-]{0,79})/g,
-  ))
-    found.add(match[2].replace(/[.]+$/, ""));
+    /(^|[^\w@./-])@([a-zA-Z0-9][a-zA-Z0-9._/-]{0,79})(?![a-zA-Z0-9._/-])/g,
+  )) {
+    const identity = match[2].replace(/[.]+$/, "");
+    if (/^[a-zA-Z0-9][a-zA-Z0-9._-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9._-]*)*$/.test(identity))
+      found.add(identity);
+  }
   return [...found];
 }

@@ -39,13 +39,15 @@ Task text is stripped of control characters before it reaches the terminal.
 ## Agent lifecycle
 
 List → get → claim (expected version, 15-minute lease) → heartbeat → update /
-comment → submit_review (summary + artifact URL) → human review → done.
+comment → update_task (done lane), or submit_review (summary + artifact URL)
+→ human review → done.
 Each board has its own [lanes](contracts/lanes.md). The flow reads lane roles
 (todo, in_progress, in_review, done), not lane names.
 Claim is atomic inside BEGIN IMMEDIATE. Every mutation increments the task
 version. The actor is derived from configuration/authentication, not a tool
 argument. An agent can only edit a task with its own unexpired lease. A review
-submission releases the lease. Agents cannot mark work done. Human writes are
+submission or direct completion releases the lease. Agents can move their
+claimed task to a done lane of its board with `update_task`. Human writes are
 also blocked by another actor's active lease, except the narrowly scoped human
 `set_standup_notes` command, which annotates without changing execution ownership. Expired leases can be reclaimed.
 Heartbeat is a task write: use the returned version in your next command.

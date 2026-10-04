@@ -60,17 +60,21 @@ export type Task = {
   version: number;
   commentCount: number;
   lease: null | { actor: string; expiresAt: number };
+  delegatedTo?: string;
+  delegatedBy?: string;
   updatedAt: string;
   standup?: { highlight: string; blocker: string };
   review?: { summary: string; artifactUrl: string; actor: string };
   /** Absent until a pull request is linked. */
   pullRequests?: TaskPullRequest[];
+  commits?: string[];
   /** Present on `get_task` and write results, not on `list_tasks`. */
   links?: TaskLink[];
   events?: TaskEvent[];
 };
 export type Epic = {
   id: string;
+  boardId?: string;
   title: string;
   description: string;
   /** A palette name, or a custom "#rrggbb". */
@@ -114,6 +118,7 @@ export type SavedView = {
 export type Actor = {
   id: string;
   kind: "human" | "agent";
+  role?: "architect" | "worker";
   /** Optional profile; empty means "show the ID". */
   name?: string;
   /** A small raster data URL, or empty for initials. */
@@ -134,6 +139,8 @@ export type BoardRecord = {
   description: string;
   /** Absolute folder where agents assigned a task on this board start work; "" means none. */
   repository: string;
+  agentReasoning?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  agentSandbox?: "read-only" | "workspace-write" | "danger-full-access";
   /** Retired prefixes whose task keys still resolve on this board. */
   formerPrefixes: string[];
   /** Whether the caller lists this board in the sidebar. Each person sets it. */
@@ -213,7 +220,7 @@ export function labelTone(label: string) {
 export const standupNotes = (task: Task, role: LaneRole = task.role) =>
   role === "done" ? undefined : task.standup;
 
-/** The server only accepts a done lane for reviewed work. */
+/** Human moves to a done lane require reviewed work. */
 export const doneLocked = (r: LaneRole) => r !== "in_review" && r !== "done";
 
 /** Tasks in an epic and how many are Done. */

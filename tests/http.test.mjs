@@ -144,11 +144,19 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   assert.equal(JSON.parse(remoteInfo.content[0].text).actor.id, "remote-agent");
   const claimed = await client.callTool({
     name: "claim_task",
-    arguments: { id: task.id, expectedVersion: 1 },
+    arguments: { id: task.id, expectedVersion: 1, verbose: true },
   });
   assert.notEqual(claimed.isError, true);
   task = JSON.parse(claimed.content[0].text);
-  assert.equal(task.assignee, "remote-agent");
+  assert.equal(task.assignee, "");
+  assert.equal(task.lease.actor, "remote-agent");
+  const leaseConflict = await post("claim_task", { id: task.id, expectedVersion: task.version });
+  assert.equal(leaseConflict.status, 409);
+  const leaseError = await leaseConflict.json();
+  assert.equal(leaseError.code, "LEASE_CONFLICT");
+  assert.equal(leaseError.details.lease.actor, "remote-agent");
+  assert.equal(leaseError.details.lease.expiresAt, task.lease.expiresAt);
+  assert.ok(leaseError.details.lease.remainingMs > 0);
   assert.deepEqual(task.labels, ["Product", "UX"]);
   assert.equal(
     (
@@ -178,6 +186,27 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   });
   assert.equal(completed.status, 200);
   assert.equal((await completed.json()).role, "done");
+  let direct = await (await post("create_task", { boardId: info.boards[0].id, title: "Direct remote completion" })).json();
+  const directClaim = await client.callTool({
+    name: "claim_task",
+    arguments: { id: direct.id, expectedVersion: direct.version, verbose: true },
+  });
+  assert.notEqual(directClaim.isError, true);
+  direct = JSON.parse(directClaim.content[0].text);
+  const directVersion = direct.version;
+  const claimedAssignee = direct.assignee;
+  const directCompletion = await client.callTool({
+    name: "update_task",
+    arguments: { id: direct.id, expectedVersion: direct.version, patch: { lane: "LANE-4" }, verbose: true },
+  });
+  assert.notEqual(directCompletion.isError, true);
+  direct = JSON.parse(directCompletion.content[0].text);
+  assert.equal(direct.role, "done");
+  assert.equal(direct.lease, null);
+  assert.equal(direct.assignee, claimedAssignee);
+  assert.equal(direct.version, directVersion + 1);
+  const savedDirect = await (await post("get_task", { id: direct.id })).json();
+  assert.deepEqual(savedDirect, direct);
   // Images exceed the ordinary command size and are served as inert files.
   const bigPng = Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),

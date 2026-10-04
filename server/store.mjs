@@ -45,8 +45,11 @@ export function createStore(path, { clock = Date.now } = {}) {
  CREATE INDEX IF NOT EXISTS events_by_task ON events(task_id, sequence);
  INSERT OR IGNORE INTO migrations VALUES(1);
  INSERT OR IGNORE INTO migrations VALUES(2); COMMIT;`);
+  let transactionDepth = 0;
   const transaction = (fn) => {
+    if (transactionDepth) return fn();
     db.exec("BEGIN IMMEDIATE");
+    transactionDepth++;
     try {
       const result = fn();
       db.exec("COMMIT");
@@ -54,7 +57,7 @@ export function createStore(path, { clock = Date.now } = {}) {
     } catch (e) {
       db.exec("ROLLBACK");
       throw e;
-    }
+    } finally { transactionDepth--; }
   };
   const saveImage = (mime, bytes, actor) => {
     const id = randomBytes(16).toString("hex");
@@ -307,6 +310,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       db.prepare("INSERT INTO migrations VALUES(18)").run();
     }
   });
+  if (!db.prepare("PRAGMA table_info(actors)").all().some((column) => column.name === "role")) db.exec("ALTER TABLE actors ADD COLUMN role TEXT NOT NULL DEFAULT 'worker'");
   const readTransaction = (fn) => {
     db.exec("BEGIN");
     try {
@@ -587,16 +591,17 @@ export function createStore(path, { clock = Date.now } = {}) {
     return epics.map((e) => ({ ...e, counts: counts.get(e.id) }));
   };
   /** A task may join only an existing, active epic. Returns its current key. */
-  const assignableEpic = (id) => {
+  const assignableEpic = (id, boardId) => {
     if (!id) return "";
     const epic = getEpic(id);
+    if (epic.boardId && boardId && epic.boardId !== boardId) fail("VALIDATION", "epic: Choose an epic of this board", 400);
     if (epic.archived)
       fail("EPIC_ARCHIVED", `${epic.title} is archived; choose another epic`);
     return epic.id;
   };
   const humanOnly = (identity, action, subject = "epics") => {
-    if (identity.kind !== "human")
-      fail("FORBIDDEN", `Only humans may ${action} ${subject}`, 403);
+    if (identity.kind !== "human" && identity.role !== "architect")
+      fail("FORBIDDEN", `Only humans and architects may ${action} ${subject}`, 403);
   };
   const avatarUrl = (email) =>
     email
@@ -607,6 +612,7 @@ export function createStore(path, { clock = Date.now } = {}) {
   const publicActor = (row, includeEmail = false) => ({
     id: row.id,
     kind: row.kind,
+    ...(row.role === "architect" ? { role: row.role } : {}),
     name: row.name,
     avatar: row.avatar,
     useGravatar: Boolean(row.use_gravatar),
@@ -616,14 +622,14 @@ export function createStore(path, { clock = Date.now } = {}) {
   const actorRoster = () =>
     db
       .prepare(
-        "SELECT id, kind, name, avatar, gravatar_email, use_gravatar FROM actors ORDER BY id",
+        "SELECT id, kind, role, name, avatar, gravatar_email, use_gravatar FROM actors ORDER BY id",
       )
       .all()
       .map((row) => publicActor(row));
   const profileOf = (id) => {
     const row = db
       .prepare(
-        "SELECT id, kind, name, avatar, gravatar_email, use_gravatar FROM actors WHERE id=?",
+        "SELECT id, kind, role, name, avatar, gravatar_email, use_gravatar FROM actors WHERE id=?",
       )
       .get(id);
     return row ? publicActor(row, true) : undefined;
@@ -642,6 +648,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         actor.id,
         actor.kind,
       );
+    db.prepare("UPDATE actors SET role=? WHERE id=?").run(actor.role, actor.id);
   };
   const validActor = (actor) => {
     if (
@@ -650,7 +657,9 @@ export function createStore(path, { clock = Date.now } = {}) {
       !["human", "agent"].includes(actor.kind)
     )
       fail("UNAUTHORIZED", "Valid actor required", 401);
-    return { id: actor.id, kind: actor.kind };
+    if (actor.role !== undefined && !["architect", "worker"].includes(actor.role)) fail("UNAUTHORIZED", "Valid actor role required", 401);
+    const stored = db.prepare("SELECT role FROM actors WHERE id=?").get(actor.id);
+    return { id: actor.id, kind: actor.kind, role: actor.role ?? stored?.role ?? "worker" };
   };
   const registerActors = (actors) => {
     const identities = actors.map(validActor);
@@ -666,7 +675,10 @@ export function createStore(path, { clock = Date.now } = {}) {
         );
       if (!existing) needsWrite = true;
     }
-    if (!needsWrite) return;
+    if (!needsWrite) {
+      for (const identity of identities) db.prepare("UPDATE actors SET role=? WHERE id=?").run(identity.role, identity.id);
+      return;
+    }
     transaction(() => {
       for (const identity of identities) addActor(identity);
     });
@@ -813,6 +825,16 @@ export function createStore(path, { clock = Date.now } = {}) {
     return { items, unread, cursor };
   };
   const active = (t) => t.lease && t.lease.expiresAt > clock();
+  const leaseFailure = (code, message, t) => {
+    const now = clock();
+    const expiresAt = t.lease?.expiresAt ?? null;
+    const remainingMs = expiresAt === null ? 0 : expiresAt - now;
+    const lease = { actor: t.lease?.actor ?? null, expiresAt, remainingMs, now, active: expiresAt !== null && remainingMs > 0 };
+    const state = expiresAt === null
+      ? `No lease exists; now=${now}`
+      : `Lease holder=${lease.actor}; expiresAt=${expiresAt}; now=${now}; remainingMs=${remainingMs}`;
+    fail(code, `${message}. ${state}`, 409, { lease });
+  };
   /**
    * Stores image data embedded in any Markdown text of a command, so tasks,
    * comments and their history keep only /files/ links. If the command then
@@ -864,6 +886,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         400,
       );
     const p = parsed.data;
+    if (["bulk_create_tasks", "bulk_move_tasks"].includes(command)) return transaction(() => ({ tasks: p.tasks.map((task) => run(command === "bulk_create_tasks" ? "create_task" : "update_task", command === "bulk_create_tasks" ? task : { ...task, patch: { lane: p.lane } }, identity)) }));
     if (command === "list_boards")
       return readTransaction(() => ({ boards: boardsFor(identity, allBoards()) }));
     if (command === "create_board")
@@ -878,6 +901,8 @@ export function createStore(path, { clock = Date.now } = {}) {
           prefix: p.prefix,
           description: p.description,
           repository: p.repository,
+          agentReasoning: p.agentReasoning,
+          agentSandbox: p.agentSandbox,
           version: 1,
           createdAt: now,
           updatedAt: now,
@@ -1022,6 +1047,14 @@ export function createStore(path, { clock = Date.now } = {}) {
       };
     if (command === "update_profile")
       return transaction(() => {
+        if (p.agentId !== undefined) {
+          if (identity.kind !== "human") fail("FORBIDDEN", "Only humans can change agent roles", 403);
+          const target = profileOf(p.agentId);
+          if (!target) fail("NOT_FOUND", "Agent not found", 404);
+          if (target.kind !== "agent") fail("VALIDATION", "agentId: Choose an agent", 400);
+          db.prepare("UPDATE actors SET role=? WHERE id=?").run(p.role, p.agentId);
+          return profileOf(p.agentId);
+        }
         // Every actor edits only its own profile; the ID never changes.
         if (p.name !== undefined)
           db.prepare("UPDATE actors SET name=? WHERE id=?").run(
@@ -1080,7 +1113,9 @@ export function createStore(path, { clock = Date.now } = {}) {
                 .includes(q)) &&
             (!p.role || t.role === p.role) &&
             (!p.lane || t.lane === p.lane) &&
-            (!p.assignee || t.assignee === p.assignee) &&
+            (p.assignee === undefined || t.assignee === p.assignee) &&
+            (p.owner === undefined || t.assignee === p.owner) &&
+            (!p.label || t.labels.includes(p.label)) &&
             (!p.boardId || t.boardId === p.boardId) &&
             (!epic || (t.epic || "none") === epic) &&
             (!view || taskMatchesView(t, view.filters, identity.id)),
@@ -1088,7 +1123,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         const page = rows.slice(p.offset, p.offset + p.limit);
         const counts = commentCounts(page.map((t) => t.id));
         return {
-          tasks: page.map((t) => withCommentCount(t, counts.get(t.id) ?? 0)),
+          tasks: page.map((t) => p.compact ? { id: t.id, title: t.title, version: t.version, lane: t.lane, role: t.role, assignee: t.assignee, labels: t.labels, delegatedTo: t.delegatedTo ?? "" } : withCommentCount(t, counts.get(t.id) ?? 0)),
           total: rows.length,
         };
       });
@@ -1143,6 +1178,23 @@ export function createStore(path, { clock = Date.now } = {}) {
           }),
         };
       });
+    if (command === "list_notifications") return readTransaction(() => {
+      const items = db.prepare(`SELECT e.sequence, e.task_id AS taskId, e.actor, e.kind, e.body, e.created_at AS createdAt, t.data
+        FROM events e JOIN tasks t ON json_extract(t.data, '$.id')=e.task_id
+        JOIN actors a ON a.id=e.actor
+        WHERE e.sequence>? AND a.kind='human' AND e.actor<>? AND e.kind IN ('add_comment','request_changes','update_task') ORDER BY e.sequence`)
+        .all(p.after, identity.id).filter((row) => {
+          const task = JSON.parse(row.data);
+          if (row.kind === "update_task") {
+            const target = JSON.parse(row.body).lane;
+            const role = target && laneRoleMap().get(target);
+            if (role !== "done") return false;
+          }
+          const creator = task.creator ?? db.prepare("SELECT actor FROM events WHERE task_id=? AND kind='created' ORDER BY sequence LIMIT 1").get(task.id)?.actor;
+          return identity.role === "architect" || [creator, task.assignee, task.delegatedBy, task.delegatedTo].includes(identity.id);
+        }).slice(0, p.limit).map(({ data, ...row }) => row);
+      return { items, cursor: items.at(-1)?.sequence ?? p.after };
+    });
     if (command === "list_inbox")
       return readTransaction(() => {
         const { items, unread } = inbox(identity, p.limit);
@@ -1167,7 +1219,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         const tasks = all().filter((task) => !p.boardId || task.boardId === p.boardId);
         return {
           epics: withCounts(
-            allEpics().filter((e) => p.includeArchived || !e.archived),
+            allEpics().filter((e) => (p.includeArchived || !e.archived) && (!p.boardId || e.boardId === p.boardId || (!e.boardId && tasks.some((task) => task.epic === e.id)))),
             tasks,
           ),
         };
@@ -1307,11 +1359,13 @@ export function createStore(path, { clock = Date.now } = {}) {
     if (command === "create_epic")
       return transaction(() => {
         humanOnly(identity, "create");
+        if (p.boardId) getBoard(p.boardId);
         const result = db.prepare("INSERT INTO epics(data) VALUES('{}')").run();
         const now = new Date(clock()).toISOString();
         const epic = {
           id: `EPIC-${result.lastInsertRowid}`,
           title: p.title,
+          boardId: p.boardId ?? "",
           description: p.description,
           // Unless chosen, rotate through the palette in creation order.
           color:
@@ -1412,34 +1466,47 @@ export function createStore(path, { clock = Date.now } = {}) {
       if (command === "create_task") {
         const board = getBoard(p.boardId);
         const nextNumber = nextTaskNumber(board.id);
-        const epic = assignableEpic(p.epic);
+        const epic = assignableEpic(p.epic, board.id);
         const lane = p.lane ? getLane(p.lane) : null;
-        if (lane && (lane.boardId !== board.id || lane.role !== "todo"))
-          fail("VALIDATION", `lane: Choose a todo lane of ${board.name}`, 400);
+        if (lane && (lane.boardId !== board.id))
+          fail("VALIDATION", `lane: Choose a lane of ${board.name}`, 400);
         const result = db.prepare("INSERT INTO tasks(data) VALUES('{}')").run();
         const now = new Date(clock()).toISOString();
+        const { blockedBy, ...fields } = p;
         const t = {
-          ...p,
+          ...fields,
           epic,
           id: taskKey(board, nextNumber),
           lane: lane?.id ?? firstLane(board.id, "todo"),
           version: 1,
           createdAt: now,
           updatedAt: now,
+          creator: identity.id,
           lease: null,
+          delegatedTo: "",
           archived: false,
         };
         db.prepare("UPDATE tasks SET data=? WHERE number=?").run(
           JSON.stringify(t),
           result.lastInsertRowid,
         );
+        for (const target of new Set(blockedBy)) {
+          const blocker = get(target);
+          if (blocker.archived) fail("ARCHIVED", `${blocker.id} is archived`);
+          db.prepare("INSERT INTO task_links(from_number,to_number,kind) VALUES(?,?,?)").run(taskNumber(blocker.id), taskNumber(t.id), "blocks");
+          event(blocker.id, identity, "link_task", JSON.stringify({ type: "blocks", target: t.id }));
+        }
         event(t.id, identity, "created");
         return detail(t);
       }
       const t = get(p.id);
       let link;
       if (t.archived) fail("ARCHIVED", "Task is archived");
-      if (t.version !== p.expectedVersion)
+      // An owned active claim is a read-only retry, even with a stale version.
+      // All commands that change task data still require the current version.
+      if (command === "claim_task" && active(t) && t.lease.actor === identity.id)
+        return detail(t);
+      if ((command !== "add_comment" || p.expectedVersion !== undefined) && t.version !== p.expectedVersion)
         fail(
           "VERSION_CONFLICT",
           `Task changed. Read it again. Current version: ${t.version}`,
@@ -1450,7 +1517,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         t.standup = { highlight: p.highlight, blocker: p.blocker };
       } else if (command === "claim_task") {
         if (active(t))
-          fail("LEASE_CONFLICT", `Task is claimed by ${t.lease.actor}`);
+          leaseFailure("LEASE_CONFLICT", `Task is claimed by ${t.lease.actor}`, t);
         const role = getLane(t.lane).role;
         if (!["todo", "in_progress"].includes(role))
           fail(
@@ -1458,21 +1525,23 @@ export function createStore(path, { clock = Date.now } = {}) {
             "Only tasks in a todo or in_progress lane can be claimed",
           );
         t.lease = { actor: identity.id, expiresAt: clock() + 900000 };
-        t.assignee = identity.id;
         if (role === "todo") t.lane = firstLane(t.boardId, "in_progress");
       } else if (command === "add_comment") {
         // Anyone may reply, claimed or not; the comment changes no task field.
       } else {
-        if (active(t) && t.lease.actor !== identity.id)
-          fail("LEASE_CONFLICT", `Task is claimed by ${t.lease.actor}`);
+        const planner = identity.role === "architect";
+        const creator = t.creator ?? db.prepare("SELECT actor FROM events WHERE task_id=? AND kind='created' ORDER BY sequence LIMIT 1").get(t.id)?.actor;
+        const creatorEvidence = ["submit_review", "link_commits"].includes(command) && creator === identity.id;
+        if (!planner && !creatorEvidence && active(t) && t.lease.actor !== identity.id)
+          leaseFailure("LEASE_CONFLICT", `Task is claimed by ${t.lease.actor}`, t);
         if (
-          identity.kind === "agent" &&
+          identity.kind === "agent" && !planner && !creatorEvidence && command !== "delegate_task" &&
           (!active(t) || t.lease.actor !== identity.id)
         )
-          fail("LEASE_REQUIRED", "Claim this task before changing it");
+          leaseFailure("LEASE_REQUIRED", "Claim this task before changing it", t);
         if (command === "heartbeat" || command === "release_task") {
           if (!active(t) || t.lease.actor !== identity.id)
-            fail("LEASE_REQUIRED", "An active owned claim is required");
+            leaseFailure("LEASE_REQUIRED", "An active owned claim is required", t);
           if (command === "heartbeat") t.lease.expiresAt = clock() + 900000;
           else t.lease = null;
         }
@@ -1481,16 +1550,17 @@ export function createStore(path, { clock = Date.now } = {}) {
           if (target && target.boardId !== t.boardId)
             fail("VALIDATION", "lane: Choose a lane of this task's board", 400);
           if (
-            identity.kind === "agent" &&
+            identity.kind === "agent" && !planner &&
             (p.patch.assignee !== undefined ||
-              (target && target.role !== "in_progress"))
+              (target && !["in_progress", "done"].includes(target.role)))
           )
             fail(
               "FORBIDDEN",
-              "Agents use submit_review; reassignment and completion require a human",
+              "Agents cannot reassign tasks; use submit_review for review or update_task for completion",
               403,
             );
           if (
+            identity.kind === "human" &&
             target?.role === "done" &&
             !["in_review", "done"].includes(getLane(t.lane).role)
           )
@@ -1500,28 +1570,47 @@ export function createStore(path, { clock = Date.now } = {}) {
             );
           if (p.patch.epic !== undefined) {
             const epic = p.patch.epic && getEpic(p.patch.epic).id;
-            if (epic !== (t.epic ?? "")) assignableEpic(epic);
+            if (epic !== (t.epic ?? "")) assignableEpic(epic, t.boardId);
             p.patch.epic = epic;
           }
           Object.assign(t, p.patch);
-          if (["in_review", "done"].includes(getLane(t.lane).role)) t.lease = null;
+          if (["in_review", "done"].includes(getLane(t.lane).role)) { t.lease = null; t.delegatedTo = ""; }
         }
         if (command === "set_standup_notes") {
           t.standup = { highlight: p.highlight, blocker: p.blocker };
         }
         if (command === "submit_review") {
-          if (getLane(t.lane).role !== "in_progress")
+          if (!["todo", "in_progress"].includes(getLane(t.lane).role))
             fail(
               "INVALID_TRANSITION",
               "Only tasks in an in_progress lane can be submitted",
             );
           t.lane = firstLane(t.boardId, "in_review");
           t.lease = null;
+          t.delegatedTo = "";
           t.review = {
             summary: p.summary,
             artifactUrl: p.artifactUrl,
             actor: identity.id,
           };
+        }
+        if (command === "delegate_task") {
+          if (!["todo", "in_progress"].includes(getLane(t.lane).role)) fail("INVALID_TRANSITION", "Only open tasks can be delegated");
+          t.delegatedTo = p.delegatedTo;
+          t.delegatedBy = identity.id;
+          t.lane = firstLane(t.boardId, "in_progress");
+          t.lease = null;
+        }
+        if (command === "request_changes") {
+          if (identity.kind !== "human" && !planner) fail("FORBIDDEN", "Human or architect access required", 403);
+          if (getLane(t.lane).role !== "in_review") fail("INVALID_TRANSITION", "Only review tasks accept changes requests");
+          t.lane = firstLane(t.boardId, "in_progress");
+          t.lease = null;
+          t.changeRequest = { reason: p.reason, actor: identity.id };
+        }
+        if (command === "link_commits") {
+          t.commits = [...new Set([...(t.commits ?? []), ...p.commits.map((sha) => sha.toLowerCase())])];
+          link = { commits: p.commits };
         }
         if (command === "link_task" || command === "unlink_task") {
           const other = get(p.target);
@@ -1613,7 +1702,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         t.id,
         identity,
         command,
-        p.body ??
+        p.body ?? p.reason ?? (command === "delegate_task" ? JSON.stringify({ delegatedTo: p.delegatedTo }) : undefined) ??
           (command === "submit_review"
             ? JSON.stringify(t.review)
             : command === "set_standup_notes"
@@ -1668,6 +1757,7 @@ export function createStore(path, { clock = Date.now } = {}) {
     });
   return {
     execute,
+    boards: allBoards,
     registerActors,
     recordEvent,
     image,

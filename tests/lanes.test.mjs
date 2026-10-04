@@ -164,10 +164,8 @@ test("lane roles keep the claim flow and the human review gate", (t) => {
   let task = s.execute("create_task", { boardId: "BOARD-1", title: "Ready work", lane: ready }, human);
   assert.equal(task.lane, ready);
   assert.equal(task.role, "todo");
-  assert.throws(
-    () => s.execute("create_task", { boardId: "BOARD-1", title: "Late", lane: s.lane("Done") }, human),
-    { code: "VALIDATION" },
-  );
+  const imported = s.execute("create_task", { boardId: "BOARD-1", title: "Late", lane: s.lane("Done") }, human);
+  assert.equal(imported.role, "done");
 
   // A claim moves todo work to the leftmost in_progress lane.
   task = s.execute("claim_task", { id: task.id, expectedVersion: task.version }, agent);
@@ -175,7 +173,7 @@ test("lane roles keep the claim flow and the human review gate", (t) => {
   assert.equal(task.role, "in_progress");
   task = s.execute("update_task", { id: task.id, expectedVersion: task.version, patch: { lane: s.lane("Testing") } }, agent);
   assert.equal(task.lease.actor, "bot");
-  for (const name of ["Backlog", "In review", "Done"])
+  for (const name of ["Backlog", "In review"])
     assert.throws(
       () => s.execute("update_task", { id: task.id, expectedVersion: task.version, patch: { lane: s.lane(name) } }, agent),
       { code: "FORBIDDEN" },
@@ -194,7 +192,7 @@ test("lane roles keep the claim flow and the human review gate", (t) => {
     { code: "INVALID_TRANSITION" },
   );
 
-  // Only a reviewed task reaches a done lane, and only through a person.
+  // Humans must send a task to review before they move it to a done lane.
   let fresh = s.make("Unreviewed");
   assert.throws(
     () => s.execute("update_task", { id: fresh.id, expectedVersion: fresh.version, patch: { lane: s.lane("Done") } }, human),
@@ -208,7 +206,7 @@ test("lane roles keep the claim flow and the human review gate", (t) => {
 
   // Filters and counts read roles.
   const ids = (args) => s.execute("list_tasks", args, human).tasks.map((x) => x.id);
-  assert.deepEqual(ids({ role: "done" }), [task.id]);
+  assert.deepEqual(ids({ role: "done" }), [imported.id, task.id]);
   assert.deepEqual(ids({ lane: s.lane("Backlog") }), [fresh.id]);
   assert.equal(s.board().inProgress, 0);
   fresh = s.execute("claim_task", { id: fresh.id, expectedVersion: fresh.version }, agent);
@@ -218,6 +216,25 @@ test("lane roles keep the claim flow and the human review gate", (t) => {
     linked.links.map(({ lane, role }) => ({ lane, role })),
     [{ lane: s.lane("Released"), role: "done" }],
   );
+});
+
+test("agents complete claimed work in any done lane on the same board", (t) => {
+  const s = fixture(t);
+  s.addLane("Released", "done");
+  const otherBoard = s.execute("create_board", { name: "Ops", prefix: "OPS" }, human);
+  let task = s.make();
+  task = s.execute("claim_task", { id: task.id, expectedVersion: task.version }, agent);
+  assert.throws(
+    () => s.execute("update_task", { id: task.id, expectedVersion: task.version, patch: { lane: otherBoard.lanes.find((lane) => lane.role === "done").id } }, agent),
+    { code: "VALIDATION" },
+  );
+  task = s.execute("update_task", { id: task.id, expectedVersion: task.version, patch: { lane: s.lane("Released") } }, agent);
+  assert.equal(task.lane, s.lane("Released"));
+  assert.equal(task.role, "done");
+  assert.equal(task.lease, null);
+  assert.equal(s.board().inProgress, 0);
+  assert.equal(s.board().lanes.find((lane) => lane.name === "Released").tasks, 1);
+  assert.deepEqual(s.execute("list_tasks", { role: "done" }, human).tasks.map((entry) => entry.id), [task.id]);
 });
 
 test("the lane upgrade moves tasks, history and views from statuses to lanes", (t) => {

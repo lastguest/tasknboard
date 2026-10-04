@@ -1,0 +1,82 @@
+# Agent workflow
+
+Task assignment, lease ownership, and external delegation are separate fields.
+`claim_task` sets the lease holder and keeps the assignee.
+Repeating an active claim as its holder returns the current task, even with an old version.
+That repeat does not renew the lease, change the version, or add an event.
+Use `heartbeat` with the current version to renew a lease.
+Expired claims need a new claim with the current version.
+Lease errors include the holder, expiry, server time, remaining milliseconds, and active state in `details.lease`.
+Negative remaining milliseconds mean the lease expired.
+`delegate_task({id, expectedVersion, delegatedTo})` records external work and moves the task to `in_progress`.
+Delegated work needs no heartbeat. Automatic task runs skip active leases and delegated tasks.
+Agents can delegate directly when no active claim exists.
+An expired claim does not block delegation.
+Workers cannot delegate tasks with another worker's active claim.
+Architects can delegate without a claim, including tasks with an active claim.
+Delegation clears the lease and keeps the assignee.
+
+An architect uses `{id, kind: "agent", role: "architect"}`.
+For local MCP, set `TASKNBOARD_AGENT_ROLE=architect` in its environment.
+For remote MCP, set the role in the actor record for its access token.
+Humans can select Worker or Architect for an agent on the desktop Agents page.
+Humans can also use `update_profile({agentId, role})` to change an existing agent's role.
+Agents cannot grant or revoke roles.
+An omitted role keeps the saved role. An explicit role in trusted configuration overrides the saved role.
+The server gets the role from authentication, never from a tool argument.
+An architect can manage boards, lanes, epics, labels, dependencies, and task lanes without a claim.
+Create a lane named `Blocked` with role `in_progress` to separate blocked work.
+
+The task creator and an architect can submit review without a claim.
+The task creator and an architect can also link commits without a claim.
+Commit links keep the current lease, assignee, and delegation.
+Anyone can add comments without a claim.
+`request_changes({id, expectedVersion, reason})` returns a review task to `in_progress` and saves the reason.
+Only a human or an architect can request changes.
+
+`create_task` accepts an initial lane and `blockedBy` task IDs.
+`bulk_create_tasks({tasks})` and `bulk_move_tasks({tasks: [{id, expectedVersion}], lane})` use one transaction.
+A failed item cancels the whole batch.
+Comments need no `expectedVersion`.
+`list_tasks` accepts label, lane, role, owner, assignee, and board filters.
+
+MCP task mutations return `{id, version, lane}` by default.
+MCP task lists return compact rows. Pass `verbose: true` to get full data.
+`get_task` always returns full task context. Browser commands keep full responses.
+
+Sub-actor IDs such as `claude/architect` and `codex/cli` identify separate sessions.
+Set `TASKNBOARD_AGENT_ID` to the session ID for local MCP.
+Set `TASKNBOARD_AGENT_ID` for CLI calls from scripts or agents.
+Non-interactive CLI writes fail without that ID. Non-interactive reads remain available.
+Set `TASKNBOARD_AGENT_ROLE=architect` or `worker` to give the CLI an explicit role.
+Omit that variable to use the saved role.
+CLI task commands accept `taskId` or `id`; both values must match if present.
+Each task in `bulk_move_tasks` accepts the same names.
+Run `tasknboard help <command>` for required fields and an example.
+Versioned writes still require the current `expectedVersion`.
+Use `<command> --file <path>` or `<command> --stdin` for JSON with Windows shell characters.
+These modes read JSON as data and keep it out of the batch command line.
+Installed plugin identities use flat names because those names also identify files.
+
+Review artifacts accept HTTP(S) URLs, repository paths, and commit SHAs.
+`link_commits({id, expectedVersion, commits})` saves commit SHAs without a pull request.
+The local server scans each board repository for commit messages that contain task IDs.
+It links matching commit SHAs to tasks on that board.
+The scanner keeps a cursor and skips commit SHAs that already link to the task.
+The first scan reads 200 recent commits. Later scans read new commits in batches of 200.
+The server scans every 30 seconds and defers links while a task has an active lease.
+Pass `boardId` to `create_epic` and `list_epics` to keep epics on one board.
+
+`list_notifications({after, limit})` returns durable human comments, changes requests, and completion events.
+The result contains `items` and a sequence `cursor`.
+Subscribe to the MCP resource `tasknboard://notifications` to get change notifications.
+Read that resource or call `list_notifications` after a notification.
+The remote change stream reconnects after connection loss.
+
+Each board has `agentReasoning` and `agentSandbox` settings for Codex runs.
+The default sandbox is `workspace-write`.
+Every task run receives the task ID, title, description, and acceptance criteria.
+Plugin installation removes the old standalone Codex registration after the plugin succeeds.
+The MCP supervisor keeps the host connection open if its worker fails.
+It restarts the worker and restores initialization and resource subscriptions.
+It does not retry calls that were in flight. Read the task before retrying a change.

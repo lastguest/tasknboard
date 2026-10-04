@@ -2,13 +2,19 @@ import { render } from "ink";
 import { connect } from "../server/client.mjs";
 import { schemas } from "../server/domain.mjs";
 import { App } from "./App.tsx";
+import { cliActor } from "./identity.ts";
+import { normalizeArguments, readCommandInput, requireExpectedVersion } from "./arguments.ts";
+import { commandHelp } from "./help.ts";
 
 const usage = `TasknBoard command line
 
 Usage:
   tasknboard                    Open the interactive board
   tasknboard <command> [json]   Run one workspace command and print JSON
+  tasknboard <command> --file <path>   Read JSON from a UTF-8 file
+  tasknboard <command> --stdin         Read JSON from standard input
   tasknboard help               Show this help
+  tasknboard help <command>     Show fields and a command example
 
 Commands: ${Object.keys(schemas).join(", ")}
 
@@ -18,24 +24,36 @@ Example:
   tasknboard create_task '{"boardId":"BOARD-1","title":"Ship it"}'
   tasknboard list_tasks '{"boardId":"BOARD-1","role":"in_review"}'
 
+On Windows, use --file or --stdin to keep JSON out of cmd.exe arguments.
+Put the JSON object in args.json, then run tasknboard <command> --file args.json.
+PowerShell: Get-Content -Raw -Encoding utf8 args.json | tasknboard <command> --stdin
+Use one input mode per command. Direct JSON examples require a shell that preserves it.
+
 The local SQLite file is TASKNBOARD_DB (default data/tasknboard.sqlite).
+Set TASKNBOARD_AGENT_ID for agent commands. Non-interactive writes require it.
+Set TASKNBOARD_AGENT_ROLE to worker or architect to select a local agent role.
+If you omit the role, the CLI uses the stored role.
 Set TASKNBOARD_SERVER_URL and TASKNBOARD_TOKEN to use a shared server.`;
 
-function connectCli() {
-  const id = process.env.TASKNBOARD_AGENT_ID;
-  return connect(id ? { actor: { id, kind: "agent" } } : undefined);
+function connectCli(command: string) {
+  const actor = cliActor(command);
+  return connect(actor ? { actor } : undefined);
 }
 
 async function once(name: string, json = "{}") {
   let args;
   try {
-    args = JSON.parse(json);
-  } catch {
+    args = normalizeArguments(name, JSON.parse(json));
+  } catch (error) {
+    if (error instanceof Error && "code" in error) throw error;
     throw Object.assign(new Error("Arguments must be one JSON object."), {
       code: "USAGE",
     });
   }
-  const client = connectCli();
+  if (!args || typeof args !== "object" || Array.isArray(args))
+    throw Object.assign(new Error("Arguments must be one JSON object."), { code: "USAGE" });
+  requireExpectedVersion(name, args);
+  const client = connectCli(name);
   try {
     console.log(JSON.stringify(await client.execute(name, args), null, 2));
   } finally {
@@ -58,7 +76,7 @@ async function interactive() {
     process.exitCode = 2;
     return;
   }
-  const client = connectCli();
+  const client = connectCli("workspace_info");
   try {
     const app = render(<App client={client} />, {
       alternateScreen: true,
@@ -70,18 +88,24 @@ async function interactive() {
   }
 }
 
-const [name, json, ...extra] = process.argv.slice(2);
+const [name, ...inputArgs] = process.argv.slice(2);
 try {
-  if (["help", "--help", "-h"].includes(name)) console.log(usage);
+  if (["help", "--help", "-h"].includes(name)) {
+    if (inputArgs.length > 1) throw Object.assign(new Error("Usage: tasknboard help [command]"), { code: "USAGE" });
+    console.log(inputArgs[0] ? commandHelp(inputArgs[0]) : usage);
+  }
   else if (!name) await interactive();
-  else if (!(name in schemas) || extra.length) {
-    console.error(`Unknown command or extra arguments.\n\n${usage}`);
+  else if (!(name in schemas)) {
+    console.error(`Unknown command.\n\n${usage}`);
     process.exitCode = 2;
-  } else await once(name, json);
+  } else await once(name, await readCommandInput(inputArgs));
 } catch (e) {
   const error = e as Error & { code?: string };
+  const message = error.code === "VALIDATION" && Object.hasOwn(schemas, name)
+    ? `${error.message} Run tasknboard help ${name} for fields and an example.`
+    : error.message;
   console.error(
-    JSON.stringify({ code: error.code ?? "ERROR", message: error.message }),
+    JSON.stringify({ code: error.code ?? "ERROR", message }),
   );
   process.exitCode = 1;
 }

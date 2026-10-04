@@ -130,8 +130,9 @@ The execution workflow is:
 
 1. An agent reads and claims a task.
 2. The agent maintains its lease and records progress.
-3. The agent submits review evidence and releases its claim.
-4. A human reviews the work and can mark it Done.
+3. The agent records evidence and can move its claimed task to Done.
+4. If human review is needed, the agent submits review evidence and releases its claim.
+5. A human reviews submitted work and can mark it Done.
 
 Preserve the server's review and ownership rules. Do not bypass them in the interface.
 

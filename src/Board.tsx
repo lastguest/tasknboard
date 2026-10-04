@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   activeLease,
-  doneLocked,
   labelTone,
   priorities,
   roles,
@@ -154,6 +153,12 @@ export function Label({ label }: { label: string }) {
 export function ClaimChip({ task }: { task: Task }) {
   const lease = activeLease(task);
   const holder = usePersonName(lease?.actor ?? "");
+  const delegate = usePersonName(task.delegatedTo ?? "");
+  if (task.delegatedTo) return (
+    <span className="claim-chip" title={`Delegated to ${delegate}`}>
+      <Icon name="users" size={12} /> Delegated to {delegate}
+    </span>
+  );
   if (!lease) return null;
   const expiry = formatUtcTimestamp(lease.expiresAt);
   return (
@@ -166,42 +171,6 @@ export function ClaimChip({ task }: { task: Task }) {
         Claimed by {holder} · expires {expiry}
       </span>
     </span>
-  );
-}
-
-/** The keyboard and touch alternative to drag and drop. */
-export function StatusSelect({
-  task,
-  lanes,
-  pending,
-  onMove,
-}: {
-  task: Task;
-  /** The lanes of the task's board. */
-  lanes: Lane[];
-  pending?: string;
-  onMove: (t: Task, lane: string) => void;
-}) {
-  return (
-    <label className="status-select">
-      <span className="sr-only">Status of {task.id}</span>
-      <select
-        aria-label={`Status of ${task.id}`}
-        value={pending ?? task.lane}
-        disabled={Boolean(pending)}
-        onChange={(e) => onMove(task, e.target.value)}
-      >
-        {lanes.map((lane) => {
-          const locked = lane.role === "done" && doneLocked(task.role);
-          return (
-            <option key={lane.id} value={lane.id} disabled={locked}>
-              {locked ? `${lane.name} (after review)` : lane.name}
-            </option>
-          );
-        })}
-      </select>
-      {pending && <span className="moving">Moving…</span>}
-    </label>
   );
 }
 
@@ -336,14 +305,6 @@ export function TaskCard({
           </span>
         )}
         <PullCount task={task} />
-        {onMove && !presentation && (
-          <StatusSelect
-            task={task}
-            lanes={lanes}
-            pending={pending}
-            onMove={onMove}
-          />
-        )}
       </div>
     </article>
   );

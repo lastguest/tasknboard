@@ -247,6 +247,8 @@ export function BoardEditor({
   const [description, setDescription] = useState(board?.description ?? "");
   const [prefix, setPrefix] = useState(board?.prefix ?? "");
   const [repository, setRepository] = useState(board?.repository ?? "");
+  const [agentReasoning, setAgentReasoning] = useState(board?.agentReasoning ?? "medium");
+  const [agentSandbox, setAgentSandbox] = useState(board?.agentSandbox ?? "workspace-write");
   const [pending, setPending] = useState(false);
   const [picking, setPicking] = useState(false);
   const [pickError, setPickError] = useState("");
@@ -275,7 +277,9 @@ export function BoardEditor({
     normalizedName !== board.name ||
     normalizedPrefix !== board.prefix ||
     normalizedDescription !== board.description ||
-    normalizedRepository !== (board.repository ?? "");
+    normalizedRepository !== (board.repository ?? "") ||
+    agentReasoning !== (board.agentReasoning ?? "medium") ||
+    agentSandbox !== (board.agentSandbox ?? "workspace-write");
 
   async function pickFolder() {
     setPicking(true);
@@ -312,6 +316,8 @@ export function BoardEditor({
             id: board.id,
             expectedVersion: board.version,
             patch: {
+              agentReasoning,
+              agentSandbox,
               ...(normalizedName !== board.name && { name: normalizedName }),
               ...(normalizedPrefix !== board.prefix && {
                 prefix: normalizedPrefix,
@@ -329,6 +335,8 @@ export function BoardEditor({
             prefix: normalizedPrefix,
             description: normalizedDescription,
             repository: normalizedRepository,
+            agentReasoning,
+            agentSandbox,
           });
       onSaved(saved, board);
     } catch (cause) {
@@ -525,8 +533,7 @@ export function BoardEditor({
           <span className="field-hint" id={`${repositoryId}-hint`}>
             Optional. When you assign a task on this board to an agent
             configured on the Agents page, the desktop app starts that agent
-            here without asking for approvals. Leave empty to start agents by
-            hand.
+            here. Leave empty to start agents by hand.
           </span>
           {attempted && repositoryError && (
             <span className="field-hint inline-error" id={`${repositoryId}-error`}>
@@ -539,6 +546,22 @@ export function BoardEditor({
             </span>
           )}
         </div>
+        <label className="field">
+          <span className="field-label">Agent reasoning</span>
+          <select value={agentReasoning} onChange={(event) => setAgentReasoning(event.target.value as typeof agentReasoning)}>
+            {["minimal", "low", "medium", "high", "xhigh", "max"].map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+          <span className="field-hint">Codex uses this reasoning effort for tasks on this board.</span>
+        </label>
+        <label className="field">
+          <span className="field-label">Agent sandbox</span>
+          <select value={agentSandbox} onChange={(event) => setAgentSandbox(event.target.value as typeof agentSandbox)}>
+            <option value="read-only">Read only</option>
+            <option value="workspace-write">Workspace write</option>
+            <option value="danger-full-access">Full access</option>
+          </select>
+          <span className="field-hint">Codex uses this sandbox for tasks on this board. Full access removes file restrictions.</span>
+        </label>
       </form>
       {board && (
         <LaneSettings

@@ -268,15 +268,17 @@ export function ColorField({
   );
 }
 
-/** Create or edit an epic. Only people manage epics; the server enforces it. */
+/** Create or edit an epic on the selected board. */
 export function EpicEditor({
   epic,
+  boardId,
   suggestedColor,
   onClose,
   onSaved,
   onArchived,
 }: {
   epic: Epic | null;
+  boardId: string;
   /** The palette colour a new epic starts with. */
   suggestedColor: string;
   onClose: () => void;
@@ -310,6 +312,7 @@ export function EpicEditor({
     try {
       const { epics } = await command<{ epics: Epic[] }>("list_epics", {
         includeArchived: true,
+        boardId,
       });
       const latest = epics.find((candidate) => candidate.id === base.id);
       if (latest) setBase(latest);
@@ -336,7 +339,7 @@ export function EpicEditor({
             expectedVersion: base.version,
             patch,
           })
-        : await command<Epic>("create_epic", { title, description, color });
+        : await command<Epic>("create_epic", { boardId, title, description, color });
       onSaved(saved, !base);
     } catch (e) {
       setError(errorOf(e));

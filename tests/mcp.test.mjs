@@ -6,6 +6,8 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { ResourceUpdatedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import { createStore } from "../server/store.mjs";
 test("real MCP client initializes, discovers tools, claims and submits review", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "tasknboard-mcp-"));
   const client = new Client({ name: "integration-test", version: "1.0.0" });
@@ -25,7 +27,7 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
   });
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 23);
+  assert.equal(tools.tools.length, 37);
   const similarTool = tools.tools.find((tool) => tool.name === "find_similar_tasks");
   assert.equal(similarTool.annotations.readOnlyHint, true);
   assert.ok(similarTool.inputSchema.properties.excludeId);
@@ -39,7 +41,7 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
   assert.ok(profileTool.inputSchema.properties.useGravatar);
   assert.ok(profileTool.inputSchema.properties.gravatarEmail);
   const call = async (name, args) => {
-    const r = await client.callTool({ name, arguments: args });
+    const r = await client.callTool({ name, arguments: { ...args, verbose: true } });
     assert.notEqual(r.isError, true, JSON.stringify(r));
     return JSON.parse(r.content[0].text);
   };
@@ -78,6 +80,10 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
   const { boards } = await call("list_boards", {});
   let task = await call("create_task", { title: "Real protocol test", boardId: boards[0].id });
   assert.equal(task.commentCount, 0);
+  const compact = await client.callTool({ name: "add_comment", arguments: { id: task.id, body: "No version read needed" } });
+  const compactTask = JSON.parse(compact.content[0].text);
+  assert.deepEqual(Object.keys(compactTask).sort(), ["id", "lane", "version"]);
+  task = await call("get_task", { id: task.id });
   assert.deepEqual(
     (await call("find_similar_tasks", { title: "Real protocol tests" })).tasks.map(
       (similar) => similar.id,
@@ -102,9 +108,9 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
     expectedVersion: task.version,
     body: "Implementation ready",
   });
-  assert.equal(task.commentCount, 1);
-  assert.equal((await call("get_task", { id: task.id })).commentCount, 1);
-  assert.equal((await call("list_tasks", {})).tasks[0].commentCount, 1);
+  assert.equal(task.commentCount, 2);
+  assert.equal((await call("get_task", { id: task.id })).commentCount, 2);
+  assert.equal((await call("list_tasks", {})).tasks[0].commentCount, 2);
   task = await call("submit_review", {
     id: task.id,
     expectedVersion: task.version,
@@ -121,4 +127,50 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
     },
   });
   assert.equal(denied.isError, true);
+  let direct = await call("create_task", { title: "Complete without review", boardId: boards[0].id });
+  direct = await call("claim_task", { id: direct.id, expectedVersion: direct.version });
+  const claimedVersion = direct.version;
+  const claimedAssignee = direct.assignee;
+  const doneLane = boards[0].lanes.find((lane) => lane.role === "done").id;
+  direct = await call("update_task", {
+    id: direct.id,
+    expectedVersion: direct.version,
+    patch: { lane: doneLane },
+  });
+  assert.equal(direct.role, "done");
+  assert.equal(direct.lease, null);
+  assert.equal(direct.assignee, claimedAssignee);
+  assert.equal(direct.version, claimedVersion + 1);
+  assert.equal((await call("get_task", { id: direct.id })).lane, doneLane);
+});
+
+test("architect MCP receives human feedback through a subscribed resource", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "tasknboard-notifications-"));
+  const database = join(dir, "test.sqlite");
+  const client = new Client({ name: "notification-test", version: "1.0.0" });
+  const transport = new StdioClientTransport({ command: process.execPath, args: [resolve("server/mcp.mjs")],
+    env: { ...process.env, TASKNBOARD_DB: database, TASKNBOARD_AGENT_ID: "claude/architect", TASKNBOARD_AGENT_ROLE: "architect" }, stderr: "pipe" });
+  const store = createStore(database);
+  t.after(async () => { await client.close(); store.close(); rmSync(dir, { recursive: true, force: true }); });
+  await client.connect(transport);
+  const call = async (name, args) => {
+    const result = await client.callTool({ name, arguments: args });
+    assert.notEqual(result.isError, true, JSON.stringify(result));
+    return JSON.parse(result.content[0].text);
+  };
+  assert.equal((await call("workspace_info", {})).actor.role, "architect");
+  const board = await call("create_board", { name: "Planning", prefix: "PL" });
+  const task = await call("create_task", { boardId: board.id, title: "Review the result" });
+  let timer;
+  const updated = new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error("No feedback notification")), 5000);
+    client.setNotificationHandler(ResourceUpdatedNotificationSchema, ({ params }) => { clearTimeout(timer); resolve(params); });
+  });
+  t.after(() => clearTimeout(timer));
+  await client.subscribeResource({ uri: "tasknboard://notifications" });
+  store.execute("add_comment", { id: task.id, body: "Please update the result" }, { id: "reviewer", kind: "human" });
+  assert.equal((await updated).uri, "tasknboard://notifications");
+  const resource = await client.readResource({ uri: "tasknboard://notifications" });
+  assert.equal(JSON.parse(resource.contents[0].text).items[0].body, "Please update the result");
+  await client.unsubscribeResource({ uri: "tasknboard://notifications" });
 });

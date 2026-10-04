@@ -33,8 +33,10 @@ test("a person adds a lane, moves a task through it, and deletes it into another
   await page.getByRole("searchbox").fill(task.id);
 
   // A task in a todo lane cannot go to a done lane before review.
-  const status = page.getByLabel(`Status of ${task.id}`);
-  await expect(status.locator("option", { hasText: "Done (after review)" })).toHaveJSProperty("disabled", true);
+  const card = page.locator(".task-card");
+  await card.click({ button: "right" });
+  await expect(page.getByRole("menu").getByRole("menuitemradio", { name: "Done (after review)" })).toBeDisabled();
+  await page.keyboard.press("Escape");
 
   let dialog = await editBoard(page);
   // The only lane of a role cannot be deleted.
@@ -47,7 +49,8 @@ test("a person adds a lane, moves a task through it, and deletes it into another
   await expect(dialog).toBeHidden();
 
   await expect(column(page, "Testing")).toBeVisible();
-  await status.selectOption({ label: "Testing" });
+  await card.click({ button: "right" });
+  await page.getByRole("menu").getByRole("menuitemradio", { name: "Testing", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: `Moved ${task.id}` })).toBeVisible();
   await expect(column(page, "Testing").locator(".task-card")).toHaveCount(1);
   const testing = (await command("get_task", { id: task.id })).lane;
