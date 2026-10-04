@@ -14,6 +14,7 @@ test("MCP exposes workflow tools, preserves selected fields and passes structure
   t.after(async () => { await client.close(); rmSync(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }); });
   await client.connect(transport);
   const tools = (await client.listTools()).tools;
+  assert.ok(!tools.some(tool => tool.name === "keep_alive"));
   for (const name of ["get_tasks", "claim_tasks", "add_comments", "submit_reviews", "undo_task", "reorder_task", "critical_path", "list_activity", "list_milestones", "create_milestone", "update_milestone", "archive_milestone", "set_label_color", "upload_artifact"])
     assert.ok(tools.some(tool => tool.name === name), name);
   assert.match(tools.find(tool => tool.name === "update_task").description, /get_task.completionPolicy/);

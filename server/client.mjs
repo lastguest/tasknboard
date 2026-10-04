@@ -8,15 +8,15 @@ import { createChangeFeed } from "./changes.mjs";
  * runs commands as `actor`, the local human by default. Both modes return the
  * same command results.
  */
-export function connect({ actor = localActor, env = process.env } = {}) {
+export function connect({ actor = localActor, env = process.env, database = dbPath } = {}) {
   const remote = env.TASKNBOARD_SERVER_URL;
   if (!remote) {
-    const store = createStore(dbPath);
+    const store = createStore(database);
     store.registerActors([actor]);
     const changes = createChangeFeed(store);
     return {
       mode: "local",
-      target: dbPath,
+      target: database,
       execute: async (name, args = {}) => store.execute(name, args, actor),
       subscribe: (listener) => changes.subscribe(listener),
       close: () => { changes.stop(); store.close(); },

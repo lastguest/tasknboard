@@ -4,14 +4,28 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { startMcpControl } from "./mcp-control.mjs";
+import { connect } from "./client.mjs";
+import { createTaskKeepAlive } from "./mcp-keep-alive.mjs";
 
 // The host owns this process. Only the adapter worker restarts.
 export function startSupervisor({ worker, input = process.stdin, output = process.stdout, diagnostics = process.stderr,
   database = process.env.TASKNBOARD_SERVER_URL ? null : resolve(process.env.TASKNBOARD_DB || "data/tasknboard.sqlite"),
-  identity = process.env.TASKNBOARD_AGENT_ID || "coding-agent" }) {
+  identity = process.env.TASKNBOARD_AGENT_ID || "coding-agent", heartbeatIntervalMs = 30000 }) {
   const pending = new Map();
   const internal = new Map();
   const subscriptions = new Set();
+  const forwarded = new Set();
+  let maintenanceClient;
+  const maintenance = createTaskKeepAlive({ intervalMs: heartbeatIntervalMs,
+    execute(name, args) {
+      if (!database && !process.env.TASKNBOARD_SERVER_URL) return;
+      maintenanceClient ??= connect({ database, actor: { id: identity, kind: "agent",
+        ...(["architect", "worker"].includes(process.env.TASKNBOARD_AGENT_ROLE) ? { role: process.env.TASKNBOARD_AGENT_ROLE } : {}) } });
+      return maintenanceClient.execute(name, args);
+    },
+    close: () => maintenanceClient?.close(),
+    onError: error => diagnostics.write(`TasknBoard MCP keep-alive: ${error?.code || "ERROR"}.\n`),
+  });
   let child, timer, handshakeTimer, initialization, initialized, startupInitialization;
   let stopped = false, ready = false, failures = 0;
   let state = "starting", manualRestart = false;
@@ -57,6 +71,7 @@ export function startSupervisor({ worker, input = process.stdin, output = proces
     if (stopped) return;
     const current = spawn(process.execPath, [fileURLToPath(worker)], {
       stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+      env: { ...process.env, TASKNBOARD_AGENT_ID: identity, ...(database ? { TASKNBOARD_DB: database } : {}) },
     });
     child = current;
     // Node buffers stdin writes until spawn. Accept the host's first handshake.
@@ -75,6 +90,8 @@ export function startSupervisor({ worker, input = process.stdin, output = proces
         return;
       }
       if (Object.hasOwn(message, "id") && !message.method) {
+        maintenance.finish(message.id);
+        forwarded.delete(message.id);
         const original = pending.get(message.id);
         pending.delete(message.id);
         if (original && !message.error) {
@@ -101,14 +118,18 @@ export function startSupervisor({ worker, input = process.stdin, output = proces
       state = "reconnecting";
       child = undefined;
       internal.clear();
+      maintenance.cancelAll();
       for (const [id, message] of pending) {
         // Initialization is safe to replay and the host still awaits this ID.
         if (message.method === "initialize" && !initialization) continue;
-        const ambiguous = message.method === "tools/call";
+        const ambiguous = message.method === "tools/call" && forwarded.has(id);
         fail(id, ambiguous
           ? "The MCP worker stopped and is reconnecting. The action can have completed. Read the task before any new write."
-          : "The MCP worker stopped and is reconnecting. Read the current state after reconnection.", ambiguous);
+          : message.method === "tools/call" && !forwarded.has(id)
+            ? "The MCP worker is reconnecting. This request was not sent."
+            : "The MCP worker stopped and is reconnecting. Read the current state after reconnection.", ambiguous);
       }
+      forwarded.clear();
       pending.clear();
       if (!stopped) {
         const delay = manualRestart ? 0 : Math.min(250 * 2 ** Math.min(failures++, 7), 30000);
@@ -120,7 +141,7 @@ export function startSupervisor({ worker, input = process.stdin, output = proces
   }
 
   const host = createInterface({ input });
-  host.on("line", (line) => {
+  host.on("line", async (line) => {
     let message;
     try { message = JSON.parse(line); } catch {
       write({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Invalid JSON" } });
@@ -131,6 +152,14 @@ export function startSupervisor({ worker, input = process.stdin, output = proces
       return;
     }
     if (message.method === "notifications/initialized") initialized = message;
+    if (message.method === "notifications/cancelled") {
+      const requestId = message.params?.requestId;
+      maintenance.finish(requestId);
+      if (pending.has(requestId) && !forwarded.has(requestId)) {
+        pending.delete(requestId);
+        write({ jsonrpc: "2.0", id: requestId, error: { code: -32800, message: "The tool call was cancelled before it was sent." } });
+      }
+    }
     if (message.method === "initialize" && !initialization) startupInitialization = message;
     if (!ready) {
       if (message.method === "initialize" && !initialization) return;
@@ -139,6 +168,12 @@ export function startSupervisor({ worker, input = process.stdin, output = proces
       return;
     }
     if (Object.hasOwn(message, "id") && message.method) pending.set(message.id, message);
+    if (message.method === "tools/call" && Object.hasOwn(message, "id")) {
+      const current = child;
+      await maintenance.start(message.id, message.params?.name, message.params?.arguments);
+      if (stopped || pending.get(message.id) !== message || current !== child || !ready) return;
+    }
+    if (Object.hasOwn(message, "id") && message.method) forwarded.add(message.id);
     send(message);
   });
   function restart() {
@@ -151,8 +186,11 @@ export function startSupervisor({ worker, input = process.stdin, output = proces
     else launch();
   }
   function stop() {
-    if (stopped) return;
+    if (stopped) return maintenance.stop();
     stopped = true;
+    ready = false;
+    pending.clear();
+    forwarded.clear();
     control?.stop();
     clearTimeout(timer);
     clearTimeout(handshakeTimer);
@@ -161,6 +199,7 @@ export function startSupervisor({ worker, input = process.stdin, output = proces
     process.removeListener("SIGTERM", stop);
     output.removeListener("error", stop);
     child?.kill();
+    return maintenance.stop();
   }
   host.once("close", stop);
   process.once("SIGINT", stop);

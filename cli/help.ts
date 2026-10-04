@@ -69,7 +69,7 @@ export const commandExamples: Record<string, Record<string, unknown>> = {
 };
 
 export function commandHelp(command: string, platform: string = process.platform): string {
-  if (!Object.hasOwn(schemas, command))
+  if (!Object.hasOwn(schemas, command) || command === "keep_alive")
     throw Object.assign(new Error(`Unknown command: ${command}. Run tasknboard help for the command list.`), { code: "USAGE" });
   const schema = z.toJSONSchema(schemas[command], { io: "input", unrepresentable: "any" });
   const required = schema.required ?? [];

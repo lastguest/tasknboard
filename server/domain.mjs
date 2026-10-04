@@ -483,6 +483,7 @@ schemas.claim_tasks = z.object({ tasks: z.array(schemas.claim_task).min(1).max(1
 schemas.add_comments = z.object({ comments: z.array(schemas.add_comment).min(1).max(100) }).strict();
 schemas.submit_reviews = z.object({ reviews: z.array(schemas.submit_review).min(1).max(100) }).strict();
 schemas.undo_task = z.object({ id, expectedVersion: version }).strict();
+schemas.keep_alive = z.object({ ids:z.array(id).min(1).max(100) }).strict();
 schemas.reorder_task = z.object({ id, expectedVersion: version, position: lanePosition }).strict();
 schemas.critical_path = z.object({ id }).strict();
 schemas.list_activity = z.object({ hours: z.number().positive().max(8760).default(24), boardId: boardId.optional(), agent: via.optional(), limit: z.number().int().min(1).max(1000).default(100) }).strict();

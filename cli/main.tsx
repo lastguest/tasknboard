@@ -16,7 +16,7 @@ ${process.platform !== "win32" ? "  tasknboard <command> [json]          Run a c
   tasknboard help               Show this help
   tasknboard help <command>     Show fields and a command example
 
-Commands: ${Object.keys(schemas).join(", ")}
+Commands: ${Object.keys(schemas).filter(command => command !== "keep_alive").join(", ")}
 
 Example:
   tasknboard list_boards
@@ -96,7 +96,7 @@ try {
     console.log(inputArgs[0] ? commandHelp(inputArgs[0]) : usage);
   }
   else if (!name) await interactive();
-  else if (!(name in schemas)) {
+  else if (!(name in schemas) || name === "keep_alive") {
     console.error(`Unknown command.\n\n${usage}`);
     process.exitCode = 2;
   } else await once(name, await readCommandInput(inputArgs));

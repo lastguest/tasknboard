@@ -2098,7 +2098,7 @@ export default function App() {
                 onEdit={() => setEpicDialog({ epic: currentEpic })}
               />
             )}
-            {currentBoard && view === "board" && <><RunningNow boardId={currentBoard.id} onOpen={(id) => void openTaskById(id)} /><Milestones boardId={currentBoard.id} tasks={tasks} canManage={canPlan} onOpen={(id) => void openTaskById(id)} onSaved={saved} /></>}
+            {currentBoard && view === "board" && <RunningNow boardId={currentBoard.id} onOpen={(id) => void openTaskById(id)} />}
             {currentSaved && (
               <ViewSummary
                 view={currentSaved}
@@ -2152,7 +2152,9 @@ export default function App() {
                 onOpen={openEpic}
                 onNew={() => setEpicDialog({ epic: null })}
                 onMenu={epicMenu}
-              />
+              >
+                {currentBoard && <Milestones key={currentBoard.id} boardId={currentBoard.id} tasks={tasks} canManage={canPlan} onOpen={(id) => void openTaskById(id)} onSaved={saved} />}
+              </EpicsPage>
             ) : view === "agents" ? (
               <AgentsPage
                 canEditRoles={actor.kind === "human"}

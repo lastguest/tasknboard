@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   epicColor,
   epicPalette,
@@ -62,6 +62,7 @@ export function EpicsPage({
   onOpen,
   onNew,
   onMenu,
+  children,
 }: {
   epics: Epic[];
   unfiled: number;
@@ -69,6 +70,7 @@ export function EpicsPage({
   onOpen: (epic: Epic) => void;
   onNew: () => void;
   onMenu: (e: React.MouseEvent<HTMLElement>, epic: Epic) => void;
+  children?: ReactNode;
 }) {
   return (
     <div className="epics-page">
@@ -147,6 +149,7 @@ export function EpicsPage({
           )}
         </div>
       )}
+      {children}
     </div>
   );
 }

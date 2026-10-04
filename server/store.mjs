@@ -1021,6 +1021,21 @@ export function createStore(path, { clock = Date.now } = {}) {
         400,
       );
     const p = parsed.data;
+    if(command === "keep_alive")return transaction(()=>{
+      if(identity.kind !== "agent")fail("FORBIDDEN","Only agents can maintain their active claims",403);
+      const renewed=[];
+      for(const id of new Set(p.ids)){
+        let task;
+        try{task=get(id);}catch(error){if(error.code==="NOT_FOUND")continue;throw error;}
+        const now=clock();
+        if(task.archived || task.delegatedTo || !task.lease || task.lease.actor!==identity.id || !(task.lease.expiresAt>now) || task.lease.expiresAt-now>300000)continue;
+        const expiresAt=now+900000;
+        db.prepare("UPDATE tasks SET data=json_set(data,'$.lease.expiresAt',?) WHERE number=?").run(expiresAt,taskNumber(task.id));
+        event(task.id,identity,"auto_heartbeat",JSON.stringify({previousExpiresAt:task.lease.expiresAt,expiresAt}));
+        renewed.push({id:task.id,lease:{actor:identity.id,expiresAt,expiresInSeconds:900}});
+      }
+      return {renewed};
+    });
     if (command === "critical_path") return readTransaction(() => {
       const goal = get(p.id); const tasks = new Map(); const edges = []; const cycles = [];
       const visit = (task, chain) => {

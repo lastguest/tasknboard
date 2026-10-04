@@ -8,6 +8,15 @@ Configured mentions, review changes, and stand-up events keep their existing dis
 Repeating an active claim as its holder returns the current task, even with an old version.
 That repeat does not renew the lease, change the version, or add an event.
 Use `heartbeat` with the current version to renew a lease.
+The MCP supervisor renews active owned claims during task-scoped TasknBoard tool calls.
+It checks before the call and every 30 seconds while the call waits.
+It renews claims with five minutes or less remaining. Automatic renewal keeps the task version and update time.
+The supervisor records each renewal as `auto_heartbeat`.
+It stops renewal after the response, cancellation, worker failure, or host close.
+It does not renew idle, expired, delegated, archived, or other actors' claims.
+
+Automatic renewal covers only task IDs in TasknBoard calls. It does not cover external build tools.
+Use explicit `heartbeat` between calls. Use the new task version from each explicit heartbeat.
 Use `release_task({id, expectedVersion})` to release an active claim as its holder or an architect.
 Release keeps the task lane, assignee, and delegation.
 Task details show a Release claim action for the claim holder and an architect.

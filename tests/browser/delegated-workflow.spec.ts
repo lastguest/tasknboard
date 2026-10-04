@@ -155,6 +155,8 @@ test("dependencies, milestone criteria, manual order and creator undo stay visib
     details.locator('[aria-label="Dependencies and undo"]'),
   ).toContainText("Foundation");
   await details.getByRole("button", { name: `Close ${goal.id}` }).click();
+  await expect(page.getByText("Milestones (0)", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Epics", exact: true }).click();
   await page.getByText("Milestones (0)", { exact: true }).click();
   await page
     .getByLabel("Milestone title", { exact: true })
@@ -180,6 +182,8 @@ test("dependencies, milestone criteria, manual order and creator undo stay visib
   expect((await command("get_task", { id: goal.id })).milestone).toBe(
     milestones[0].id,
   );
+  await page.getByRole("button", { name: "Tasks", exact: true }).click();
+  await expect(page.getByText("Milestones (1)", { exact: true })).toHaveCount(0);
   const foundationCard = page.locator(`article[aria-label^="${blocker.id}:"]`);
   const goalCard = page.locator(`article[aria-label^="${goal.id}:"]`);
   await foundationCard.dragTo(goalCard);

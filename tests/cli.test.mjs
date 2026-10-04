@@ -41,8 +41,9 @@ const deferred = () => {
 const key = (patch = {}) => ({ ctrl: false, meta: false, shift: false, ...patch });
 
 test("CLI command help provides a valid example for every schema command", () => {
-  assert.deepEqual(Object.keys(commandExamples).sort(), Object.keys(schemas).sort());
+  assert.deepEqual(Object.keys(commandExamples).sort(), Object.keys(schemas).filter(name => name !== "keep_alive").sort());
   for (const [name, schema] of Object.entries(schemas)) {
+    if (name === "keep_alive") continue;
     assert.equal(schema.safeParse(commandExamples[name]).success, true, name);
     const help = commandHelp(name, "win32");
     assert.match(help, new RegExp(`Usage: tasknboard ${name}`));
@@ -60,6 +61,7 @@ test("CLI command help provides a valid example for every schema command", () =>
   assert.match(commandHelp("claim_task"), /Read get_task/);
   assert.match(commandHelp("create_lane"), /board version/);
   assert.throws(() => commandHelp("not_a_command"), { code: "USAGE" });
+  assert.throws(() => commandHelp("keep_alive"), { code: "USAGE" });
   assert.match(commandHelp("create_task", "linux"), /Direct JSON is also supported/);
   assert.ok(commandHelp("create_task", "linux").includes(`tasknboard create_task '${JSON.stringify(commandExamples.create_task)}'`));
 });
