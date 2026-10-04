@@ -143,6 +143,7 @@ Use `restore_task({ id, expectedVersion })` to return the task to its saved lane
 
 ## Agent events
 
+Assignment does not start the agent launcher. The **Run agent** action starts a task run.
 The agent launcher uses roles:
 
 - `task_assigned` and `changes_requested` start only for a task in a `todo` or

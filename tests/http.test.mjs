@@ -251,8 +251,8 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
 test("a local workspace saves agent settings and rejects invalid ones", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "tasknboard-agents-"));
   const service = spawn(process.execPath, ["server/http.mjs"], {
-    env: { ...process.env, PORT: "14329", TASKNBOARD_DB: join(dir, "db.sqlite") },
-    stdio: ["ignore", "ignore", "pipe"],
+    env: { ...process.env, PORT: "14329", TASKNBOARD_DB: join(dir, "db.sqlite"), TASKNBOARD_DESKTOP: "1", TASKNBOARD_USER_HOME: dir },
+    stdio: ["pipe", "ignore", "pipe"],
   });
   t.after(async () => {
     service.kill();
@@ -277,19 +277,42 @@ test("a local workspace saves agent settings and rejects invalid ones", async (t
   };
   const { body: info } = await post("agent-configs", {});
   assert.equal(info.mode, "local");
-  assert.equal(info.autoStart, false);
+  assert.equal(info.autoStart, true);
   assert.deepEqual(info.clients.map((c) => c.id), ["claude", "codex", "opencode", "pi"]);
   assert.deepEqual(
     info.events.map((e) => e.id),
     ["task_assigned", "task_unassigned", "changes_requested", "mention", "standup"],
   );
-  const config = { ...info.defaults, client: "opencode", model: "anthropic/x", env: { KEY: "v" } };
+  const config = { ...info.defaults, client: "opencode", command: process.execPath, model: "anthropic/x", env: { KEY: "v" } };
   const saved = await post("agent-config-save", { identity: "builder", config });
   assert.equal(saved.status, 200);
   assert.equal(saved.body.config.client, "opencode");
   const { body: after } = await post("agent-configs", {});
   assert.deepEqual(after.agents.builder.config, saved.body.config);
   assert.deepEqual(after.agents.builder.queued, []);
+  const { body: workspace } = await post("workspace_info", {});
+  const board = workspace.boards[0];
+  await post("update_board", { id: board.id, expectedVersion: board.version, patch: { repository: dir } });
+  const { body: created } = await post("create_task", { boardId: board.id, title: "Manual run", assignee: "builder" });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal((await post("get_task", { id: created.id })).body.events.some((event) => event.kind === "agent_started"), false);
+  const { body: removed } = await post("update_task", { id: created.id, expectedVersion: created.version, patch: { assignee: "" } });
+  const { body: assigned } = await post("update_task", { id: created.id, expectedVersion: removed.version, patch: { assignee: "builder" } });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal((await post("get_task", { id: assigned.id })).body.events.some((event) => event.kind === "agent_started"), false);
+  assert.deepEqual((await post("agent-event", { event: "task_assigned", taskId: assigned.id })).body, { started: ["builder"] });
+  let dispatched;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    dispatched = (await post("get_task", { id: assigned.id })).body;
+    if (dispatched.events.some((event) => event.kind === "agent_started")) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.ok(dispatched.events.some((event) => event.kind === "agent_started"));
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const state = (await post("agent-configs", {})).body.agents.builder;
+    if (!state.running) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
   const bad = await post("agent-config-save", {
     identity: "builder",
     config: { ...config, command: "relative/opencode" },
@@ -300,6 +323,6 @@ test("a local workspace saves agent settings and rejects invalid ones", async (t
   assert.equal((await post("agent-event", { event: "deploy" })).status, 400);
   assert.deepEqual((await post("agent-event", { event: "standup" })).body, { started: [] });
   // Logs belong to the desktop app that runs agents; elsewhere there are none.
-  assert.deepEqual((await post("agent-logs", { taskId: "TNB-1" })).body, { available: false, runs: [] });
+  assert.equal((await post("agent-logs", { taskId: "TNB-1" })).body.available, true);
   assert.equal((await post("agent-logs", { taskId: "TNB-1", path: "/etc/passwd" })).status, 400);
 });

@@ -49,6 +49,8 @@ test("Archived shows only archived tasks on the selected board in List layout", 
   await expect(layout.getByRole("button")).toHaveCount(1);
   await expect(page.getByRole("region", { name: "Task list", exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Kanban board", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("columnheader", { name: "Status", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("columnheader", { name: "Category", exact: true })).toBeVisible();
   await expect(taskButton(archived)).toBeVisible();
   await expect(taskButton(active)).toHaveCount(0);
   await expect(taskButton(other)).toHaveCount(0);
@@ -67,6 +69,8 @@ test("Archived shows only archived tasks on the selected board in List layout", 
   await expect(details).toContainText("This task is archived. Task details are read-only.");
   await expect(details.getByLabel("Title", { exact: true })).toHaveAttribute("readonly", "");
   await expect(details).toContainText(history);
+  await expect(details.getByLabel("Task state", { exact: true }).locator(".facts")).toContainText("Archived");
+  await expect(details.getByRole("button", { name: /^Status:/ })).toHaveCount(0);
   await expect(details.getByRole("button", { name: "Archive task…", exact: true })).toHaveCount(0);
   await expect(details.getByRole("textbox", { name: "Add a comment", exact: true })).toHaveCount(0);
   await details.getByRole("button", { name: `Close ${archived.id}`, exact: true }).click();
@@ -96,4 +100,37 @@ test("Archived shows an empty state when the board has only active tasks", async
   await expect(page.getByRole("heading", { name: "No archived tasks.", exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Task list", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New task", exact: true })).toHaveCount(0);
+});
+
+test("Archive categories separate rejected tasks and hide their saved lanes", async ({ page }) => {
+  const key = randomUUID().slice(0, 6).toUpperCase();
+  const board = await command("create_board", { name: `Categories ${key}`, prefix: `C${key}` });
+  const rejected = await command("create_task", { boardId: board.id, title: `Rejected category ${key}` });
+  const archived = await command("create_task", { boardId: board.id, title: `Normal archive ${key}` });
+  await command("reject_task", { id: rejected.id, expectedVersion: rejected.version });
+  await command("archive_task", { id: archived.id, expectedVersion: archived.version });
+  await page.addInitScript(({ token, boardId }) => {
+    sessionStorage.setItem("tasknboard-token", token);
+    localStorage.setItem("tasknboard.selectedBoardId", boardId);
+  }, { token: humanToken, boardId: board.id });
+  await page.goto(baseURL);
+  await page.getByRole("navigation", { name: "Boards", exact: true })
+    .getByRole("group", { name: board.name, exact: true }).getByRole("button", { name: "Archived", exact: true }).click();
+  const list = page.getByRole("region", { name: "Task list", exact: true });
+  await expect(list.getByRole("columnheader", { name: "Status", exact: true })).toHaveCount(0);
+  await expect(list).not.toContainText("Todo");
+  await expect(page.getByRole("combobox", { name: "Group by", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Order by", exact: true })).toBeVisible();
+  await expect(list.locator("tbody tr:not(.group-row)")).toHaveCount(2);
+  await page.getByRole("combobox", { name: "Archive category", exact: true }).selectOption("rejected");
+  await expect(list.locator("tbody tr:not(.group-row)")).toHaveCount(1);
+  await expect(list).toContainText(rejected.title);
+  await expect(list).not.toContainText(archived.title);
+  await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+  await expect(list.locator("tbody tr:not(.group-row)")).toHaveCount(2);
+  await list.getByRole("button", { name: `${rejected.id}: ${rejected.title}`, exact: false }).click();
+  const facts = page.getByRole("region", { name: /Task details/ }).getByLabel("Task state", { exact: true }).locator(".facts");
+  await expect(facts).toContainText("Archived");
+  await expect(facts).toContainText("Rejected");
+  await expect(facts).not.toContainText("Todo");
 });

@@ -425,8 +425,15 @@ export function createStore(path, { clock = Date.now } = {}) {
         .all()
         .map((row) => [`LANE-${row.number}`, row.role]),
     );
-  /** A task with `role`, derived from its lane on every read. */
-  const withRole = (t, roles = laneRoleMap()) => ({ ...t, role: roles.get(t.lane) });
+  const latestArchive = db.prepare("SELECT kind FROM events WHERE task_id=? AND kind IN ('archive_task','reject_task') ORDER BY sequence DESC LIMIT 1");
+  /** A task with its lane role and current archive category. */
+  const withRole = (t, roles = laneRoleMap()) => ({
+    ...t,
+    role: roles.get(t.lane),
+    archiveCategory: t.archived
+      ? (latestArchive.get(t.id)?.kind === "reject_task" ? "rejected" : "archived")
+      : null,
+  });
   const saveBoard = (board) =>
     db
       .prepare("UPDATE boards SET data=? WHERE number=?")

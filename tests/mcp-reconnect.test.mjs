@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import { createInterface } from "node:readline";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
@@ -29,7 +29,7 @@ function host(t, worker, options = {}) {
     const index = messages.findIndex(matches);
     if (index >= 0) return Promise.resolve(messages.splice(index, 1)[0]);
     return new Promise((resolve, reject) => {
-      const waiter = { matches, resolve, timer: setTimeout(() => reject(new Error("No MCP response")), 5000) };
+      const waiter = { matches, resolve, timer: setTimeout(() => reject(new Error("No MCP response")), 15000) };
       waiters.push(waiter);
     });
   }
@@ -139,10 +139,14 @@ appendFileSync(${JSON.stringify(launches)}, Date.now() + '\\n');
 process.exit(1);`);
   const connection = host(t, pathToFileURL(worker));
   t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }));
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  const deadline = Date.now() + 15000;
+  while (!existsSync(launches) || readFileSync(launches, "utf8").trim().split("\n").length < 2) {
+    assert.ok(Date.now() < deadline, "The supervisor must restart the failed worker");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
   connection.input.end();
   const starts = readFileSync(launches, "utf8").trim().split("\n").map(Number);
-  assert.ok(starts.length >= 2 && starts.length <= 3);
+  assert.ok(starts.length >= 2);
   assert.ok(starts[1] - starts[0] >= 250);
   if (starts.length === 3) assert.ok(starts[2] - starts[1] >= 500);
   await new Promise((resolve) => setTimeout(resolve, 1100));

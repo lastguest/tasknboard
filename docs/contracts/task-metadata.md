@@ -19,6 +19,11 @@ Names and lease ownership must not determine actor kind.
 
 `export_workspace` includes the actor roster. `workspace_info` and exports use
 `schemaVersion: 20`. Version 20 removes obsolete rejected lanes and archives their tasks in [lanes](lanes.md).
+
+Task reads include `archiveCategory`: `archived`, `rejected`, or `null` for active tasks.
+The latest `archive_task` or `reject_task` event supplies the category.
+Restore clears the displayed category. A later archive action supplies a new category.
+The task keeps its saved lane for restore. Archive categories are not lane roles.
 Version 18 added lanes. Version 17 added the [Inbox](inbox.md) read positions.
 Version 16 moved embedded images to storage. Version 15 renamed task keys to their board prefix.
 Version 14 added [task links](task-links.md). Version 13 added board descriptions.

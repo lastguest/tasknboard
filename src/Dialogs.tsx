@@ -727,6 +727,7 @@ type Pending =
   | "comment"
   | "review"
   | "reject"
+  | "dispatch"
   | "archive"
   | "release"
   | "reload"
@@ -1187,6 +1188,20 @@ export function TaskEditor({
     }
   }
 
+  async function dispatch() {
+    if (!current || pending || current.archived) return;
+    setPending("dispatch");
+    setReviewError(null);
+    try {
+      await command("agent-event", { event: "task_assigned", taskId: current.id });
+      setNotice("Agent run queued.");
+    } catch (error) {
+      setReviewError(errorOf(error));
+    } finally {
+      setPending(null);
+    }
+  }
+
   async function reject() {
     if (!current || pending || current.archived) return;
     setPending("reject");
@@ -1436,11 +1451,12 @@ export function TaskEditor({
           aria-label={current ? "Task state" : "New task settings"}
         >
           <dl className="facts">
+            {archived && <div><dt>Category</dt><dd>{current?.archiveCategory === "rejected" ? "Rejected" : "Archived"}</dd></div>}
             {current ? (
               <div>
                 <dt>Status</dt>
                 <dd>
-                  <button
+                  {archived ? <span><Icon name="archive" size={14} /> Archived</span> : <button
                     type="button"
                     className="sidebar-picker-trigger"
                     aria-label={"Status: " + laneName(draft.lane) + ". Choose status"}
@@ -1450,7 +1466,7 @@ export function TaskEditor({
                   >
                     <RoleIcon role={draftLane?.role ?? current.role} />
                     <span>{laneName(draft.lane)}</span>
-                  </button>
+                  </button>}
                   {conflicted("lane") && (
                     <ConflictValue
                       value={laneName(current.lane)}
@@ -1812,6 +1828,13 @@ export function TaskEditor({
                     <button type="button" className="secondary" disabled={Boolean(pending)} onClick={() => setChangeStep(false)}>Cancel</button>
                   </div>
                 </div>
+              )}
+              {!archived && actor.kind === "human" && agents.has(current.assignee) &&
+                (current.role === "todo" || current.role === "in_progress") &&
+                !activeLease(current) && !current.delegatedTo && (
+                <button type="button" className="secondary" disabled={Boolean(pending)} onClick={() => void dispatch()}>
+                  {pending === "dispatch" ? "Starting…" : "Run agent"}
+                </button>
               )}
               {!current.archived && (actor.kind === "human" || actor.role === "architect") && (
                 <button

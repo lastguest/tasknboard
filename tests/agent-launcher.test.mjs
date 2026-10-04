@@ -80,7 +80,21 @@ async function fixture(t, { client = "claude" } = {}) {
 const events = (store, id) =>
   store.execute("get_task", { id }, human).events.map((e) => e.kind);
 
-test("assigning a task to an installed agent starts its CLI in the board folder", async (t) => {
+test("assignment does not dispatch an agent", async (t) => {
+  const { store, launcher, calls, board } = await fixture(t);
+  const task = store.execute("create_task", { boardId: board.id, title: "Ownership", assignee: "" }, human);
+  const assigned = store.execute("update_task", {
+    id: task.id, expectedVersion: task.version, patch: { assignee: "bot" },
+  }, human);
+  launcher.changed(task, assigned);
+  await settle();
+  assert.equal(calls.length, 0);
+  assert.deepEqual(launcher.status("bot"), { running: null, queued: [] });
+  assert.equal(launcher.runTask(assigned), true);
+  await waitFor(() => calls.length === 1);
+});
+
+test("an explicit run starts the agent CLI in the board folder", async (t) => {
   const { store, launcher, calls, repository, board } = await fixture(t);
   assert.equal(board.repository, repository);
   const task = store.execute(
@@ -88,7 +102,7 @@ test("assigning a task to an installed agent starts its CLI in the board folder"
     { boardId: board.id, title: "Fix it", assignee: "bot" },
     human,
   );
-  launcher.assigned(task);
+  launcher.runTask(task);
   await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
   const [call] = calls;
@@ -103,7 +117,7 @@ test("assigning a task to an installed agent starts its CLI in the board folder"
   assert.ok(events(store, task.id).includes("agent_started"));
 });
 
-test("a busy agent queues the next assignment and starts it when the run ends", async (t) => {
+test("a busy agent queues the next explicit run and starts it when the run ends", async (t) => {
   const { store, launcher, calls, board } = await fixture(t, { client: "codex" });
   const first = store.execute(
     "create_task",
@@ -115,9 +129,9 @@ test("a busy agent queues the next assignment and starts it when the run ends", 
     { boardId: board.id, title: "Two", assignee: "bot" },
     human,
   );
-  launcher.assigned(first);
-  launcher.assigned(second);
-  launcher.assigned(second);
+  launcher.runTask(first);
+  launcher.runTask(second);
+  launcher.runTask(second);
   await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].args[0], "exec");
@@ -149,7 +163,7 @@ test("custom prompts always include the task description and acceptance criteria
     boardId: board.id, title: "Fix the export", assignee: "bot",
     description: "Preserve the authored layout.", acceptance: "The export opens the saved board.",
   }, human);
-  launcher.assigned(task);
+  launcher.runTask(task);
   await waitFor(() => calls.length === 1);
   const prompt = calls[0].args.at(-1);
   assert.match(prompt, /Fix the export/);
@@ -163,7 +177,7 @@ test("external dispatch prevents a second assignment run", async (t) => {
     boardId: board.id, title: "Delegated work", assignee: "bot",
   }, human);
   store.execute("delegate_task", { id: task.id, expectedVersion: task.version, delegatedTo: "codex/cli" }, human);
-  launcher.assigned(task);
+  launcher.runTask(task);
   await settle();
   assert.equal(calls.length, 0);
 });
@@ -175,7 +189,7 @@ test("Codex uses the reasoning and sandbox settings of its task's board", async 
     patch: { agentReasoning: "high", agentSandbox: "read-only" },
   }, human);
   const task = store.execute("create_task", { boardId: board.id, title: "Plan", assignee: "bot" }, human);
-  launcher.assigned(task);
+  launcher.runTask(task);
   await waitFor(() => calls.length === 1);
   assert.ok(calls[0].args.includes('model_reasoning_effort="high"'));
   assert.equal(calls[0].args[calls[0].args.indexOf("--sandbox") + 1], "read-only");
@@ -188,7 +202,7 @@ test("no run starts without a folder, for unknown agents, or for claimed tasks",
     { boardId: board.id, title: "Human work", assignee: "somebody" },
     human,
   );
-  launcher.assigned(other);
+  launcher.runTask(other);
   const claimed = store.execute(
     "create_task",
     { boardId: board.id, title: "Taken", assignee: "bot" },
@@ -199,7 +213,7 @@ test("no run starts without a folder, for unknown agents, or for claimed tasks",
     { id: claimed.id, expectedVersion: claimed.version },
     { id: "bot", kind: "agent" },
   );
-  launcher.assigned(claimed);
+  launcher.runTask(claimed);
   await settle();
   assert.equal(calls.length, 0);
 
@@ -214,7 +228,7 @@ test("no run starts without a folder, for unknown agents, or for claimed tasks",
     { boardId: board.id, title: "No folder", assignee: "bot" },
     human,
   );
-  launcher.assigned(task);
+  launcher.runTask(task);
   await settle();
   assert.equal(calls.length, 0);
   assert.ok(events(store, task.id).includes("agent_not_started"));
@@ -232,7 +246,7 @@ test("the launcher stays off outside the local desktop app", async (t) => {
   });
   launcher.register("bot", "claude");
   const [board] = store.execute("list_boards", {}, human).boards;
-  launcher.assigned(
+  launcher.runTask(
     store.execute(
       "create_task",
       { boardId: board.id, title: "Web", assignee: "bot" },
@@ -345,7 +359,7 @@ test("each CLI gets its model, profile, extra arguments, and environment", async
       { boardId: board.id, title: "Go", assignee: "bot" },
       human,
     );
-    launcher.assigned(task);
+    launcher.runTask(task);
     await waitFor(() => calls.length >= 1);
     assert.equal(calls.length, 1, client);
     const prompt = client === "claude" ? calls[0].args[1] : calls[0].args.at(-1);
@@ -369,7 +383,7 @@ test("a custom command path and prompt are used, and disabled agents or events n
   const make = (title) =>
     store.execute("create_task", { boardId: board.id, title, assignee: "bot" }, human);
   const first = make("Custom");
-  launcher.assigned(first);
+  launcher.runTask(first);
   await waitFor(() => calls.length >= 1);
   assert.equal(calls[0].command, custom);
   assert.match(calls[0].args[1], /Work on TNB-1 \(Custom\) for bot on /);
@@ -378,15 +392,15 @@ test("a custom command path and prompt are used, and disabled agents or events n
   await settle();
 
   configure(store, { events: { task_assigned: { enabled: false } } });
-  launcher.assigned(make("Off event"));
+  launcher.runTask(make("Off event"));
   configure(store, { enabled: false, events: { task_assigned: { enabled: true } } });
-  launcher.assigned(make("Off agent"));
+  launcher.runTask(make("Off agent"));
   await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
 
   configure(store, { enabled: true, command: join(home, "missing") });
   const missing = make("Missing");
-  launcher.assigned(missing);
+  launcher.runTask(missing);
   await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
   const note = store
@@ -402,7 +416,7 @@ test("unassigning stops the run on that task and drops it from the queue", async
   const first = make("One");
   const second = make("Two");
   const third = make("Three");
-  for (const task of [first, second, third]) launcher.assigned(task);
+  for (const task of [first, second, third]) launcher.runTask(task);
   await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
   const reassign = (task) => {
@@ -507,7 +521,7 @@ test("the stand-up starts bound agents that have open tasks", async (t) => {
 
 test("runs get a copy of the user's environment, not the service's", async (t) => {
   const { store, launcher, calls, board } = await fixture(t);
-  launcher.assigned(
+  launcher.runTask(
     store.execute("create_task", { boardId: board.id, title: "Env", assignee: "bot" }, human),
   );
   await waitFor(() => calls.length === 1, "the agent starts with the user environment");
@@ -585,8 +599,8 @@ test("quitting records the stopped run, releases its claim, and starts it again 
     store.execute("create_task", { boardId: board.id, title, assignee: "bot" }, human);
   const first = make("Working");
   const second = make("Waiting");
-  launcher.assigned(first);
-  launcher.assigned(second);
+  launcher.runTask(first);
+  launcher.runTask(second);
   await waitFor(() => calls.length === 1, "the first run starts before shutdown");
   const claimed = store.execute("claim_task", { id: first.id, expectedVersion: 1 }, bot);
   assert.equal(claimed.lease.actor, "bot");
@@ -633,7 +647,7 @@ test("a task reassigned while another run starts still waits its turn", async (t
   const first = make("Starting");
   const second = make("Reassigned");
   // The first run is still starting when the second task is unassigned and assigned again.
-  launcher.assigned(first);
+  launcher.runTask(first);
   const away = store.execute(
     "update_task",
     { id: second.id, expectedVersion: second.version, patch: { assignee: "" } },
@@ -646,6 +660,7 @@ test("a task reassigned while another run starts still waits its turn", async (t
     human,
   );
   launcher.changed(away, back);
+  launcher.runTask(back);
   await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
   assert.deepEqual(launcher.status("bot").queued, [{ event: "task_assigned", taskId: second.id }]);

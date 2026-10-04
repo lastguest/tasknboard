@@ -2,6 +2,9 @@
 
 Task assignment, lease ownership, and external delegation are separate fields.
 `claim_task` sets the lease holder and keeps the assignee.
+Assignment sets the owner and does not start an agent process.
+The human **Run agent** action sends `agent-event` with `event: "task_assigned"` and `taskId`.
+Configured mentions, review changes, and stand-up events keep their existing dispatch rules.
 Repeating an active claim as its holder returns the current task, even with an old version.
 That repeat does not renew the lease, change the version, or add an event.
 Use `heartbeat` with the current version to renew a lease.
@@ -99,5 +102,7 @@ The default sandbox is `workspace-write`.
 Every task run receives the task ID, title, description, and acceptance criteria.
 Plugin installation removes the old standalone Codex registration after the plugin succeeds.
 The MCP supervisor keeps the host connection open if its worker fails.
+It also retries initialization if the first worker stops before the connection succeeds.
 It restarts the worker and restores initialization and resource subscriptions.
 It does not retry calls that were in flight. Read the task before retrying a change.
+The MCP client must keep its stdio connection open for this recovery.

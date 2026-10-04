@@ -91,8 +91,8 @@ export const agentClients = {
 export const agentEvents = [
   {
     id: "task_assigned",
-    label: "Task assigned",
-    description: "A person assigns a task to this agent, or creates one for it.",
+    label: "Run task",
+    description: "A person selects Run agent for an assigned task. Assignment alone does not start a run.",
     enabled: true,
     placeholders: ["agent", "task", "title", "board"],
     prompt: [

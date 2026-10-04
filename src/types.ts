@@ -61,6 +61,8 @@ export type Task = {
   version: number;
   archived: boolean;
   commentCount: number;
+  /** The latest archive action; null on active tasks. */
+  archiveCategory: "archived" | "rejected" | null;
   lease: null | { actor: string; expiresAt: number };
   delegatedTo?: string;
   delegatedBy?: string;

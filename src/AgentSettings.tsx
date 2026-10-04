@@ -248,7 +248,7 @@ export function AgentSettings({
       )}
       {!info.autoStart && (
         <p className="small agent-settings-note">
-          Agents start automatically only in the TasknBoard desktop app. You can
+          Agents run only in the TasknBoard desktop app. You can
           save these settings here and the desktop app uses them.
         </p>
       )}

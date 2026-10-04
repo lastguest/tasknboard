@@ -157,6 +157,7 @@ const sameSettings = (
 export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [archivedTasks, setArchivedTasks] = useState<Task[]>([]);
+  const [archiveCategory, setArchiveCategory] = useState("");
   const [boards, setBoards] = useState<BoardRecord[]>([]);
   const [selectedBoardId, setSelectedBoardId] = useState(readSelectedBoardId);
   const selectedBoardRef = useRef(selectedBoardId);
@@ -641,13 +642,14 @@ export default function App() {
     });
   };
   const q = query.trim().toLowerCase();
-  const filtersActive = Boolean(q || assignee || conditions.length);
+  const filtersActive = Boolean(q || assignee || conditions.length || (view === "archived" && archiveCategory));
   const inScope = (t: Task, scope: View = view) =>
     scope === "mine"
       ? workspaceInfoLoaded && t.assignee === actor.id
       : scope !== "epic" || t.epic === epicId;
   const matches = (t: Task, scope: View = view) =>
     inScope(t, scope) &&
+    (scope !== "archived" || !archiveCategory || t.archiveCategory === archiveCategory) &&
     (!assignee ||
       (assignee === UNASSIGNED ? !t.assignee : t.assignee === assignee)) &&
     (!q || `${t.id} ${t.title} ${t.description}`.toLowerCase().includes(q)) &&
@@ -658,7 +660,13 @@ export default function App() {
     pageTasks.filter((t) => matches(t)),
     display.orderBy,
   );
-  const groups = list
+  const groups = view === "archived"
+    ? (["archived", "rejected"] as const).map((category) => ({
+        key: category,
+        label: category === "rejected" ? "Rejected" : "Archived",
+        tasks: visible.filter((task) => task.archiveCategory === category),
+      })).filter((group) => group.tasks.length)
+    : list
     ? groupTasks(visible, display.groupBy, {
         lanes,
         epics: epicsById,
@@ -921,6 +929,7 @@ export default function App() {
   }
 
   function clearFilters() {
+    setArchiveCategory("");
     setQuery("");
     setAssignee("");
     setConditions([]);
@@ -2146,6 +2155,14 @@ export default function App() {
                     </button>
                   </div>
                   <div className="toolbar-actions">
+                    {view === "archived" && <label>
+                      Category{" "}
+                      <select aria-label="Archive category" value={archiveCategory} onChange={(event) => setArchiveCategory(event.target.value)}>
+                        <option value="">All categories</option>
+                        <option value="archived">Archived</option>
+                        <option value="rejected">Rejected</option>
+                      </select>
+                    </label>}
                     <FilterAddButton
                       count={conditions.length}
                       onClick={() => setAddingFilter(true)}
@@ -2153,6 +2170,7 @@ export default function App() {
                     <DisplayOptions
                       display={{ ...display, layout: list ? "list" : "board" }}
                       onChange={(next) => setDisplay(view === "archived" ? { ...next, layout: display.layout } : next)}
+                      showGrouping={view !== "archived"}
                     />
                     {filtersActive && (
                       <button
@@ -2361,6 +2379,7 @@ export default function App() {
                     pending={pending}
                     list={list}
                     groups={groups}
+                    archiveView={view === "archived"}
                   />
                 )}
               </>

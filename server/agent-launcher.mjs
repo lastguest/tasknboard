@@ -64,7 +64,7 @@ const taskWork = new Set(["task_assigned", "changes_requested"]);
 
 /**
  * Starts an agent's CLI when an event it is bound to happens, such as a person
- * assigning it a task. Only agents configured from this app start. One run per
+ * selecting Run agent for a task. Only agents configured from this app start. One run per
  * agent at a time; later events wait in that agent's queue.
  */
 /** USER, LOGNAME, and SHELL for the account this service runs as. */
@@ -385,9 +385,9 @@ export function createAgentLauncher({
   }
   /** Queues an event for an agent bound to it. */
   function trigger(identity, event, taskId, values = {}) {
-    if (!enabled || !identity || !taskId) return;
+    if (!enabled || !identity || !taskId) return false;
     const config = readConfig(store, identity);
-    if (!config?.enabled || !config.events[event]?.enabled) return;
+    if (!config?.enabled || !config.events[event]?.enabled) return false;
     const queue = queues.get(identity) ?? [];
     const run = running.get(identity)?.job;
     const same = (job) => job.event === event && job.taskId === taskId;
@@ -396,6 +396,7 @@ export function createAgentLauncher({
       queue.push({ event, taskId, values });
     queues.set(identity, queue);
     void next(identity);
+    return true;
   }
   /** Drops an agent's work on a task that a person gave to someone else. */
   function unassigned(identity, task) {
@@ -419,16 +420,16 @@ export function createAgentLauncher({
       );
     }
   }
-  /** Call after a person creates or assigns a task. */
-  function assigned(task) {
-    if (task?.assignee) trigger(task.assignee, "task_assigned", task.id);
+  /** Call only after a person selects Run agent for this task. */
+  function runTask(task) {
+    if (!task?.assignee || !prepare(task.assignee, { event: "task_assigned", taskId: task.id })) return false;
+    return trigger(task.assignee, "task_assigned", task.id);
   }
   /** Call after a person updates a task, with the task as it was before. */
   function changed(before, after) {
     if (!before || !after) return;
     if (before.assignee !== after.assignee) {
       if (before.assignee) unassigned(before.assignee, after);
-      assigned(after);
     } else if (
       before.role === "in_review" &&
       ["in_progress", "todo"].includes(after.role) &&
@@ -548,7 +549,7 @@ export function createAgentLauncher({
   /** Log files that runs write to now. */
   const runningLogs = () => new Set([...running.values()].map((run) => run.log));
   return {
-    assigned,
+    runTask,
     changed,
     commented,
     standup,

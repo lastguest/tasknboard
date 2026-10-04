@@ -82,7 +82,10 @@ MCP exposes `list_views` to agents. WebMCP exposes `list_views` and
 ## Interface
 
 The **Archived** page lists archived tasks from the selected board. It uses
-the List layout only. Search, filters, Group, and Order apply to the list.
+the List layout only. Search, filters, and Order apply to the list.
+The list groups tasks by archive category: **Archived** or **Rejected**.
+The category filter selects either category. The list hides the saved lane and status.
+Task details show **Archived** as the status and show the archive category separately.
 Task details and history are read-only. The page does not offer **Save as view**.
 
 Every task page has a filter bar of condition chips. Click a chip's operator to

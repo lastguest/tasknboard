@@ -117,8 +117,16 @@ function agentCommand(name, args, actor) {
       throw httpError("VALIDATION", "Provide only identity and config.", 400);
     return { identity: args.identity, config: writeConfig(store, args.identity, args.config) };
   }
+  if (args.event === "task_assigned") {
+    if (typeof args.taskId !== "string" || Object.keys(args).some((key) => !["event", "taskId"].includes(key)))
+      throw httpError("VALIDATION", "Provide event and taskId to run an assigned task.", 400);
+    const task = store.execute("get_task", { id: args.taskId }, actor);
+    if (!launcher.runTask(task))
+      throw httpError("AGENT_NOT_READY", "The task needs an enabled agent, an open work lane, and no active claim or external dispatch.", 409);
+    return { started: [task.assignee] };
+  }
   if (args.event !== "standup" || Object.keys(args).length !== 1)
-    throw httpError("VALIDATION", "event: Only standup can be sent.", 400);
+    throw httpError("VALIDATION", "event: Send standup, or task_assigned with taskId.", 400);
   const identities = new Set([...roster(), ...Object.keys(listConfigs(store))]);
   return { started: launcher.standup([...identities]) };
 }
@@ -402,8 +410,6 @@ const server = createServer(async (req, res) => {
       const output = result ?? store.execute(name, args, actor);
       // A person's edits start agents; agents cannot reassign tasks.
       if (actor.kind === "human") {
-        if (name === "create_task") launcher.assigned(output);
-        if (name === "bulk_create_tasks") for (const task of output.tasks) launcher.assigned(task);
         if (["update_task", "request_changes", "reject_task"].includes(name)) launcher.changed(before, output);
         if (name === "add_comment") launcher.commented(output, actor, args.body);
       }

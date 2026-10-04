@@ -383,13 +383,15 @@ const orderTitles: Record<ViewOrder, string> = {
 export function DisplayOptions({
   display,
   onChange,
+  showGrouping = true,
 }: {
   display: ViewDisplay;
   onChange: (display: ViewDisplay) => void;
+  showGrouping?: boolean;
 }) {
   return (
     <div className="display-options" role="group" aria-label="Display options">
-      {display.layout === "list" && (
+      {showGrouping && display.layout === "list" && (
         <label className="display-option">
           <span>Group</span>
           <select

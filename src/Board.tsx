@@ -194,6 +194,7 @@ type BoardProps = {
   /** The lane each moving task is headed for, by task ID. */
   pending?: Map<string, string>;
   list?: boolean;
+  archiveView?: boolean;
   /** List sections, from a view's grouping. Without them the list is by lane. */
   groups?: TaskGroup[];
   presentation?: boolean;
@@ -356,6 +357,7 @@ export function Board({
   onLogs,
   pending = new Map(),
   list = false,
+  archiveView = false,
   groups,
   presentation = false,
 }: BoardProps) {
@@ -416,8 +418,10 @@ export function Board({
             )}
           </td>
         )}
-        <td data-label="Status">
-          {onMove ? (
+        <td data-label={archiveView ? "Category" : "Status"}>
+          {archiveView ? (
+            <span>{t.archiveCategory === "rejected" ? "Rejected" : "Archived"}</span>
+          ) : onMove ? (
             <StatusPicker
               task={t}
               lanes={lanes}
@@ -454,7 +458,7 @@ export function Board({
             <tr>
               <th scope="col">Task</th>
               {epics && <th scope="col">Epic</th>}
-              <th scope="col">Status</th>
+              <th scope="col">{archiveView ? "Category" : "Status"}</th>
               <th scope="col">Priority</th>
               <th scope="col">Assignee</th>
               <th scope="col">Label</th>

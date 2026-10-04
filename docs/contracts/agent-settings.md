@@ -40,7 +40,7 @@ TasknBoard skill lives.
 
 | Event | Starts when | Default |
 | --- | --- | --- |
-| `task_assigned` | A person creates or assigns a task for the agent. | On |
+| `task_assigned` | A person selects **Run agent** for an assigned task. Assignment alone does not start a run. | On |
 | `task_unassigned` | A person reassigns the agent's task. The run on that task stops and its queued work is dropped. It has no prompt. | On |
 | `changes_requested` | A person moves the agent's task from an `in_review` lane back to an `in_progress` or `todo` lane. | On |
 | `mention` | A person writes `@identity` in a comment. The agent replies with a comment; comments need no claim, so replying leaves the assignee as it is. | Off |
@@ -49,7 +49,7 @@ TasknBoard skill lives.
 Task events start only when the task is still assigned to the agent, is in
 a `todo` or `in_progress` lane, and has no active claim. Mentions and stand-ups start
 unless another actor holds the claim. Agents never trigger events: only a
-person's writes do.
+person's explicit run request or configured event does.
 
 A run's prompt is fixed identity and safety instructions around the binding's
 prompt. Placeholders are `{{agent}}`, `{{task}}`, `{{title}}`, `{{board}}`,
@@ -88,3 +88,6 @@ Only people may call these. Agents receive 403.
   app it returns `{ available: false, runs: [] }`.
 - `POST /api/agent-event { event: "standup" }` queues the stand-up runs and
   returns `{ started: identity[] }`. The UI sends it when the stand-up opens.
+- `POST /api/agent-event { event: "task_assigned", taskId }` queues the assigned agent for that task.
+  It returns `{ started: identity[] }` or `AGENT_NOT_READY` when the task or agent cannot run.
+  Create and assignment commands do not send this event.
