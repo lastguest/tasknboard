@@ -97,8 +97,8 @@ test("Status menu saves and the server rejects an invalid drag", async ({ page }
 });
 
 test("List epic picker saves on choice and hides archived epics", async ({ page }) => {
-  const epic = await command("create_epic", { title: `List epic ${key()}` });
-  const old = await command("create_epic", { title: `Old epic ${key()}` });
+  const epic = await command("create_epic", { boardId: "BOARD-1", title: `List epic ${key()}` });
+  const old = await command("create_epic", { boardId: "BOARD-1", title: `Old epic ${key()}` });
   await command("archive_epic", { id: old.id, expectedVersion: old.version });
   const task = await create(`Epic pick ${key()}`);
   await connect(page);
@@ -589,7 +589,9 @@ test("Needs changes explains retained review evidence", async ({ page }) => {
   await connect(page);
   await card(page, task.id).click();
   const dialog = page.getByRole("region", { name: /Task details/ });
-  await dialog.getByRole("button", { name: "Needs changes" }).click();
+  await dialog.getByRole("button", { name: "Request changes" }).click();
+  await dialog.getByLabel("Reason for changes").fill("Add the missing review evidence.");
+  await dialog.getByRole("button", { name: "Send to In progress" }).click();
   await expect(dialog).toContainText("earlier submission for context");
   await expect(dialog.locator(".review-summary")).toHaveText("Earlier submission");
   expect((await command("get_task", { id: task.id })).lane).toBe("LANE-2");

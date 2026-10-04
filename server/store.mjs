@@ -648,7 +648,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         actor.id,
         actor.kind,
       );
-    db.prepare("UPDATE actors SET role=? WHERE id=?").run(actor.role, actor.id);
+    db.prepare("UPDATE actors SET role=? WHERE id=? AND role<>?").run(actor.role, actor.id, actor.role);
   };
   const validActor = (actor) => {
     if (
@@ -676,7 +676,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       if (!existing) needsWrite = true;
     }
     if (!needsWrite) {
-      for (const identity of identities) db.prepare("UPDATE actors SET role=? WHERE id=?").run(identity.role, identity.id);
+      for (const identity of identities) db.prepare("UPDATE actors SET role=? WHERE id=? AND role<>?").run(identity.role, identity.id, identity.role);
       return;
     }
     transaction(() => {

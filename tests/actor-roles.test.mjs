@@ -9,6 +9,17 @@ const human = { id: "you", kind: "human" };
 const agent = { id: "claude", kind: "agent" };
 const other = { id: "codex", kind: "agent" };
 
+test("unchanged actor registration and reads do not signal workspace changes", (t) => {
+  const store = fixture(t);
+  const before = store.dataVersion();
+  store.registerActors([human, agent, other]);
+  store.execute("workspace_info", {}, human);
+  store.execute("list_tasks", {}, agent);
+  assert.equal(store.dataVersion(), before);
+  store.registerActors([{ ...agent, role: "architect" }]);
+  assert.notEqual(store.dataVersion(), before);
+});
+
 function fixture(t) {
   const store = createStore(":memory:");
   t.after(() => store.close());

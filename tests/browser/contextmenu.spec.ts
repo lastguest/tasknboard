@@ -88,7 +88,7 @@ test("Keyboard opens the menu, archive asks first, and the page menu switches la
 });
 
 test("Epic context menu starts a task inside the epic", async ({ page }) => {
-  const epic = await command("create_epic", { title: `Menu epic ${key()}` });
+  const epic = await command("create_epic", { boardId: "BOARD-1", title: `Menu epic ${key()}` });
   await connect(page);
   const item = page.locator(".nav-epics").getByRole("button", { name: new RegExp(`^${epic.title}`) });
   // Menus close on scroll, so the sidebar must finish scrolling to the epic first.

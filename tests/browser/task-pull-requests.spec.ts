@@ -224,7 +224,7 @@ test("Stand-up cards and notes show the pull request mark", async ({ page }) => 
 
 test("Epic pages mark tasks that link pull requests", async ({ page }) => {
   const stamp = Date.now();
-  const epic = await command("create_epic", { title: `PR epic ${stamp}` });
+  const epic = await command("create_epic", { boardId: "BOARD-1", title: `PR epic ${stamp}` });
   const task = await command("create_task", {
     boardId: "BOARD-1",
     title: `Epic task with pull requests ${stamp}`,
