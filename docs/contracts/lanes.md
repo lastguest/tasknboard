@@ -56,7 +56,7 @@ not stored.
 
 Lane IDs are workspace-unique, allocated in creation order, and never reused.
 Names are trimmed, contain 1–40 characters, and are unique on their board
-without regard to case. A board has at most 12 lanes. The role of a lane does
+without regard to case. A board has at most 13 lanes. The role of a lane does
 not change after creation. To change it, create a lane with the new role,
 then delete the old lane into it.
 
@@ -76,8 +76,8 @@ board ID, and returns the board.
   otherwise). Every task in the lane, archived tasks included, moves to
   `moveTo`. So the last lane of a role cannot be deleted.
 
-`create_board` creates four lanes: Backlog, In progress, In review, and Done,
-with the four roles in that order.
+`create_board` creates four lanes: Backlog, In progress, In review, and Done.
+The lanes use the four roles in that order.
 
 ### Lane deletion and tasks
 
@@ -98,7 +98,8 @@ task's board (`VALIDATION` otherwise). The existing lease and version rules
 apply first. Then:
 
 - An agent can move its claimed task to a lane with role
-  `in_progress` or `done` (`FORBIDDEN` otherwise).
+  `todo`, `in_progress`, or `done` (`FORBIDDEN` otherwise).
+- A move to a `todo` lane parks the task and releases the claim.
 - A human can move a task to a `done` lane only from a lane with role
   `in_review` or `done` (`INVALID_TRANSITION` otherwise).
 - A move to a lane with role `in_review` or `done` releases the claim.
@@ -119,6 +120,14 @@ the claim.
 
 In the task page, **Mark Done** moves a task to the first `done` lane. **Needs
 changes** moves it to the first `in_progress` lane.
+**Reject** calls `reject_task({ id, expectedVersion, reason? })`.
+Only a human or an architect can reject a task.
+The task must not already be archived.
+Rejection archives the task and saves the optional reason in its activity.
+Rejection clears the lease and delegation and keeps the assignee.
+The task keeps its lane, data, and activity, but leaves active lists.
+Task links retain the archived state of rejected tasks.
+Use `restore_task({ id, expectedVersion })` to return the task to its saved lane.
 
 ## Reads and filters
 
@@ -126,8 +135,7 @@ changes** moves it to the first `in_progress` lane.
 - `list_boards`, `workspace_info`, and every board result carry `lanes`.
 - Epic `counts` maps each role to the number of non-archived tasks:
   `{ todo, in_progress, in_review, done }`. `archive_epic` fails with
-  `EPIC_NOT_EMPTY` while a non-archived task of the epic is not in a `done`
-  lane.
+  `EPIC_NOT_EMPTY` while a non-archived task of the epic is not in a `done` lane.
 - View conditions use the fields `role` and `lane`. They replace `status`.
   `role` values are role IDs. `lane` values are lane IDs of any board.
 - The view `groupBy` value `lane` replaces `status` and is the default. The
@@ -154,6 +162,8 @@ current tools.
 The CLI groups tasks by the lanes of each task's board. `/move <lane>` takes a
 lane name, or a unique start of one, on the task's board. `/done` moves a
 reviewed task to the first `done` lane.
+`/reject [reason]` rejects the selected task.
+`tasknboard reject_task` accepts JSON with `id`, `expectedVersion`, and an optional `reason`.
 
 ## Interface
 
@@ -179,7 +189,11 @@ then rewrites stored data in the same transaction:
 - Each view condition on `status` becomes a condition on `role`, with
   `backlog` mapped to `todo`. Each view `groupBy: "status"` becomes `lane`.
 
-`workspace_info` and `export_workspace` report `schemaVersion: 18`. The export
+Migration 20 removes obsolete rejected lanes and archives their tasks.
+The tasks move to a valid lane on their board and keep their data and activity.
+New boards have only the four workflow roles.
+
+`workspace_info` and `export_workspace` report `schemaVersion: 20`. The export
 includes every board with its lanes, without the derived task counts.
 
 ## Acceptance criteria
@@ -193,8 +207,7 @@ includes every board with its lanes, without the derived task counts.
    named the lane name the target lane.
 5. An agent can claim, heartbeat, release, move between `in_progress` lanes,
    and submit for review. A claim expires after 15 minutes.
-6. No agent command puts a task in a `done` lane. No command puts a task in a
-   `done` lane from a `todo` or `in_progress` lane.
+6. An agent can complete its claimed task. A human can mark a task done only after review.
 7. The board, list, views, epics, stand-up, CLI, and agent launcher show and
    use the lanes of each board. No code path uses the old status IDs.
 8. Existing tests pass after updates for the new model. New tests cover the

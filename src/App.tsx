@@ -77,6 +77,7 @@ import {
 import { referencePrefixes } from "./task-references";
 import {
   activeLease,
+  canArchiveTask,
   doneLocked,
   epicPalette,
   epicStyle,
@@ -97,6 +98,7 @@ import {
 type View =
   | "board"
   | "mine"
+  | "archived"
   | "inbox"
   | "agents"
   | "epics"
@@ -117,6 +119,7 @@ type BoardDialog = null | { board: BoardRecord | null };
 const viewTitles: Record<Exclude<View, "epic" | "saved">, string> = {
   board: "Board",
   mine: "My tasks",
+  archived: "Archived",
   inbox: "Inbox",
   agents: "Agents",
   epics: "Epics",
@@ -153,6 +156,7 @@ const sameSettings = (
 
 export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [archivedTasks, setArchivedTasks] = useState<Task[]>([]);
   const [boards, setBoards] = useState<BoardRecord[]>([]);
   const [selectedBoardId, setSelectedBoardId] = useState(readSelectedBoardId);
   const selectedBoardRef = useRef(selectedBoardId);
@@ -178,8 +182,9 @@ export default function App() {
   const [viewSaving, setViewSaving] = useState(false);
   const [viewError, setViewError] = useState<ApiError | null>(null);
   const [display, setDisplay] = useState<ViewDisplay>(defaultDisplay);
-  const list = display.layout === "list";
+  const list = view === "archived" || display.layout === "list";
   const setList = (next: boolean) =>
+    view !== "archived" &&
     setDisplay((d) => ({ ...d, layout: next ? "list" : "board" }));
   const [query, setQuery] = useState("");
   const [assignee, setAssignee] = useState("");
@@ -282,16 +287,17 @@ export default function App() {
         setSelectedBoardId(scopedBoardId);
         persistSelectedBoardId(scopedBoardId);
       }
-      const [next, epicList] = scopedBoardId
+      const [next, archivedNext, epicList] = scopedBoardId
         ? await Promise.all([
             loadTasks(scopedBoardId),
+            loadTasks(scopedBoardId, true),
             // Each board owns its epics and task counts.
             command<{ epics: Epic[] }>("list_epics", {
               includeArchived: true,
               boardId: scopedBoardId,
             }),
           ])
-        : [[], { epics: [] as Epic[] }];
+        : [[], [], { epics: [] as Epic[] }];
       // A slow response for the previous selection must never replace this board.
       if (
         selectedBoardRef.current !== scopedBoardId ||
@@ -299,6 +305,7 @@ export default function App() {
       )
         return { ok: true };
       setTasks(next);
+      setArchivedTasks(archivedNext);
       setEpics(epicList.epics);
       refreshTaskReferences();
       setSync({
@@ -353,6 +360,7 @@ export default function App() {
       setSelectedBoardId(id);
       persistSelectedBoardId(id);
       setTasks([]);
+      setArchivedTasks([]);
       setEpics([]);
       setSync({ loaded: false, connected: false, error: null, lastSync: "" });
       setPending(new Map());
@@ -494,7 +502,7 @@ export default function App() {
       if (e.key === "n" || e.key === "N") {
         e.preventDefault();
         const boardId = selectedBoardRef.current;
-        if (boardId)
+        if (boardId && view !== "archived")
           setEditor({ boardId, epic: view === "epic" ? epicId : undefined });
       } else if (e.key === "f" || e.key === "F") {
         e.preventDefault();
@@ -571,16 +579,17 @@ export default function App() {
     () => new Set(actors.filter((a) => a.kind === "agent").map((a) => a.id)),
     [actors],
   );
+  const pageTasks = view === "archived" ? archivedTasks : tasks;
   const assignees = useMemo(
     () =>
-      [...new Set(tasks.map((t) => t.assignee).filter(Boolean))].sort((a, b) =>
+      [...new Set(pageTasks.map((t) => t.assignee).filter(Boolean))].sort((a, b) =>
         a.localeCompare(b),
       ),
-    [tasks],
+    [pageTasks],
   );
   const labels = useMemo(
-    () => [...new Set(tasks.flatMap((t) => t.labels))].sort(),
-    [tasks],
+    () => [...new Set(pageTasks.flatMap((t) => t.labels))].sort(),
+    [pageTasks],
   );
   const epicsById = useMemo(
     () => new Map(epics.map((epic) => [epic.id, epic])),
@@ -644,9 +653,9 @@ export default function App() {
     (!q || `${t.id} ${t.title} ${t.description}`.toLowerCase().includes(q)) &&
     (!conditions.length ||
       taskMatchesView(t, { query: "", conditions }, actor.id));
-  const scoped = tasks.filter((t) => inScope(t));
+  const scoped = pageTasks.filter((t) => inScope(t));
   const visible = sortTasks(
-    tasks.filter((t) => matches(t)),
+    pageTasks.filter((t) => matches(t)),
     display.orderBy,
   );
   const groups = list
@@ -726,7 +735,7 @@ export default function App() {
       seedView(currentSaved);
   }, [currentSaved?.version]);
   const canSaveView =
-    isHuman && !overviews.includes(view) && sync.connected;
+    isHuman && view !== "archived" && !overviews.includes(view) && sync.connected;
   const showSaveView =
     canSaveView &&
     view !== "saved" &&
@@ -1138,6 +1147,7 @@ export default function App() {
       boardSelectionEpoch.current += 1;
       boardDataGeneration.current += 1;
       setTasks([]);
+      setArchivedTasks([]);
       setEpics([]);
       setSync({ loaded: false, connected: false, error: null, lastSync: "" });
       setOpening("");
@@ -1358,7 +1368,7 @@ export default function App() {
               icon: <Icon name="list" size={14} />,
               onSelect: () => copyId(task.id),
             },
-            ...(isHuman
+            ...(workspaceInfoLoaded && canArchiveTask(task, actor)
               ? [
                   {
                     label: "Archive",
@@ -1446,7 +1456,7 @@ export default function App() {
       menuAt(e, `${title} actions`, [
         {
           items: [
-            ...(taskView && !currentEpic?.archived
+            ...(taskView && view !== "archived" && !currentEpic?.archived
               ? [
                   {
                     label: "New task",
@@ -1477,7 +1487,7 @@ export default function App() {
         },
         {
           label: "Layout",
-          items: taskView
+          items: taskView && view !== "archived"
             ? [
                 {
                   label: "Board",
@@ -1590,6 +1600,7 @@ export default function App() {
               [
                 ["board", "board"],
                 ["mine", "user"],
+                ["archived", "archive"],
                 ["inbox", "inbox"],
                 ["agents", "cursor"],
                 ["epics", "folder"],
@@ -1601,7 +1612,7 @@ export default function App() {
                 key={id}
                 type="button"
                 className={`nav-item ${view === id ? "selected" : ""} ${
-                  id === "board" || id === "epics" || id === "views"
+                  id === "board" || id === "archived" || id === "epics" || id === "views"
                     ? "nav-board-scoped"
                     : ""
                 }`}
@@ -1909,7 +1920,7 @@ export default function App() {
                 labels={labels}
                 epics={epics}
                 linkCandidates={tasks}
-                latestVersion={tasks.find((t) => t.id === task.id)?.version}
+                latestVersion={[...tasks, ...archivedTasks].find((t) => t.id === task.id)?.version}
                 closeRequest={closeRequest}
                 onReveal={() => setActiveTab(task.id)}
                 onClose={() => closeTab(task.id)}
@@ -2004,6 +2015,8 @@ export default function App() {
                     ? "Projects that group related tasks. Open one to see its board."
                     : view === "agents"
                     ? "Coding agents that work on tasks in this workspace."
+                    : view === "archived"
+                    ? `Archived tasks on ${currentBoard?.name ?? "the selected board"}. Open a task to read its details and history.`
                     : workspaceInfoLoaded
                       ? `Tasks assigned to ${displayName(people, actor.id)} on ${currentBoard?.name ?? "the selected board"}.`
                       : ""}
@@ -2113,6 +2126,7 @@ export default function App() {
               <>
                 <div className="toolbar">
                   <div className="tabs" role="group" aria-label="Layout">
+                    {view !== "archived" && (
                     <button
                       type="button"
                       aria-pressed={!list}
@@ -2121,6 +2135,7 @@ export default function App() {
                     >
                       <Icon name="board" size={15} /> Board
                     </button>
+                    )}
                     <button
                       type="button"
                       aria-pressed={list}
@@ -2135,7 +2150,10 @@ export default function App() {
                       count={conditions.length}
                       onClick={() => setAddingFilter(true)}
                     />
-                    <DisplayOptions display={display} onChange={setDisplay} />
+                    <DisplayOptions
+                      display={{ ...display, layout: list ? "list" : "board" }}
+                      onChange={(next) => setDisplay(view === "archived" ? { ...next, layout: display.layout } : next)}
+                    />
                     {filtersActive && (
                       <button
                         type="button"
@@ -2153,7 +2171,7 @@ export default function App() {
                       value={assignee}
                       onChange={setAssignee}
                     />
-                    <button
+                    {view !== "archived" && <button
                       type="button"
                       className="primary"
                       onClick={() => newTask()}
@@ -2161,7 +2179,7 @@ export default function App() {
                     >
                       <Icon name="plus" size={16} />
                       New task
-                    </button>
+                    </button>}
                   </div>
                 </div>
                 <div className={conditions.length || showSaveView ? "filter-row" : "filter-row empty"}>
@@ -2233,7 +2251,12 @@ export default function App() {
                       </button>
                     </div>
                   </div>
-                ) : tasks.length === 0 ? (
+                ) : view === "archived" && scoped.length === 0 ? (
+                  <div className="empty-state">
+                    <h2>No archived tasks.</h2>
+                    <p>Tasks you archive on this board appear here.</p>
+                  </div>
+                ) : pageTasks.length === 0 ? (
                   <div className="empty-state">
                     <h2>No tasks yet.</h2>
                     <p>
@@ -2330,10 +2353,10 @@ export default function App() {
                     agents={agents}
                     epics={view === "epic" ? undefined : epicsById}
                     onOpen={openTask}
-                    onMove={move}
-                    onEpic={setEpic}
-                    onNew={newTask}
-                    onMenu={taskMenu}
+                    onMove={view === "archived" ? undefined : move}
+                    onEpic={view === "archived" ? undefined : setEpic}
+                    onNew={view === "archived" ? undefined : newTask}
+                    onMenu={view === "archived" ? undefined : taskMenu}
                     onLogs={logsAvailable ? (t) => setLogTask(t.id) : undefined}
                     pending={pending}
                     list={list}

@@ -26,8 +26,8 @@ export async function readCommandInput(args: string[]): Promise<string> {
 
 const taskCommands = new Set([
   "get_task", "update_task", "set_standup_notes", "claim_task", "heartbeat",
-  "release_task", "delegate_task", "request_changes", "link_commits", "add_comment",
-  "submit_review", "archive_task", "link_task", "unlink_task", "link_pull_requests",
+  "release_task", "delegate_task", "request_changes", "reject_task", "link_commits", "add_comment",
+  "submit_review", "archive_task", "restore_task", "link_task", "unlink_task", "link_pull_requests",
   "unlink_pull_request",
 ]);
 

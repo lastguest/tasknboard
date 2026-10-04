@@ -510,7 +510,7 @@ test("runs get a copy of the user's environment, not the service's", async (t) =
   launcher.assigned(
     store.execute("create_task", { boardId: board.id, title: "Env", assignee: "bot" }, human),
   );
-  await settle();
+  await waitFor(() => calls.length === 1, "the agent starts with the user environment");
   const { env } = calls[0].options;
   assert.equal(env.USER, "someone");
   assert.equal(env.FROM_PROFILE, "yes");

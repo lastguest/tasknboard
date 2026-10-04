@@ -195,9 +195,9 @@ test("Settings, task workflow, agent review, archive, and export", async ({ page
   );
   await details.getByRole("button", { name: "Mark Done" }).click();
   await expect(details.getByText("Marked Done.")).toBeVisible();
-  await details.getByRole("button", { name: "Archive task…" }).click();
-  const confirmation = details.getByRole("group", { name: "Confirm archive" });
-  await expect(confirmation).toContainText(`Archive ${taskId}?`);
+  await details.locator(".dialog-head").getByRole("button", { name: "Archive task…" }).click();
+  const confirmation = page.getByRole("dialog", { name: `Archive ${taskId}?` });
+  await expect(confirmation).toContainText("Its history stays in the database");
   await confirmation.getByRole("button", { name: "Archive", exact: true }).click();
   await expect(details).toBeHidden();
   await expect(page.getByRole("button", { name: new RegExp(`^${taskId}: Edited ${title}`) })).toHaveCount(0);

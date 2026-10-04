@@ -16,11 +16,13 @@ export const commandExamples: Record<string, Record<string, unknown>> = {
   release_task: task,
   delegate_task: { ...task, delegatedTo: "worker-1" },
   request_changes: { ...task, reason: "Add the missing check" },
+  reject_task: { ...task, reason: "The task is no longer needed" },
   list_notifications: { after: 0 },
   link_commits: { ...task, commits: ["abcdef1234567890"] },
   add_comment: { id: "TNB-1", body: "The change is ready" },
   submit_review: { ...task, summary: "The change is ready", artifactUrl: "src/main.ts" },
   archive_task: task,
+  restore_task: task,
   link_task: { ...task, type: "blocks", target: "TNB-2" },
   unlink_task: { ...task, target: "TNB-2" },
   link_pull_requests: { ...task, pullRequests: ["acme/app#7"] },
@@ -53,24 +55,28 @@ export const commandExamples: Record<string, Record<string, unknown>> = {
   bulk_move_tasks: { tasks: [task], lane: "LANE-12" },
 };
 
-export function commandHelp(command: string): string {
+export function commandHelp(command: string, platform: string = process.platform): string {
   if (!Object.hasOwn(schemas, command))
     throw Object.assign(new Error(`Unknown command: ${command}. Run tasknboard help for the command list.`), { code: "USAGE" });
   const schema = z.toJSONSchema(schemas[command], { io: "input", unrepresentable: "any" });
   const required = schema.required ?? [];
   const optional = Object.keys(schema.properties ?? {}).filter((key) => !required.includes(key));
+  const windows = platform === "win32";
   const lines = [
-    `Usage: tasknboard ${command} '[json]'`,
-    `       tasknboard ${command} --file <path>`,
+    `Usage: tasknboard ${command} --file <path>`,
     `       tasknboard ${command} --stdin`,
+    ...(!windows ? [`       tasknboard ${command} '[json]'`] : []),
     `Required fields: ${required.join(", ") || "none"}`,
     `Optional fields: ${optional.join(", ") || "none"}`,
+    "", "Save this JSON in args.json:",
+    JSON.stringify(commandExamples[command]),
     "", "Example:",
-    `  tasknboard ${command} '${JSON.stringify(commandExamples[command])}'`,
-    "", "On Windows, use --file or --stdin to keep JSON out of cmd.exe arguments.",
-    `Save the example JSON in args.json, then run tasknboard ${command} --file args.json.`,
+    `  tasknboard ${command} --file args.json`,
+    "", "On Windows, use --file or --stdin for all JSON input.",
     `PowerShell: Get-Content -Raw -Encoding utf8 args.json | tasknboard ${command} --stdin`,
-    "Use one input mode per command. Direct JSON requires a shell that preserves it.",
+    "Use one input mode per command.",
+    ...(windows ? ["Do not put JSON in tasknboard.cmd arguments. cmd.exe can interpret JSON text as shell commands."]
+      : [`Direct JSON is also supported in shells that preserve it: tasknboard ${command} '${JSON.stringify(commandExamples[command])}'`]),
   ];
   if (acceptsTaskId(command)) lines.push("", "Use id or taskId for the task key. If you set both, they must match.");
   if (command === "bulk_move_tasks") lines.push("", "Each tasks entry accepts id or taskId and requires expectedVersion.");

@@ -25,6 +25,7 @@ const descriptions = {
   bulk_create_tasks: "Create tasks in one atomic call. Each task includes boardId and optional lane and blockedBy.",
   bulk_move_tasks: "Move tasks to one lane in one atomic call. Pass each task ID and current version.",
   delegate_task: "Record external work without a lease. Pass delegatedTo to keep the task in progress and prevent duplicate automatic runs.",
+  reject_task: "Reject and archive a task, preserving its lane and releasing its claim and delegation. Humans and architects can use this action. Pass an optional reason.",
   request_changes: "Return a task in review to in progress with a required reason. Architects and humans can use this action.",
   list_notifications: "Read human review feedback. Pass after to resume from a sequence. Subscribe to tasknboard://notifications for push updates.",
   list_boards:
@@ -32,7 +33,7 @@ const descriptions = {
   workspace_info:
     "Read workspace identity, authenticated actor and lease duration.",
   list_tasks:
-    "Find non-archived tasks. Paginated; use offset and limit. Filter by lane role (role: \"todo\" finds unstarted work), lane ID, epic ID or \"none\", or by a saved view ID from list_views. Each task carries its lane and the lane's role. Read task before claiming.",
+    "Find active tasks by default. Pass archived:true to find only archived tasks. Use offset and limit for pages. Filter by lane role, lane ID, epic ID or \"none\", or saved view ID. Each task includes its lane and role. Read the task before you claim it.",
   list_views:
     "List saved views: named task filters and display settings that people share with the workspace. Pass a view's ID to list_tasks to get its tasks.",
   list_epics:
@@ -48,12 +49,16 @@ const descriptions = {
   create_task:
     "Create a task on the explicit boardId from list_boards, with instructions and acceptance criteria, optionally inside an existing epic. Pass an initial lane and blockedBy task IDs, or use the first todo lane. Call find_similar_tasks first. If a result is the same work, do not create a task: use the existing one, and link related work to it with link_task type duplicates.",
   update_task:
-    "Update your claimed task using expectedVersion. Set patch.lane to an in_progress or done lane ID from its board. A move to done releases your claim. Agents cannot reassign tasks. Use submit_review to request human review.",
+    "Update your claimed task using expectedVersion. Set patch.lane to a todo, in_progress, or done lane ID from its board. A todo move parks the task and releases your claim. A done move releases your claim. A lane-only move on an open task can renew your expired claim. Agents cannot reassign tasks. Use submit_review to request human review.",
   claim_task:
     "Acquire a task in a todo or in_progress lane for 15 minutes. A todo task moves to the board's first in_progress lane. Your own active claim returns the current task without lease renewal, even after a stale version retry. Another actor's active claim fails with lease details. A new claim requires the current version.",
   heartbeat:
     "Extend your owned lease by 15 minutes. Returns a NEW task version; use it in subsequent writes.",
-  release_task: "Release your active claim without changing the task's lane.",
+  release_task: "Release an active claim as its owner or an architect. Use the current expectedVersion. The task keeps its lane.",
+  archive_task:
+    "Archive a task with its current expectedVersion. Architects can archive tasks; workers can archive only tasks they created. Workers cannot archive another actor's active claim. Archiving clears the lease and delegation, hides the task from active lists, and keeps its history.",
+  restore_task:
+    "Restore an archived task with its current expectedVersion. Architects can restore tasks; workers can restore only tasks they created. The task returns to its saved lane with no lease or delegation. Read get_task first.",
   add_comment:
     "Append progress, a question, or a reply to any task, claimed or not. No expectedVersion is required.",
   set_standup_notes:
@@ -93,7 +98,7 @@ const read = [
   "list_notifications",
 ];
 const concise = (output) => {
-  if (output?.id && output?.lane) return { id: output.id, version: output.version, lane: output.lane };
+  if (output?.id && output?.lane) return { id: output.id, version: output.version, lane: output.lane, ...(output.archived ? { archived: true } : {}) };
   if (Array.isArray(output?.tasks)) return { ...output, tasks: output.tasks.map((task) => task.lane ? { id: task.id, version: task.version, lane: task.lane, title: task.title, role: task.role, assignee: task.assignee, labels: task.labels } : task) };
   return output;
 };
@@ -105,7 +110,7 @@ for (const [name, description] of Object.entries(descriptions)) {
       inputSchema: schemas[name].extend({ verbose: z.boolean().optional() }),
       annotations: {
         readOnlyHint: read.includes(name),
-        destructiveHint: false,
+        destructiveHint: name === "archive_task",
         idempotentHint: read.includes(name),
         openWorldHint: false,
       },
@@ -114,7 +119,7 @@ for (const [name, description] of Object.entries(descriptions)) {
       try {
         const { verbose, ...input } = args;
         const full = await client.execute(name, input);
-        const output = verbose || name === "get_task" ? full : concise(full);
+        const output = verbose || name === "get_task" ? full : name === "restore_task" ? { ...concise(full), archived: false } : concise(full);
         return {
           content: [{ type: "text", text: JSON.stringify(output) }],
           structuredContent: output,

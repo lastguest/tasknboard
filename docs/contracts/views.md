@@ -59,6 +59,9 @@ exist, and every command that names it fails with `NOT_FOUND`.
   does not change the view's version or append an event.
 - `list_tasks({ view })` applies a view's filters for the caller, together
   with any other `list_tasks` filters.
+- `list_tasks({ archived: true })` returns only archived tasks. The default
+  `archived: false` returns only active tasks. Both support all task filters,
+  pages, and comment counts.
 
 Filters may name only existing epics (`NOT_FOUND` otherwise). Archived epics
 stay valid. Only humans create, edit, delete, or star views (`FORBIDDEN`
@@ -70,13 +73,17 @@ Migration 7 adds a `views` table and a `view_favorites(actor, view_id)` table.
 Existing tasks are not touched. View writes append events (`created`,
 `update_view`, `delete_view`) whose subject ID is the view ID. The deletion
 event's body is the view as it was. `workspace_info` and `export_workspace`
-report `schemaVersion: 18` since [lanes](lanes.md). The export includes every view (personal ones too,
+report `schemaVersion: 20` after removal of obsolete rejected lanes in [lanes](lanes.md). The export includes every view (personal ones too,
 since exports are human-only backups) and `viewFavorites`.
 
 MCP exposes `list_views` to agents. WebMCP exposes `list_views` and
 `create_view` to the signed-in browser user.
 
 ## Interface
+
+The **Archived** page lists archived tasks from the selected board. It uses
+the List layout only. Search, filters, Group, and Order apply to the list.
+Task details and history are read-only. The page does not offer **Save as view**.
 
 Every task page has a filter bar of condition chips. Click a chip's operator to
 switch between is and is not, or its values to change them. Group (list only) and

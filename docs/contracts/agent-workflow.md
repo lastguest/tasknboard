@@ -5,7 +5,13 @@ Task assignment, lease ownership, and external delegation are separate fields.
 Repeating an active claim as its holder returns the current task, even with an old version.
 That repeat does not renew the lease, change the version, or add an event.
 Use `heartbeat` with the current version to renew a lease.
-Expired claims need a new claim with the current version.
+Use `release_task({id, expectedVersion})` to release an active claim as its holder or an architect.
+Release keeps the task lane, assignee, and delegation.
+Task details show a Release claim action for the claim holder and an architect.
+Expired claims need a new claim with the current version for ordinary edits.
+A lane-only move can renew the same actor's expired claim on an open task.
+Workers can move their claimed task to a todo lane without changing its assignee.
+That move parks the task and clears its lease.
 Lease errors include the holder, expiry, server time, remaining milliseconds, and active state in `details.lease`.
 Negative remaining milliseconds mean the lease expired.
 `delegate_task({id, expectedVersion, delegatedTo})` records external work and moves the task to `in_progress`.
@@ -31,8 +37,23 @@ The task creator and an architect can submit review without a claim.
 The task creator and an architect can also link commits without a claim.
 Commit links keep the current lease, assignee, and delegation.
 Anyone can add comments without a claim.
+Humans and architects can archive tasks with `archive_task({id, expectedVersion})`.
+Workers can archive only tasks they created, without an active claim from another actor.
+Archiving clears the lease and delegation and hides the task from active lists.
+The task data and activity remain in the database.
+Use `restore_task({id, expectedVersion})` to return an archived task to its saved lane.
+The archive access rules also apply to restore. Restore clears the lease and delegation.
+Task details show an Archive task action and ask for confirmation.
 `request_changes({id, expectedVersion, reason})` returns a review task to `in_progress` and saves the reason.
 Only a human or an architect can request changes.
+`reject_task({id, expectedVersion, reason?})` archives a task and keeps its lane.
+Only a human or an architect can reject a task.
+The task must not already be archived.
+Rejection clears the lease and delegation and keeps the assignee.
+The optional reason stays in the task activity.
+Rejected tasks leave active lists. Task links retain their archived state.
+Use `restore_task` to return a rejected task to its saved lane.
+Use `/reject [reason]` in the interactive CLI, or `reject_task` with JSON input.
 
 `create_task` accepts an initial lane and `blockedBy` task IDs.
 `bulk_create_tasks({tasks})` and `bulk_move_tasks({tasks: [{id, expectedVersion}], lane})` use one transaction.

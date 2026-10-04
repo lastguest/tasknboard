@@ -44,11 +44,12 @@ export function BoardControls({
 }
 
 /** The board pages that each sidebar board row expands to. */
-export type BoardPage = "board" | "epics" | "views";
+export type BoardPage = "board" | "epics" | "views" | "archived";
 const boardPages: [BoardPage, string, string][] = [
   ["board", "board", "Tasks"],
   ["epics", "folder", "Epics"],
   ["views", "layers", "Views"],
+  ["archived", "archive", "Archived"],
 ];
 const SIDEBAR_BOARDS_KEY = "tasknboard.sidebarBoards";
 /** Expanded board rows and the section state are this browser's layout, not workspace data. */

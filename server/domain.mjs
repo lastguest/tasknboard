@@ -13,7 +13,7 @@ export const imageDataUrlLimit = Math.ceil(imageBytesLimit / 3) * 4 + 32;
 /** What a lane means to the agent and review workflow. See docs/contracts/lanes.md. */
 export const laneRoles = ["todo", "in_progress", "in_review", "done"];
 /** At most this many lanes on one board. */
-export const laneLimit = 12;
+export const laneLimit = 13;
 const text = z.string().trim().min(1).max(300);
 const long = z.string().max(20000);
 const version = z.number().int().positive();
@@ -188,6 +188,7 @@ export const schemas = {
       owner: z.string().max(80).optional(),
       label: label.optional(),
       compact: z.boolean().default(false),
+      archived: z.boolean().default(false),
       epic: z.union([z.literal("none"), epicId]).optional(),
       boardId: boardId.optional(),
       view: viewId.optional(),
@@ -233,6 +234,7 @@ export const schemas = {
   heartbeat: z.object({ id, expectedVersion: version }).strict(),
   release_task: z.object({ id, expectedVersion: version }).strict(),
   delegate_task: z.object({ id, expectedVersion: version, delegatedTo: text }).strict(),
+  reject_task: z.object({ id, expectedVersion: version, reason: z.string().trim().max(10000).default("") }).strict(),
   request_changes: z.object({ id, expectedVersion: version, reason: z.string().trim().min(1).max(10000) }).strict(),
   list_notifications: z.object({ after: z.number().int().min(0).default(0), limit: z.number().int().min(1).max(100).default(50) }).strict(),
   link_commits: z.object({ id, expectedVersion: version, commits: z.array(z.string().regex(/^[a-f0-9]{7,40}$/i)).min(1).max(100) }).strict(),
@@ -252,6 +254,7 @@ export const schemas = {
     })
     .strict(),
   archive_task: z.object({ id, expectedVersion: version }).strict(),
+  restore_task: z.object({ id, expectedVersion: version }).strict(),
   link_task: z
     .object({
       id,

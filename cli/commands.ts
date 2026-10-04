@@ -148,6 +148,15 @@ export const commands: Command[] = [
     },
   },
   {
+    name: "reject",
+    usage: "/reject [reason]",
+    summary: "Reject and archive the selected task",
+    plan: (arg, task) => {
+      const t = selected(task);
+      return versioned("reject_task", t, arg ? { reason: arg } : {}, `${t.id} rejected.`);
+    },
+  },
+  {
     name: "assign",
     usage: "/assign [name]",
     summary: "Assign the selected task, or clear the assignee",

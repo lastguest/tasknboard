@@ -27,7 +27,8 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
   });
   await client.connect(transport);
   const tools = await client.listTools();
-  assert.equal(tools.tools.length, 37);
+  assert.ok(tools.tools.some((tool) => tool.name === "restore_task"));
+  assert.equal(tools.tools.find((tool) => tool.name === "archive_task").annotations.destructiveHint, true);
   const similarTool = tools.tools.find((tool) => tool.name === "find_similar_tasks");
   assert.equal(similarTool.annotations.readOnlyHint, true);
   assert.ok(similarTool.inputSchema.properties.excludeId);
@@ -46,7 +47,7 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
     return JSON.parse(r.content[0].text);
   };
   const info = await call("workspace_info", {});
-  assert.equal(info.schemaVersion, 18);
+  assert.equal(info.schemaVersion, 20);
   assert.ok(
     info.actors.some((entry) => entry.id === "test-agent" && entry.kind === "agent"),
   );
@@ -142,6 +143,15 @@ test("real MCP client initializes, discovers tools, claims and submits review", 
   assert.equal(direct.assignee, claimedAssignee);
   assert.equal(direct.version, claimedVersion + 1);
   assert.equal((await call("get_task", { id: direct.id })).lane, doneLane);
+  const archived = await client.callTool({ name: "archive_task", arguments: { id: direct.id, expectedVersion: direct.version } });
+  assert.notEqual(archived.isError, true);
+  assert.deepEqual(JSON.parse(archived.content[0].text), { id: direct.id, version: direct.version + 1, lane: doneLane, archived: true });
+  assert.equal((await call("get_task", { id: direct.id })).archived, true);
+  assert.ok(!(await call("list_tasks", {})).tasks.some((entry) => entry.id === direct.id));
+  const restored = await client.callTool({ name: "restore_task", arguments: { id: direct.id, expectedVersion: direct.version + 1 } });
+  assert.notEqual(restored.isError, true);
+  assert.equal(JSON.parse(restored.content[0].text).archived, false);
+  assert.equal((await call("get_task", { id: direct.id })).archived, false);
 });
 
 test("architect MCP receives human feedback through a subscribed resource", async (t) => {

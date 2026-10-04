@@ -69,6 +69,7 @@ const eventVerb: Record<string, string> = {
   heartbeat: "extended the claim",
   release_task: "released the claim",
   submit_review: "submitted for review",
+  reject_task: "rejected",
   set_standup_notes: "set stand-up notes",
   archive_task: "archived",
   link_task: "linked",

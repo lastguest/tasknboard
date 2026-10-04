@@ -54,10 +54,12 @@ export type Task = {
   role: LaneRole;
   priority: Priority;
   assignee: string;
+  creator?: string;
   labels: string[];
   /** An epic ID, or "" when the task is in no epic. */
   epic: string;
   version: number;
+  archived: boolean;
   commentCount: number;
   lease: null | { actor: string; expiresAt: number };
   delegatedTo?: string;
@@ -197,6 +199,9 @@ export const priorities: { id: Priority; title: string }[] = [
 export const activeLease = (t: Task, now = Date.now()) =>
   t.lease && t.lease.expiresAt > now ? t.lease : null;
 
+export const canArchiveTask = (task: Task, actor: Actor) =>
+  actor.kind === "human" || actor.role === "architect" || task.creator === actor.id;
+
 /** Only render review artifacts that are plain web links. */
 export function safeUrl(value: string | undefined) {
   if (!value) return "";
@@ -216,7 +221,7 @@ export function labelTone(label: string) {
   return Math.abs(hash) % 6;
 }
 
-/** Stand-up notes, which stop mattering once the task is Done. */
+/** Stand-up notes are hidden for finished tasks. */
 export const standupNotes = (task: Task, role: LaneRole = task.role) =>
   role === "done" ? undefined : task.standup;
 
@@ -226,7 +231,11 @@ export const doneLocked = (r: LaneRole) => r !== "in_review" && r !== "done";
 /** Tasks in an epic and how many are Done. */
 export function epicProgress(epic: Epic) {
   const total = Object.values(epic.counts).reduce((sum, n) => sum + n, 0);
-  return { total, done: epic.counts.done, open: total - epic.counts.done };
+  return {
+    total,
+    done: epic.counts.done,
+    open: total - epic.counts.done,
+  };
 }
 
 /**

@@ -67,8 +67,8 @@ test("a new board gets one lane per role and humans manage its lanes", (t) => {
     { code: "VERSION_CONFLICT" },
   );
   assert.throws(() => s.addLane("backlog", "todo"), { code: "VALIDATION", message: /already has a lane named/ });
-  while (s.board().lanes.length < 12) s.addLane(`Lane ${s.board().lanes.length}`, "todo");
-  assert.throws(() => s.addLane("Too many", "todo"), { code: "VALIDATION", message: /at most 12 lanes/ });
+  while (s.board().lanes.length < 13) s.addLane(`Lane ${s.board().lanes.length}`, "todo");
+  assert.throws(() => s.addLane("Too many", "todo"), { code: "VALIDATION", message: /at most 13 lanes/ });
 });
 
 test("deleting a lane moves every task and view to a lane of the same role", (t) => {
@@ -173,11 +173,14 @@ test("lane roles keep the claim flow and the human review gate", (t) => {
   assert.equal(task.role, "in_progress");
   task = s.execute("update_task", { id: task.id, expectedVersion: task.version, patch: { lane: s.lane("Testing") } }, agent);
   assert.equal(task.lease.actor, "bot");
-  for (const name of ["Backlog", "In review"])
-    assert.throws(
-      () => s.execute("update_task", { id: task.id, expectedVersion: task.version, patch: { lane: s.lane(name) } }, agent),
-      { code: "FORBIDDEN" },
-    );
+  assert.throws(
+    () => s.execute("update_task", { id: task.id, expectedVersion: task.version, patch: { lane: s.lane("In review") } }, agent),
+    { code: "FORBIDDEN" },
+  );
+  task = s.execute("update_task", { id: task.id, expectedVersion: task.version, patch: { lane: ready } }, agent);
+  assert.equal(task.role, "todo");
+  assert.equal(task.lease, null);
+  task = s.execute("claim_task", { id: task.id, expectedVersion: task.version }, agent);
   const otherBoard = s.execute("create_board", { name: "Ops", prefix: "OPS" }, human);
   assert.throws(
     () =>
@@ -278,7 +281,7 @@ test("the lane upgrade moves tasks, history and views from statuses to lanes", (
   view.filters.conditions = [{ field: "status", op: "is", values: ["backlog", "in_review"] }];
   view.display.groupBy = "status";
   db.prepare("UPDATE views SET data=?").run(JSON.stringify(view));
-  db.exec("DROP TABLE lanes; DELETE FROM migrations WHERE version=18");
+  db.exec("DROP TABLE lanes; DELETE FROM migrations WHERE version>=18");
   db.close();
 
   store = createStore(path);
@@ -304,7 +307,7 @@ test("the lane upgrade moves tasks, history and views from statuses to lanes", (
   ]);
   assert.equal(migratedView.display.groupBy, "lane");
   assert.equal(migratedView.version, view.version);
-  assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 18);
+  assert.equal(store.execute("workspace_info", {}, human).schemaVersion, 20);
   const backup = store.execute("export_workspace", {}, human);
   assert.deepEqual(
     backup.boards[1].lanes,

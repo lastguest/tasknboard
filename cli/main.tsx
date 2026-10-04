@@ -10,9 +10,9 @@ const usage = `TasknBoard command line
 
 Usage:
   tasknboard                    Open the interactive board
-  tasknboard <command> [json]   Run one workspace command and print JSON
-  tasknboard <command> --file <path>   Read JSON from a UTF-8 file
+  tasknboard <command> --file <path>   Run a command with JSON from a UTF-8 file
   tasknboard <command> --stdin         Read JSON from standard input
+${process.platform !== "win32" ? "  tasknboard <command> [json]          Run a command with direct JSON\n" : ""}  tasknboard <command>                Run a command without arguments
   tasknboard help               Show this help
   tasknboard help <command>     Show fields and a command example
 
@@ -20,14 +20,15 @@ Commands: ${Object.keys(schemas).join(", ")}
 
 Example:
   tasknboard list_boards
-  tasknboard create_board '{"name":"Engineering","prefix":"ENG"}'
-  tasknboard create_task '{"boardId":"BOARD-1","title":"Ship it"}'
-  tasknboard list_tasks '{"boardId":"BOARD-1","role":"in_review"}'
+  tasknboard create_board --file board.json
+  tasknboard create_task --file task.json
+  tasknboard list_tasks --file filter.json
 
-On Windows, use --file or --stdin to keep JSON out of cmd.exe arguments.
+On Windows, use --file or --stdin for all JSON input.
 Put the JSON object in args.json, then run tasknboard <command> --file args.json.
 PowerShell: Get-Content -Raw -Encoding utf8 args.json | tasknboard <command> --stdin
-Use one input mode per command. Direct JSON examples require a shell that preserves it.
+Use one input mode per command.
+Do not put JSON in tasknboard.cmd arguments. cmd.exe can interpret JSON text as shell commands.
 
 The local SQLite file is TASKNBOARD_DB (default data/tasknboard.sqlite).
 Set TASKNBOARD_AGENT_ID for agent commands. Non-interactive writes require it.

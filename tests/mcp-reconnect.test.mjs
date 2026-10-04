@@ -65,7 +65,7 @@ startSupervisor({ worker: new URL(${JSON.stringify(pathToFileURL(worker).href)})
     rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
   });
   await client.connect(transport);
-  assert.equal((await client.listTools()).tools.length, 37);
+  assert.ok((await client.listTools()).tools.some((tool) => tool.name === "restore_task"));
   assert.equal(readFileSync(marker, "utf8"), "failed");
 });
 
@@ -90,7 +90,7 @@ test("a real MCP worker recovers on the same host connection and restores its re
   process.kill(originalPid);
   await restored;
   assert.notEqual(connection.supervisor.workerPid, originalPid);
-  assert.equal((await connection.request(3, "tools/list", {})).result.tools.length, 37);
+  assert.ok((await connection.request(3, "tools/list", {})).result.tools.some((tool) => tool.name === "restore_task"));
   const board = store.execute("list_boards", {}, { id: "reviewer", kind: "human" }).boards[0];
   const task = store.execute("create_task", { title: "Restored subscription", boardId: board.id }, { id: "coding-agent", kind: "agent" });
   const feedback = connection.receive((message) => message.method === "notifications/resources/updated");

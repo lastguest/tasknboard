@@ -2,6 +2,7 @@ import { AppVersion, AppUpdates, desktopApp } from "./AppUpdates";
 import { cloneElement, useEffect, useId, useRef, useState } from "react";
 import {
   activeLease,
+  canArchiveTask,
   doneLocked,
   findLane,
   firstLane,
@@ -510,9 +511,11 @@ const kindText: Record<string, string> = {
   release_task: "released the claim",
   submit_review: "submitted for review",
   request_changes: "requested changes",
+  reject_task: "rejected the task",
   delegate_task: "delegated the task",
   link_commits: "linked commits",
   archive_task: "archived the task",
+  restore_task: "restored the task",
   set_standup_notes: "updated stand-up notes",
   link_task: "linked a task",
   unlink_task: "removed a link",
@@ -572,7 +575,7 @@ function eventDetail(
           .join("\n") || "Notes cleared."
       );
     if (e.kind === "submit_review") return body.summary;
-    if (e.kind === "request_changes") return body.reason;
+    if (e.kind === "request_changes" || e.kind === "reject_task") return body.reason || "";
     if (e.kind === "delegate_task") return `Delegated to ${body.delegatedTo}`;
     if (e.kind === "link_commits") return body.commits.join(", ");
     if (e.kind === "link_task" || e.kind === "unlink_task")
@@ -723,7 +726,9 @@ type Pending =
   | "save"
   | "comment"
   | "review"
+  | "reject"
   | "archive"
+  | "release"
   | "reload"
   | "link"
   | "pulls";
@@ -785,6 +790,7 @@ export function TaskEditor({
   const lanes = boards.find((board) => board.id === boardId)?.lanes ?? [];
   const laneName = (id: string) => findLane(boards, id)?.name ?? "a deleted lane";
   const [current, setCurrent] = useState(task);
+  const archived = Boolean(current?.archived);
   const [draft, setDraft] = useState(() =>
     draftOf(task, initialEpic, initialLane ?? firstLane(lanes, "todo")?.id),
   );
@@ -804,6 +810,8 @@ export function TaskEditor({
   const [delegatedTo, setDelegatedTo] = useState("");
   const [archiveStep, setArchiveStep] = useState(false);
   const [archiveError, setArchiveError] = useState<ApiError | null>(null);
+  const [claimError, setClaimError] = useState<ApiError | null>(null);
+  const canArchive = current !== null && !archived && canArchiveTask(current, actor);
   const [linkType, setLinkType] = useState<LinkType>("blocks");
   const [linkPicker, setLinkPicker] = useState(false);
   const [linkMenu, setLinkMenu] = useState<MenuState | null>(null);
@@ -893,6 +901,7 @@ export function TaskEditor({
         !sameValue(draft[k], current[k]),
     );
   const lease = current && activeLease(current);
+  const canRelease = Boolean(lease && (lease.actor === actor.id || actor.role === "architect"));
   const foreignLease = lease && lease.actor !== actor.id ? lease : null;
   const stale =
     current && latestVersion !== undefined && latestVersion > current.version;
@@ -990,6 +999,7 @@ export function TaskEditor({
       setCommentError(null);
       setReviewError(null);
       setArchiveError(null);
+      setClaimError(null);
       setLinkError(null);
       onChanged(latest);
     } catch (e) {
@@ -1001,7 +1011,7 @@ export function TaskEditor({
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    if (pending) return;
+    if (pending || archived) return;
     if (!draft.title.trim()) {
       setError(new ApiError("Title is required", "VALIDATION", 400));
       return;
@@ -1047,7 +1057,7 @@ export function TaskEditor({
 
   async function postComment(e?: React.FormEvent) {
     e?.preventDefault();
-    if (!current || pending || !comment.trim()) return;
+    if (!current || archived || pending || !comment.trim()) return;
     setPending("comment");
     setCommentError(null);
     try {
@@ -1067,7 +1077,7 @@ export function TaskEditor({
 
   /** Links are separate writes, like comments: the draft stays as it is. */
   async function writeLink(name: "link_task" | "unlink_task", target: string) {
-    if (!current || pending) return;
+    if (!current || archived || pending) return;
     setPending("link");
     setLinkError(null);
     try {
@@ -1091,7 +1101,7 @@ export function TaskEditor({
     name: "link_pull_requests" | "unlink_pull_request",
     values: string[],
   ) {
-    if (!current || pending) return false;
+    if (!current || archived || pending) return false;
     setPending("pulls");
     setPullError(null);
     try {
@@ -1116,7 +1126,7 @@ export function TaskEditor({
   /** Review actions move the task and preserve the reason for changes. */
   async function review(role: LaneRole) {
     const lane = firstLane(lanes, role);
-    if (!current || pending || !lane || (role === "in_progress" && !changeReason.trim())) return;
+    if (!current || archived || pending || !lane || (role === "in_progress" && !changeReason.trim())) return;
     setPending("review");
     setReviewError(null);
     try {
@@ -1139,7 +1149,7 @@ export function TaskEditor({
   }
 
   async function delegate() {
-    if (!current || pending || !delegatedTo.trim()) return;
+    if (!current || archived || pending || !delegatedTo.trim()) return;
     setPending("review");
     setReviewError(null);
     try {
@@ -1159,8 +1169,43 @@ export function TaskEditor({
     }
   }
 
+  async function releaseClaim() {
+    if (!current || archived || pending || !canRelease) return;
+    setPending("release");
+    setClaimError(null);
+    try {
+      const next = await command<Task>("release_task", {
+        id: current.id,
+        expectedVersion: current.version,
+      });
+      setCurrent(next);
+      onChanged(next);
+    } catch (error) {
+      setClaimError(errorOf(error));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function reject() {
+    if (!current || pending || current.archived) return;
+    setPending("reject");
+    setReviewError(null);
+    try {
+      const next = await command<Task>("reject_task", {
+        id: current.id,
+        expectedVersion: current.version,
+      });
+      onArchived(next);
+    } catch (error) {
+      setReviewError(errorOf(error));
+    } finally {
+      setPending(null);
+    }
+  }
+
   async function archive() {
-    if (!current || pending) return;
+    if (!current || archived || pending) return;
     setPending("archive");
     setArchiveError(null);
     try {
@@ -1263,6 +1308,7 @@ export function TaskEditor({
           onSubmit={save}
           noValidate
         >
+          {archived && <p className="small">This task is archived. Task details are read-only.</p>}
           {!current && (
             <p className="small form-intro">
               This task will be created on <strong>{boardName}</strong> in{" "}
@@ -1319,6 +1365,7 @@ export function TaskEditor({
               maxLength={300}
               placeholder="What needs to happen?"
               value={draft.title}
+              readOnly={archived}
               onChange={(e) => set("title")(e.target.value)}
             />
           </Field>
@@ -1355,14 +1402,14 @@ export function TaskEditor({
             }
             onUseLatest={() => set("description")(current!.description)}
           >
-            <MarkdownEditor
+            {archived ? <Markdown source={draft.description} /> : <MarkdownEditor
               rows={7}
               maxLength={20000}
               placeholder="Describe the work. Markdown, tables, and pasted images are supported."
               startInPreview={Boolean(current)}
               value={draft.description}
               onChange={set("description")}
-            />
+            />}
           </Field>
           <Field
             label="Acceptance criteria"
@@ -1376,6 +1423,7 @@ export function TaskEditor({
               rows={4}
               maxLength={20000}
               value={draft.acceptance}
+              readOnly={archived}
               onChange={(e) => set("acceptance")(e.target.value)}
             />
           </Field>
@@ -1397,7 +1445,7 @@ export function TaskEditor({
                     className="sidebar-picker-trigger"
                     aria-label={"Status: " + laneName(draft.lane) + ". Choose status"}
                     aria-haspopup="dialog"
-                    disabled={Boolean(pending)}
+                    disabled={archived || Boolean(pending)}
                     onClick={() => setPicker("lane")}
                   >
                     <RoleIcon role={draftLane?.role ?? current.role} />
@@ -1425,7 +1473,7 @@ export function TaskEditor({
                   className="sidebar-picker-trigger"
                   aria-label={"Priority: " + (priorities.find((priority) => priority.id === draft.priority)?.title ?? draft.priority)}
                   aria-haspopup="dialog"
-                  disabled={Boolean(pending)}
+                  disabled={archived || Boolean(pending)}
                   onClick={() => setPicker("priority")}
                 >
                   {priorities.find((priority) => priority.id === draft.priority)?.title}
@@ -1446,7 +1494,7 @@ export function TaskEditor({
                   className="sidebar-picker-trigger assignee-picker-trigger"
                   aria-label={"Assignee: " + (displayName(people, draft.assignee) || "Unassigned") + ". Choose assignee"}
                   aria-haspopup="dialog"
-                  disabled={Boolean(pending)}
+                  disabled={archived || Boolean(pending)}
                   onClick={() => setPicker("assignee")}
                 >
                   <Assignee
@@ -1474,7 +1522,7 @@ export function TaskEditor({
                     ". Choose epic"
                   }
                   aria-haspopup="dialog"
-                  disabled={Boolean(pending)}
+                  disabled={archived || Boolean(pending)}
                   onClick={() => setPicker("epic")}
                 >
                   {draft.epic ? (
@@ -1499,7 +1547,7 @@ export function TaskEditor({
                     className="sidebar-picker-trigger label-picker-trigger"
                     aria-label={"Labels: " + (draft.labels.join(", ") || "None") + ". Edit labels"}
                     aria-haspopup="dialog"
-                    disabled={Boolean(pending)}
+                    disabled={archived || Boolean(pending)}
                     onClick={() => setPicker("labels")}
                   >
                     {draft.labels.length ? (
@@ -1534,7 +1582,7 @@ export function TaskEditor({
                 <h3>
                   <Icon name="link" size={14} /> Links
                 </h3>
-                <button
+                {!archived && <button
                   type="button"
                   className="icon-button compact"
                   aria-label={pending === "link" ? "Saving link…" : "Add link"}
@@ -1564,7 +1612,7 @@ export function TaskEditor({
                   }}
                 >
                   <Icon name="plus" size={14} />
-                </button>
+                </button>}
               </div>
               {current.links?.length ? (
                 <ul className="task-links">
@@ -1585,7 +1633,7 @@ export function TaskEditor({
                         <span className="task-link-title">{link.title}</span>
                         {link.archived && <span className="small"> Archived</span>}
                       </a>
-                      <button
+                      {!archived && <button
                         type="button"
                         className="icon-button compact"
                         aria-label={`Remove link to ${link.id}`}
@@ -1594,7 +1642,7 @@ export function TaskEditor({
                         onClick={() => writeLink("unlink_task", link.id)}
                       >
                         <Icon name="close" size={12} />
-                      </button>
+                      </button>}
                     </li>
                   ))}
                 </ul>
@@ -1612,12 +1660,19 @@ export function TaskEditor({
                 />
               )}
             </section>
-            <TaskPullRequests
+            {archived ? (
+              <section className="side-block" aria-label="Pull requests">
+                <h3><Icon name="pull" size={14} /> Pull requests</h3>
+                {current.pullRequests?.length ? (
+                  <PullRefs urls={current.pullRequests.map((pull) => pull.url)} />
+                ) : <p className="small">No pull requests.</p>}
+              </section>
+            ) : <TaskPullRequests
               pullRequests={current.pullRequests ?? []}
               busy={Boolean(pending)}
               onLink={(values) => writePulls("link_pull_requests", values)}
               onUnlink={(url) => void writePulls("unlink_pull_request", [url])}
-            />
+            />}
             {Boolean(current.commits?.length) && (
               <section className="side-block" aria-label="Commits">
                 <h3>Commits</h3>
@@ -1638,7 +1693,7 @@ export function TaskEditor({
               {current.delegatedTo && (
                 <p>Delegated to <PersonName id={current.delegatedTo} />. No lease renewal is required.</p>
               )}
-              {current.role !== "done" && (
+              {!archived && current.role !== "done" && (
                 <div className="field">
                   <label className="field-label" htmlFor={`${listId}-delegate`}>Delegate to</label>
                   <input id={`${listId}-delegate`} value={delegatedTo} onChange={(event) => setDelegatedTo(event.target.value)} placeholder="Actor ID or external agent" disabled={Boolean(pending)} />
@@ -1657,12 +1712,21 @@ export function TaskEditor({
                     , expires{" "}
                     {formatUtcTimestamp(lease.expiresAt)}.
                   </p>
-                  {foreignLease && (
+                  {!archived && foreignLease && (
                     <p className="small warn">
-                      While this claim is active, the server rejects edits and
-                      archiving from anyone else. Comments and stand-up notes
-                      remain open.
+                      This claim blocks edits from other actors. An architect
+                      can remove the claim. Comments and stand-up notes remain open.
                     </p>
+                  )}
+                  {!archived && canRelease && (
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={Boolean(pending)}
+                      onClick={() => void releaseClaim()}
+                    >
+                      {pending === "release" ? "Releasing claim…" : "Release claim"}
+                    </button>
                   )}
                 </>
               ) : (
@@ -1670,6 +1734,9 @@ export function TaskEditor({
                   Claim by <PersonName id={current.lease.actor} /> expired at{" "}
                   {formatUtcTimestamp(current.lease.expiresAt)}.
                 </p>
+              )}
+              {claimError && (
+                <ErrorNote error={claimError} onReload={reload} busy={Boolean(pending)} />
               )}
             </section>
             <section className="side-block" aria-label="Review">
@@ -1716,7 +1783,7 @@ export function TaskEditor({
               ) : (
                 <p className="small">No review evidence yet.</p>
               )}
-              {current.role === "in_review" && actor.kind === "human" && (
+              {!archived && current.role === "in_review" && actor.kind === "human" && (
                 <div className="review-actions">
                   <button
                     type="button"
@@ -1736,7 +1803,7 @@ export function TaskEditor({
                   </button>
                 </div>
               )}
-              {current.role === "in_review" && changeStep && (
+              {!archived && current.role === "in_review" && changeStep && (
                 <div className="field">
                   <label className="field-label" htmlFor={`${listId}-changes`}>Reason for changes</label>
                   <textarea id={`${listId}-changes`} value={changeReason} onChange={(event) => setChangeReason(event.target.value)} rows={3} disabled={Boolean(pending)} />
@@ -1745,6 +1812,16 @@ export function TaskEditor({
                     <button type="button" className="secondary" disabled={Boolean(pending)} onClick={() => setChangeStep(false)}>Cancel</button>
                   </div>
                 </div>
+              )}
+              {!current.archived && (actor.kind === "human" || actor.role === "architect") && (
+                <button
+                  type="button"
+                  className="quiet danger"
+                  disabled={Boolean(pending)}
+                  onClick={() => void reject()}
+                >
+                  {pending === "reject" ? "Rejecting…" : "Reject task"}
+                </button>
               )}
               {reviewError && (
                 <ErrorNote
@@ -1760,59 +1837,16 @@ export function TaskEditor({
                 </p>
               )}
             </section>
-            {actor.kind === "human" && (
+            {canArchive && (
               <section className="side-block" aria-label="Archive">
-                {!archiveStep ? (
-                  <button
-                    type="button"
-                    className="quiet danger"
-                    onClick={() => setArchiveStep(true)}
-                    disabled={Boolean(pending)}
-                  >
-                    <Icon name="archive" size={15} /> Archive task…
-                  </button>
-                ) : (
-                  <div
-                    className="confirm-archive"
-                    role="group"
-                    aria-label="Confirm archive"
-                  >
-                    <p>
-                      Archive {current.id}? It leaves the board and lists. Its
-                      history stays in the database and the JSON export.
-                    </p>
-                    <div className="review-actions">
-                      <button
-                        type="button"
-                        className="secondary"
-                        autoFocus
-                        disabled={pending === "archive"}
-                        onClick={() => {
-                          setArchiveStep(false);
-                          setArchiveError(null);
-                        }}
-                      >
-                        Keep task
-                      </button>
-                      <button
-                        type="button"
-                        className="danger-button"
-                        disabled={Boolean(pending)}
-                        onClick={archive}
-                      >
-                        {pending === "archive" ? "Archiving…" : "Archive"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {archiveError && (
-                  <ErrorNote
-                    error={archiveError}
-
-                    onReload={reload}
-                    busy={Boolean(pending)}
-                  />
-                )}
+                <button
+                  type="button"
+                  className="quiet danger"
+                  onClick={() => setArchiveStep(true)}
+                  disabled={Boolean(pending)}
+                >
+                  <Icon name="archive" size={15} /> Archive task…
+                </button>
               </section>
             )}
             </>
@@ -1826,7 +1860,7 @@ export function TaskEditor({
               epicTitle={epicTitle}
               laneName={laneName}
             />
-            <form className="comment-form" onSubmit={postComment}>
+            {!archived && <form className="comment-form" onSubmit={postComment}>
               <div
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -1867,7 +1901,7 @@ export function TaskEditor({
                   {pending === "comment" ? "Posting…" : "Post comment"}
                 </button>
               </div>
-            </form>
+            </form>}
           </section>
         )}
       </div>
@@ -1883,10 +1917,20 @@ export function TaskEditor({
           <h2 id={`${listId}-title`} ref={headingRef} tabIndex={-1}>
             <span className="task-id">{current.id}</span> Task details
           </h2>
+          {canArchive && (
+            <button
+              type="button"
+              className="secondary small-button danger"
+              disabled={Boolean(pending)}
+              onClick={() => setArchiveStep(true)}
+            >
+              <Icon name="archive" size={15} /> Archive task…
+            </button>
+          )}
           {/* Save and Cancel show only while there is a draft to act on. */}
           {discard
             ? discardBar
-            : (dirty || pending === "save") && actions}
+            : !archived && (dirty || pending === "save") && actions}
           <button
             type="button"
             className="icon-button"
@@ -1920,6 +1964,51 @@ export function TaskEditor({
         wide
       >
         {layout}
+      </Dialog>
+    )}
+    {current && canArchive && archiveStep && (
+      <Dialog
+        title={`Archive ${current.id}?`}
+        closeDisabled={Boolean(pending)}
+        onClose={() => {
+          if (pending) return;
+          setArchiveStep(false);
+          setArchiveError(null);
+        }}
+        footer={
+          <>
+            <button
+              type="button"
+              className="secondary"
+              data-autofocus
+              disabled={Boolean(pending)}
+              onClick={() => {
+                setArchiveStep(false);
+                setArchiveError(null);
+              }}
+            >
+              Keep task
+            </button>
+            <button
+              type="button"
+              className="danger-button"
+              disabled={Boolean(pending)}
+              onClick={archive}
+            >
+              {pending === "archive" ? "Archiving…" : "Archive"}
+            </button>
+          </>
+        }
+      >
+        <p>
+          The task leaves the board and active lists. Its history stays in the database
+          and the JSON export.
+        </p>
+        <p>Archiving removes the claim automatically.</p>
+        {dirty && <p>Your unsaved changes will be discarded.</p>}
+        {archiveError && (
+          <ErrorNote error={archiveError} onReload={reload} busy={Boolean(pending)} />
+        )}
       </Dialog>
     )}
     {picker && (

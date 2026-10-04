@@ -44,18 +44,24 @@ test("CLI command help provides a valid example for every schema command", () =>
   assert.deepEqual(Object.keys(commandExamples).sort(), Object.keys(schemas).sort());
   for (const [name, schema] of Object.entries(schemas)) {
     assert.equal(schema.safeParse(commandExamples[name]).success, true, name);
-    const help = commandHelp(name);
+    const help = commandHelp(name, "win32");
     assert.match(help, new RegExp(`Usage: tasknboard ${name}`));
     assert.ok(help.includes(JSON.stringify(commandExamples[name])), name);
     assert.ok(help.includes(`tasknboard ${name} --file <path>`), name);
     assert.ok(help.includes(`tasknboard ${name} --stdin`), name);
     assert.match(help, /On Windows, use --file or --stdin/);
+    assert.ok(help.includes(`Usage: tasknboard ${name} --file <path>`), name);
+    assert.ok(help.includes(`tasknboard ${name} --file args.json`), name);
+    assert.ok(!help.includes(`tasknboard ${name} '`), name);
+    assert.match(help, /Do not put JSON in tasknboard.cmd arguments/);
     if (JSON.stringify(commandExamples[name]).includes("expectedVersion"))
       assert.match(help, /current version as expectedVersion/);
   }
   assert.match(commandHelp("claim_task"), /Read get_task/);
   assert.match(commandHelp("create_lane"), /board version/);
   assert.throws(() => commandHelp("not_a_command"), { code: "USAGE" });
+  assert.match(commandHelp("create_task", "linux"), /Direct JSON is also supported/);
+  assert.ok(commandHelp("create_task", "linux").includes(`tasknboard create_task '${JSON.stringify(commandExamples.create_task)}'`));
 });
 
 test("CLI task aliases normalize once and reject conflicting keys", () => {
@@ -134,7 +140,7 @@ test("slash commands map to versioned workspace requests", () => {
     boardId: "UNKNOWN",
   });
   assert.equal(planInput("/exit", undefined).kind, "quit");
-  assert.deepEqual(matchCommands("/re").map((c) => c.name), ["release", "review", "refresh"]);
+  assert.deepEqual(matchCommands("/re").map((c) => c.name), ["reject", "release", "review", "refresh"]);
   assert.deepEqual(matchCommands("/move x"), []);
   for (const [input, t] of [["/archive", task()], ["/move", task()], ["/move Done", task()], ["/comment hi", undefined], ["/nope", task()]])
     assert.throws(() => planInput(input, t), UsageError, input);

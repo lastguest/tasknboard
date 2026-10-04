@@ -18,7 +18,13 @@ assignee ID matches an agent in the roster. Unknown assignees remain neutral.
 Names and lease ownership must not determine actor kind.
 
 `export_workspace` includes the actor roster. `workspace_info` and exports use
-`schemaVersion: 18`. Version 18 added [lanes](lanes.md), 17 added the [Inbox](inbox.md) read positions, 16 moved embedded images to storage, 15 renamed task keys to their board prefix, 14 added [task links](task-links.md), 13 added board descriptions, 12 added board sidebar choices, and 11 added [boards](boards.md) (7 added views, 6 added epics, 5 added description images). No import or restore command is added.
+`schemaVersion: 20`. Version 20 removes obsolete rejected lanes and archives their tasks in [lanes](lanes.md).
+Version 18 added lanes. Version 17 added the [Inbox](inbox.md) read positions.
+Version 16 moved embedded images to storage. Version 15 renamed task keys to their board prefix.
+Version 14 added [task links](task-links.md). Version 13 added board descriptions.
+Version 12 added board sidebar choices. Version 11 added [boards](boards.md).
+Version 7 added views. Version 6 added epics. Version 5 added description images.
+No workspace import or workspace restore command is added.
 
 ## Comment counts
 

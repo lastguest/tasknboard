@@ -396,7 +396,7 @@ const server = createServer(async (req, res) => {
       const result = await github.execute(name, args, actor);
       // Agent events compare the task with how it was before a person's edit.
       const before =
-        actor.kind === "human" && ["update_task", "request_changes"].includes(name) && !result
+        actor.kind === "human" && ["update_task", "request_changes", "reject_task"].includes(name) && !result
           ? store.execute("get_task", { id: args.id }, actor)
           : null;
       const output = result ?? store.execute(name, args, actor);
@@ -404,7 +404,7 @@ const server = createServer(async (req, res) => {
       if (actor.kind === "human") {
         if (name === "create_task") launcher.assigned(output);
         if (name === "bulk_create_tasks") for (const task of output.tasks) launcher.assigned(task);
-        if (["update_task", "request_changes"].includes(name)) launcher.changed(before, output);
+        if (["update_task", "request_changes", "reject_task"].includes(name)) launcher.changed(before, output);
         if (name === "add_comment") launcher.commented(output, actor, args.body);
       }
       json(res, 200, output);

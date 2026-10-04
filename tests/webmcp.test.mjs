@@ -33,7 +33,7 @@ test("WebMCP validates and executes against the domain, refreshes writes, reject
     },
     lifetime.signal,
   );
-  assert.equal(context.tools.size, 18);
+  assert.equal(context.tools.size, 19);
   const call = async (name, args) =>
     JSON.parse(await context.tools.get(name).execute(args, execution()));
   const { boards } = await call("list_boards", {});
@@ -70,6 +70,14 @@ test("WebMCP validates and executes against the domain, refreshes writes, reject
     body: "Verified",
   });
   assert.ok(commented.version > noted.version);
+  const rejected = await call("reject_task", {
+    id: commented.id,
+    expectedVersion: commented.version,
+    reason: "Work is no longer required",
+  });
+  assert.equal(rejected.archived, true);
+  assert.equal(rejected.lane, commented.lane);
+  assert.equal(rejected.events.at(-1).kind, "reject_task");
   lifetime.abort();
   assert.equal(context.tools.size, 0);
 });

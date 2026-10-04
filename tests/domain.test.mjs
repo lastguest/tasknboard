@@ -117,16 +117,16 @@ test("an agent completes its claimed task and releases its lease", (t) => {
   assert.throws(() => complete(a), { code: "LEASE_REQUIRED" });
   assert.throws(() => s.execute("heartbeat", { id: task.id, expectedVersion: task.version }, a), { code: "LEASE_REQUIRED" });
 });
-test("an expired claim does not permit an agent to complete a task", (t) => {
+test("an expired owner completes a task with a versioned lane-only move", (t) => {
   const s = fixture(t);
   let task = s.make();
   task = s.execute("claim_task", { id: task.id, expectedVersion: task.version }, a);
   s.advance();
-  assert.throws(
-    () => s.execute("update_task", { id: task.id, expectedVersion: task.version, patch: { lane: LANE.done } }, a),
-    { code: "LEASE_REQUIRED" },
-  );
-  assert.deepEqual(s.execute("get_task", { id: task.id }, human), task);
+  const completed = s.execute("update_task", { id: task.id, expectedVersion: task.version, patch: { lane: LANE.done } }, a);
+  assert.equal(completed.lane, LANE.done);
+  assert.equal(completed.lease, null);
+  assert.equal(completed.version, task.version + 1);
+  assert.equal(completed.events.length, task.events.length + 1);
 });
 test("anyone can comment on a task claimed by someone else", (t) => {
   const s = fixture(t);
@@ -230,7 +230,7 @@ test("strict validation blocks unrecognized fields and unsafe artifact URLs", (t
   );
   assert.throws(
     () => s.execute("archive_task", { id: task.id, expectedVersion: 1 }, a),
-    { code: "LEASE_REQUIRED" },
+    { code: "FORBIDDEN" },
   );
 });
 test("archive hides from queries, preserves export and activity", (t) => {
@@ -252,7 +252,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
     { id: "TasknBoard Agent", kind: "human", token: "must-not-be-kept" },
   ]);
   const info = s.execute("workspace_info", {}, human);
-  assert.equal(info.schemaVersion, 18);
+  assert.equal(info.schemaVersion, 20);
   assert.equal(info.boards[0].id, "BOARD-1");
   assert.equal(Object.hasOwn(info, "settings"), false);
   assert.deepEqual(info.actor, {
@@ -283,7 +283,7 @@ test("actor roster uses explicit kinds and rejects conflicting identities", (t) 
   );
   assert.equal(s.execute("list_tasks", {}, human).total, 0);
   const backup = s.execute("export_workspace", {}, human);
-  assert.equal(backup.schemaVersion, 18);
+  assert.equal(backup.schemaVersion, 20);
   assert.equal(backup.boards[0].id, "BOARD-1");
   assert.deepEqual(backup.actors, info.actors);
 });
