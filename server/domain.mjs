@@ -233,7 +233,7 @@ export const schemas = {
     .strict(),
   claim_task: z.object({ id, expectedVersion: version }).strict(),
   heartbeat: z.object({ id, expectedVersion: version }).strict(),
-  release_task: z.object({ id, expectedVersion: version }).strict(),
+  release_task: z.object({ id, expectedVersion: version }).strict().describe("Release an active or expired claim with the current task version."),
   delegate_task: z.object({ id, expectedVersion: version, delegatedTo: text }).strict(),
   reject_task: z.object({ id, expectedVersion: version, reason: z.string().trim().max(10000).default("") }).strict(),
   request_changes: z.object({ id, expectedVersion: version, reason: z.string().trim().min(1).max(10000) }).strict(),

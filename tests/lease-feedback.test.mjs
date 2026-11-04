@@ -47,7 +47,7 @@ test("expired claims retain their holder and expiration in errors and require a 
   const s = fixture(t);
   const claimed = s.execute("claim_task", { id: s.task.id, expectedVersion: s.task.version }, owner);
   s.advance(900000);
-  for (const [command, extra] of [["heartbeat", {}], ["release_task", {}], ["update_task", { patch: { title: "Expired work" } }]]) {
+  for (const [command, extra] of [["heartbeat", {}], ["update_task", { patch: { title: "Expired work" } }]]) {
     assert.throws(() => s.execute(command, { id: claimed.id, expectedVersion: claimed.version, ...extra }, owner), (error) => {
       assert.equal(error.code, "LEASE_REQUIRED");
       assert.deepEqual(error.details.lease, { actor: owner.id, expiresAt: claimed.lease.expiresAt, now: s.now(), remainingMs: 0, expiresInSeconds: 0, active: false });

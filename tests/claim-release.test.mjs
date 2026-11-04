@@ -72,15 +72,33 @@ test("an architect cannot renew another actor's claim", (t) => {
   assert.deepEqual(s.execute("get_task", { id: s.task.id }, human), s.task);
 });
 
-test("release requires an active claim, including for architects", (t) => {
+test("the owner releases an expired claim and keeps the audit event", (t) => {
   const s = fixture(t);
   s.advance();
-  for (const actor of [owner, architect])
-    assert.throws(() => release(s, s.task, actor), { code: "LEASE_REQUIRED" });
+  const released = release(s, s.task, owner);
+  assert.equal(released.lease, null);
+  assert.equal(released.version, s.task.version + 1);
+  assert.equal(released.events.at(-1).kind, "release_task");
   const claimed = s.execute("claim_task", {
-    id: s.task.id, expectedVersion: s.task.version,
+    id: released.id, expectedVersion: released.version,
   }, owner);
-  const released = release(s, claimed, owner);
+  const releasedAgain = release(s, claimed, owner);
+  assert.equal(releasedAgain.lease, null);
+  assert.throws(() => release(s, releasedAgain, architect), { code: "LEASE_REQUIRED" });
+});
+
+test("an architect releases another actor's expired claim", (t) => {
+  const s = fixture(t);
+  s.advance();
+  const released = release(s, s.task, architect);
+  assert.equal(released.lease, null);
+  assert.equal(released.events.at(-1).kind, "release_task");
+});
+
+test("release still requires an owned or architect claim", (t) => {
+  const s = fixture(t);
+  s.advance();
+  const released = release(s, s.task, owner);
   assert.throws(() => release(s, released, architect), { code: "LEASE_REQUIRED" });
 });
 

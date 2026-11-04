@@ -18,6 +18,8 @@ type Activity = {
     kind: string;
     body: string;
     createdAt: string;
+    via?: string;
+    source?: string;
   }[];
   running: (Task & {
     elapsedSeconds: number;
@@ -130,6 +132,9 @@ export function RecentMovement({
         "restore_task",
         "undo_task",
         "auto_complete",
+      "agent_started",
+      "agent_stopped",
+      "agent_not_started",
       ].includes(event.kind),
     ) ?? [];
   return (

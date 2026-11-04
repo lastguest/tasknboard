@@ -67,7 +67,7 @@ const descriptions = {
     "Acquire a task in a todo or in_progress lane for 15 minutes. A todo task moves to the board's first in_progress lane. Your own active claim returns the current task without lease renewal, even after a stale version retry. Another actor's active claim fails with lease details. A new claim requires the current version.",
   heartbeat:
     "Extend your owned lease by 15 minutes. Returns a NEW task version; use it in subsequent writes.",
-  release_task: "Release an active claim as its owner or an architect. Use the current expectedVersion. The task keeps its lane.",
+  release_task: "Release an active or expired claim as its owner or an architect. Use the current expectedVersion. The task keeps its lane.",
   archive_task:
     "Archive a task with its current expectedVersion. Architects can archive tasks; workers can archive only tasks they created. Workers cannot archive another actor's active claim. Archiving clears the lease and delegation, hides the task from active lists, and keeps its history.",
   restore_task:

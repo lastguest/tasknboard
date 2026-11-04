@@ -8,6 +8,7 @@ import { createStore } from "../server/store.mjs";
 import {
   createAgentLauncher,
   failureReason,
+  isAuthenticationFailure,
   userEnvironment,
 } from "../server/agent-launcher.mjs";
 import {
@@ -115,6 +116,10 @@ test("an explicit run starts the agent CLI in the board folder", async (t) => {
   // Overriding it would make Claude Code read another keychain login.
   assert.equal(call.options.env.CLAUDE_CONFIG_DIR, process.env.CLAUDE_CONFIG_DIR);
   assert.ok(events(store, task.id).includes("agent_started"));
+  assert.match(
+    store.execute("get_task", { id: task.id }, human).events.findLast((e) => e.kind === "agent_started").body,
+    /trigger: manual; event: run task/,
+  );
 });
 
 test("a busy agent queues the next explicit run and starts it when the run ends", async (t) => {
@@ -146,10 +151,10 @@ test("a busy agent queues the next explicit run and starts it when the run ends"
     .events.findLast((e) => e.kind === "agent_started");
   await writeFile(started.body.split("Log: ")[1].replace(/\.$/, ""), "booting\nNot logged in\n");
   calls[1].child.emit("exit", 1);
-  await waitFor(() => events(store, second.id).includes("agent_stopped"), "the second run records its exit");
+  await waitFor(() => events(store, second.id).includes("agent_auth_failed"), "the second run records its authentication failure");
   const stopped = store
     .execute("get_task", { id: second.id }, human)
-    .events.find((e) => e.kind === "agent_stopped");
+    .events.find((e) => e.kind === "agent_auth_failed");
   assert.match(stopped.body, /exited with code 1: Not logged in\. Log:/);
   assert.ok(!events(store, first.id).includes("agent_stopped"));
 });
@@ -467,7 +472,7 @@ test("Needs changes starts the agent with the changes prompt", async (t) => {
   const started = store
     .execute("get_task", { id: task.id }, human)
     .events.findLast((e) => e.kind === "agent_started");
-  assert.match(started.body, /\(changes requested\)/);
+  assert.match(started.body, /trigger: changes requested; event: changes requested/);
 });
 
 test("a mention starts a bound agent with the comment, once per comment", async (t) => {
@@ -516,7 +521,7 @@ test("the stand-up starts bound agents that have open tasks", async (t) => {
   await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
   assert.match(calls[0].args[1], /stand-up just started\. Your open tasks: TNB-1 \(In progress\)\./);
-  assert.deepEqual(launcher.status("bot").running, { event: "standup", taskId: "TNB-1" });
+  assert.deepEqual(launcher.status("bot").running, { event: "standup", taskId: "TNB-1", source: "standup" });
 });
 
 test("runs get a copy of the user's environment, not the service's", async (t) => {
@@ -582,6 +587,12 @@ test("the login shell supplies the account and profile variables", { skip: proce
   });
   assert.equal(env.USER, userInfo().username);
   assert.match(env.PATH, /\/bin/);
+});
+
+test("authentication failure reasons become board alerts", () => {
+  assert.equal(isAuthenticationFailure("Not logged in · Please run /login"), true);
+  assert.equal(isAuthenticationFailure("OAuth token expired"), true);
+  assert.equal(isAuthenticationFailure("regular process failure"), false);
 });
 
 test("a failed stream-json run reports Claude Code's result message", () => {
@@ -663,7 +674,7 @@ test("a task reassigned while another run starts still waits its turn", async (t
   launcher.runTask(back);
   await waitFor(() => calls.length >= 1);
   assert.equal(calls.length, 1);
-  assert.deepEqual(launcher.status("bot").queued, [{ event: "task_assigned", taskId: second.id }]);
+  assert.deepEqual(launcher.status("bot").queued, [{ event: "task_assigned", taskId: second.id, source: "manual" }]);
   calls[0].child.emit("exit", 0);
   await waitFor(() => calls.length >= 2);
   assert.equal(calls.length, 2);

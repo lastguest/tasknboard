@@ -92,6 +92,21 @@ test("claim exclusion, agent ownership, heartbeat and review lifecycle", (t) => 
   assert.equal(task.role, "done");
   assert.equal(task.events.length, 5);
 });
+
+test("agent authentication failures appear in the owner's Inbox", (t) => {
+  const s = fixture(t);
+  let task = s.make();
+  task = s.execute("update_task", {
+    id: task.id,
+    expectedVersion: task.version,
+    patch: { assignee: "agent-a" },
+  }, human);
+  s.recordEvent(task.id, a, "agent_auth_failed", "Claude Code exited: OAuth token expired.");
+  const inbox = s.execute("list_inbox", {}, human);
+  assert.equal(inbox.items[0].kind, "agent_auth_failed");
+  assert.equal(inbox.items[0].reason, "auth");
+  assert.match(inbox.items[0].excerpt, /OAuth token expired/);
+});
 test("an agent completes its claimed task when board policy allows it", (t) => {
   const s = fixture(t);
   const board = s.execute("list_boards", {}, human).boards[0];

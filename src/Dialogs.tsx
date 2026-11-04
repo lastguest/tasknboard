@@ -918,9 +918,10 @@ export function TaskEditor({
         current &&
         !sameValue(draft[k], current[k]),
     );
-  const lease = current && activeLease(current);
+  const lease = current?.lease ?? null;
+  const active = current && activeLease(current);
   const canRelease = Boolean(lease && (lease.actor === actor.id || actor.role === "architect"));
-  const foreignLease = lease && lease.actor !== actor.id ? lease : null;
+  const foreignLease = active && active.actor !== actor.id ? active : null;
   const stale =
     current && latestVersion !== undefined && latestVersion > current.version;
   const set =
@@ -1740,15 +1741,15 @@ export function TaskEditor({
               )}
               {!current.lease ? (
                 <p className="small">Not claimed.</p>
-              ) : lease ? (
+              ) : active ? (
                 <>
                   <p>
                     Claimed by{" "}
                     <strong>
-                      <PersonName id={lease.actor} />
+                      <PersonName id={active.actor} />
                     </strong>
                     , expires{" "}
-                    {formatUtcTimestamp(lease.expiresAt)}.
+                    {formatUtcTimestamp(active.expiresAt)}.
                   </p>
                   {!archived && foreignLease && (
                     <p className="small warn">
@@ -1768,10 +1769,17 @@ export function TaskEditor({
                   )}
                 </>
               ) : (
-                <p className="small">
-                  Claim by <PersonName id={current.lease.actor} /> expired at{" "}
-                  {formatUtcTimestamp(current.lease.expiresAt)}.
-                </p>
+                <>
+                  <p className="small">
+                    Claim by <PersonName id={current.lease.actor} /> expired at{" "}
+                    {formatUtcTimestamp(current.lease.expiresAt)}.
+                  </p>
+                  {!archived && canRelease && (
+                    <button type="button" className="secondary" disabled={Boolean(pending)} onClick={() => void releaseClaim()}>
+                      {pending === "release" ? "Releasing claim…" : "Release expired claim"}
+                    </button>
+                  )}
+                </>
               )}
               {claimError && (
                 <ErrorNote error={claimError} onReload={reload} busy={Boolean(pending)} />

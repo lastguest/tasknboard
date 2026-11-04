@@ -924,7 +924,7 @@ export function createStore(path, { clock = Date.now } = {}) {
  json_extract(t.data, '$.title') AS title, json_extract(t.data, '$.assignee') AS assignee,
  (SELECT c.actor FROM events c WHERE c.task_id=e.task_id AND c.kind='created' ORDER BY c.sequence LIMIT 1) AS creator
  FROM events e CROSS JOIN tasks t ON json_extract(t.data, '$.id')=+e.task_id
- WHERE e.kind IN ('add_comment','submit_review') AND e.actor<>?
+ WHERE e.kind IN ('add_comment','submit_review','agent_auth_failed') AND e.actor<>?
  AND NOT coalesce(json_extract(t.data, '$.archived'), 0)
  ORDER BY e.sequence DESC`,
       )
@@ -933,7 +933,9 @@ export function createStore(path, { clock = Date.now } = {}) {
       const owners = [row.creator, row.assignee];
       const owns = owners.includes(identity.id);
       let reason = "";
-      if (row.kind === "add_comment") {
+      if (row.kind === "agent_auth_failed") {
+        if (owns || identity.role === "architect") reason = "auth";
+      } else if (row.kind === "add_comment") {
         if (mentionedIdentities(row.body).includes(identity.id)) reason = "mention";
         else if (owns) reason = "comment";
       } else if (
@@ -1394,7 +1396,7 @@ export function createStore(path, { clock = Date.now } = {}) {
       const items = db.prepare(`SELECT e.sequence, e.task_id AS taskId, e.actor, e.kind, e.body, e.created_at AS createdAt, t.data
         FROM events e JOIN tasks t ON json_extract(t.data, '$.id')=e.task_id
         JOIN actors a ON a.id=e.actor
-        WHERE e.sequence>? AND e.actor<>? AND e.kind IN ('add_comment','submit_review','request_changes','reject_task','update_task','delegate_task','archive_task','restore_task','link_commits','unblocked','dispatch_requested','auto_complete') ORDER BY e.sequence`)
+        WHERE e.sequence>? AND e.actor<>? AND e.kind IN ('add_comment','submit_review','request_changes','reject_task','update_task','delegate_task','archive_task','restore_task','link_commits','unblocked','dispatch_requested','auto_complete','agent_auth_failed') ORDER BY e.sequence`)
         .all(p.after, identity.id).filter((row) => {
           const task = JSON.parse(row.data);
           const creator = task.creator ?? db.prepare("SELECT actor FROM events WHERE task_id=? AND kind='created' ORDER BY sequence LIMIT 1").get(task.id)?.actor;
@@ -1836,13 +1838,15 @@ export function createStore(path, { clock = Date.now } = {}) {
           ["todo", "in_progress"].includes(getLane(t.lane).role);
         if (!planner && !creatorEvidence && !delegatedAccess && !reviewApproval && active(t) && t.lease.actor !== identity.id)
           leaseFailure("LEASE_CONFLICT", `Task is claimed by ${t.lease.actor}`, t);
+        const canReleaseExpired = command === "release_task" && t.lease?.actor === identity.id;
         if (
           identity.kind === "agent" && !planner && !creatorEvidence && !delegatedAccess && !reviewApproval && !creatorArchive && !resumeLaneMove && command !== "delegate_task" &&
-          (!active(t) || t.lease.actor !== identity.id)
+          (!active(t) || t.lease.actor !== identity.id) && !canReleaseExpired
         )
           leaseFailure("LEASE_REQUIRED", "Claim this task before changing it", t);
         if (command === "heartbeat" || command === "release_task") {
-          if (!active(t) || (t.lease.actor !== identity.id && (command === "heartbeat" || !planner)))
+          const canReleaseExpired = command === "release_task" && Boolean(t.lease) && (t.lease.actor === identity.id || planner);
+          if ((!active(t) && !canReleaseExpired) || (t.lease?.actor !== identity.id && (command === "heartbeat" || !planner)))
             leaseFailure("LEASE_REQUIRED", command === "heartbeat"
               ? "An active owned claim is required"
               : "An active claim owned by you or architect access is required", t);

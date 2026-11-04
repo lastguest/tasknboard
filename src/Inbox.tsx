@@ -7,10 +7,11 @@ const action: Record<InboxItem["reason"], string> = {
   mention: "mentioned you on",
   review: "submitted for review",
   comment: "commented on",
+  auth: "needs authentication for",
 };
 
 /**
- * Comments, mentions and reviews from others on your tasks. Opening the page
+ * Comments, mentions, reviews, and authentication failures from others on your tasks. Opening the page
  * marks nothing read; only Mark all read moves the read position.
  */
 export function InboxPage({
@@ -45,8 +46,8 @@ export function InboxPage({
           <Icon name="inbox" size={26} />
           <h2>Nothing here yet.</h2>
           <p>
-            Comments on your tasks, mentions of you, and work submitted for
-            your review appear here.
+            Comments, mentions, review work, and agent authentication failures
+            on your tasks appear here.
           </p>
         </div>
       ) : (

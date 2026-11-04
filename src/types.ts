@@ -9,6 +9,7 @@ export type TaskEvent = {
   body: string;
   createdAt: string;
   via?: string;
+  source?: string;
 };
 /** How a task relates to another, read from the first task's side. */
 export type LinkType =
@@ -222,8 +223,8 @@ export type InboxItem = {
   taskId: string;
   taskTitle: string;
   actor: string;
-  kind: "add_comment" | "submit_review";
-  reason: "mention" | "review" | "comment";
+  kind: "add_comment" | "submit_review" | "agent_auth_failed";
+  reason: "mention" | "review" | "comment" | "auth";
   excerpt: string;
   createdAt: string;
 };

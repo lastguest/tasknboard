@@ -36,6 +36,10 @@ export function failureReason(output) {
   return String(reason).slice(0, 300);
 }
 
+export function isAuthenticationFailure(reason) {
+  return /(?:not logged in|authentication|auth(?:entication)?\s+(?:failed|required|expired)|oauth|access token|token\s+(?:expired|invalid)|unauthori[sz]ed|\b401\b)/i.test(reason);
+}
+
 /**
  * The full prompt for a run: fixed identity and safety instructions around the
  * event's configurable part, which a person may have edited.
@@ -147,7 +151,7 @@ export function createAgentLauncher({
   /** The user's environment, read once for the life of the service. */
   let copied;
   const runEnvironment = () => (copied ??= environment());
-  /** Per agent: jobs of { event, taskId, values }. */
+    /** Per agent: jobs of { event, taskId, values, source }. */
   const queues = new Map();
   /** Per agent: the current run's { child, job, cancelled }. */
   const running = new Map();
@@ -341,7 +345,7 @@ export function createAgentLauncher({
           note(
             task.id,
             identity,
-            "agent_stopped",
+              isAuthenticationFailure(reason) ? "agent_auth_failed" : "agent_stopped",
             `${client.name} exited${code == null ? "" : ` with code ${code}`}${reason ? `: ${reason}` : ""}. Log: ${log}`,
           );
         }
@@ -350,12 +354,12 @@ export function createAgentLauncher({
     };
     child.once("error", () => finish(null));
     child.once("exit", (code) => finish(code));
-    const reason = agentEvents.find((e) => e.id === job.event).label.toLowerCase();
+      const reason = agentEvents.find((e) => e.id === job.event).label.toLowerCase();
     note(
       task.id,
       identity,
       "agent_started",
-      `Started ${client.name} in ${folder} (${reason}${job.resumed ? ", again after TasknBoard restarted" : ""}). Log: ${log}`,
+        `Started ${client.name} in ${folder} (trigger: ${job.source}; event: ${reason}${job.resumed ? "; again after TasknBoard restarted" : ""}). Log: ${log}`,
     );
     await output.close();
     return true;
@@ -384,7 +388,7 @@ export function createAgentLauncher({
     else if (!running.has(identity)) void next(identity);
   }
   /** Queues an event for an agent bound to it. */
-  function trigger(identity, event, taskId, values = {}) {
+    function trigger(identity, event, taskId, values = {}, source = event) {
     if (!enabled || !identity || !taskId) return false;
     const config = readConfig(store, identity);
     if (!config?.enabled || !config.events[event]?.enabled) return false;
@@ -393,7 +397,7 @@ export function createAgentLauncher({
     const same = (job) => job.event === event && job.taskId === taskId;
     // Mentions each carry their own comment; other events need one run.
     if (event === "mention" || !(queue.some(same) || (run && same(run))))
-      queue.push({ event, taskId, values });
+        queue.push({ event, taskId, values, source });
     queues.set(identity, queue);
     void next(identity);
     return true;
@@ -423,7 +427,7 @@ export function createAgentLauncher({
   /** Call only after a person selects Run agent for this task. */
   function runTask(task) {
     if (!task?.assignee || !prepare(task.assignee, { event: "task_assigned", taskId: task.id })) return false;
-    return trigger(task.assignee, "task_assigned", task.id);
+      return trigger(task.assignee, "task_assigned", task.id, {}, "manual");
   }
   /** Call after a person updates a task, with the task as it was before. */
   function changed(before, after) {
@@ -435,13 +439,13 @@ export function createAgentLauncher({
       ["in_progress", "todo"].includes(after.role) &&
       after.assignee
     )
-      trigger(after.assignee, "changes_requested", after.id);
+        trigger(after.assignee, "changes_requested", after.id, {}, "changes requested");
   }
   /** Call after a person comments; every agent written as @identity is told. */
   function commented(task, author, body) {
     for (const identity of mentionedIdentities(body))
       if (identity !== author.id)
-        trigger(identity, "mention", task.id, { author: author.id, comment: body });
+          trigger(identity, "mention", task.id, { author: author.id, comment: body }, "mention");
   }
   /**
    * Call when a person opens the stand-up. Each agent bound to it runs once,
@@ -462,9 +466,9 @@ export function createAgentLauncher({
           .execute("list_boards", {}, asAgent(identity))
           .boards.flatMap((board) => board.lanes.map((lane) => [lane.id, lane.name])),
       );
-      trigger(identity, "standup", open[0].id, {
+        trigger(identity, "standup", open[0].id, {
         tasks: open.map((t) => `${t.id} (${laneNames.get(t.lane)})`).join(", "),
-      });
+        }, "standup");
       started.push(identity);
     }
     return started;
@@ -479,8 +483,8 @@ export function createAgentLauncher({
   function status(identity) {
     const run = running.get(identity);
     return {
-      running: run ? { event: run.job.event, taskId: run.job.taskId } : null,
-      queued: (queues.get(identity) ?? []).map(({ event, taskId }) => ({ event, taskId })),
+      running: run ? { event: run.job.event, taskId: run.job.taskId, source: run.job.source } : null,
+      queued: (queues.get(identity) ?? []).map(({ event, taskId, source }) => ({ event, taskId, source })),
     };
   }
   /**
@@ -541,7 +545,7 @@ export function createAgentLauncher({
     for (const { identity, event, taskId, values } of saved) {
       if (!identity || !agentEvents.some((e) => e.id === event)) continue;
       const queue = queues.get(identity) ?? [];
-      queue.push({ event, taskId, values: values ?? {}, resumed: true });
+      queue.push({ event, taskId, values: values ?? {}, source: "resume", resumed: true });
       queues.set(identity, queue);
     }
     for (const identity of queues.keys()) void next(identity);
