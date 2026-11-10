@@ -30,11 +30,11 @@ PowerShell: Get-Content -Raw -Encoding utf8 args.json | tasknboard <command> --s
 Use one input mode per command.
 Do not put JSON in tasknboard.cmd arguments. cmd.exe can interpret JSON text as shell commands.
 
-The local SQLite file is TASKNBOARD_DB (default data/tasknboard.sqlite).
+Commands use the resident TasknBoard MCP service.
 Set TASKNBOARD_AGENT_ID for agent commands. Non-interactive writes require it.
 Set TASKNBOARD_AGENT_ROLE to worker or architect to select a local agent role.
 If you omit the role, the CLI uses the stored role.
-Set TASKNBOARD_SERVER_URL and TASKNBOARD_TOKEN to use a shared server.`;
+Set TASKNBOARD_SERVER_URL and TASKNBOARD_TOKEN to select a service.`;
 
 function connectCli(command: string) {
   const actor = cliActor(command);
@@ -58,7 +58,7 @@ async function once(name: string, json = "{}") {
   try {
     console.log(JSON.stringify(await client.execute(name, args), null, 2));
   } finally {
-    client.close();
+    await client.close();
   }
 }
 
@@ -85,7 +85,7 @@ async function interactive() {
     });
     await app.waitUntilExit();
   } finally {
-    client.close();
+    await client.close();
   }
 }
 

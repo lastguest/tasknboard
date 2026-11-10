@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { delimiter, join } from "node:path";
 import { execFile, spawn as spawnProcess } from "node:child_process";
 import { userInfo } from "node:os";
+import { credentialFor } from "./local-auth.mjs";
 import {
   agentClients,
   agentEvents,
@@ -147,6 +148,9 @@ export function createAgentLauncher({
   spawn = spawnProcess,
   clock = Date.now,
   environment = () => userEnvironment({ platform, home }),
+  connection,
+  runtimeFile = process.env.TASKNBOARD_RUNTIME_FILE,
+  credentialHelper = process.env.TASKNBOARD_CREDENTIAL_HELPER,
 } = {}) {
   /** The user's environment, read once for the life of the service. */
   let copied;
@@ -155,8 +159,9 @@ export function createAgentLauncher({
   const queues = new Map();
   /** Per agent: the current run's { child, job, cancelled }. */
   const running = new Map();
-  /** Agents whose queue is being read, so one event cannot start two runs. */
-  const busy = new Set();
+  /** Jobs that left the queue and have not finished starting. */
+  const starting = new Map();
+  let stopping = false;
   const enabled = Boolean(desktop && home);
   const note = (taskId, identity, kind, body) => {
     try {
@@ -225,7 +230,8 @@ export function createAgentLauncher({
     };
     return { task, board, values };
   }
-  async function start(identity, job) {
+  async function start(identity, pending) {
+    const { job } = pending;
     const config = readConfig(store, identity);
     if (!config?.enabled || !config.events[job.event]?.enabled) return false;
     const client = agentClients[config.client];
@@ -295,7 +301,31 @@ export function createAgentLauncher({
     // Runs get a copy of the user's environment, not this service's: Claude
     // Code finds its macOS keychain login by USER, and setting CLAUDE_CONFIG_DIR
     // would make it read a different login and report "Not logged in".
-    const env = { ...userEnv, ...config.env, HOME: home, USERPROFILE: home };
+    const service = await (typeof connection === "function"
+      ? connection()
+      : connection);
+    if (!service?.url || !service.secret) {
+      note(
+        task.id,
+        identity,
+        "agent_not_started",
+        "The TasknBoard service connection is unavailable.",
+      );
+      return false;
+    }
+    const env = {
+      ...withoutServiceOnly(userEnv),
+      ...withoutServiceOnly(config.env),
+      HOME: home,
+      USERPROFILE: home,
+      TASKNBOARD_SERVER_URL: service.url,
+      TASKNBOARD_TOKEN: credentialFor(service.secret, asAgent(identity)),
+      TASKNBOARD_AGENT_ID: identity,
+      ...(runtimeFile ? { TASKNBOARD_RUNTIME_FILE: runtimeFile } : {}),
+      ...(credentialHelper
+        ? { TASKNBOARD_CREDENTIAL_HELPER: credentialHelper }
+        : {}),
+    };
     const logs = join(home, ".tasknboard", "logs", identity);
     await mkdir(logs, { recursive: true });
     const log = join(
@@ -309,6 +339,12 @@ export function createAgentLauncher({
     }
     let child;
     try {
+      const latest = pending.cancelled || stopping ? null : prepare(identity, job);
+      if (!latest || latest.task.id !== task.id || latest.board?.repository !== folder ||
+          JSON.stringify(readConfig(store, identity)) !== JSON.stringify(config)) {
+        await output.close();
+        return false;
+      }
       const options = {
         cwd: folder,
         env,
@@ -365,20 +401,18 @@ export function createAgentLauncher({
     return true;
   }
   async function next(identity) {
-    if (busy.has(identity) || running.has(identity)) return;
-    busy.add(identity);
+    if (stopping || starting.has(identity) || running.has(identity)) return;
     const queue = queues.get(identity) ?? [];
-    try {
-      while (queue.length) {
-        const job = queue.shift();
-        try {
-          if (await start(identity, job)) break;
-        } catch (error) {
-          console.error(error);
-        }
+    while (!stopping && queue.length) {
+      const pending = { job: queue.shift(), cancelled: false };
+      starting.set(identity, pending);
+      try {
+        if (await start(identity, pending)) break;
+      } catch (error) {
+        console.error(error);
+      } finally {
+        starting.delete(identity);
       }
-    } finally {
-      busy.delete(identity);
     }
     // Delete only this queue: events while it started may have replaced it.
     if (!queue.length) {
@@ -388,16 +422,18 @@ export function createAgentLauncher({
     else if (!running.has(identity)) void next(identity);
   }
   /** Queues an event for an agent bound to it. */
-    function trigger(identity, event, taskId, values = {}, source = event) {
-    if (!enabled || !identity || !taskId) return false;
+  function trigger(identity, event, taskId, values = {}, source = event) {
+    if (stopping || !enabled || !identity || !taskId) return false;
     const config = readConfig(store, identity);
     if (!config?.enabled || !config.events[event]?.enabled) return false;
     const queue = queues.get(identity) ?? [];
     const run = running.get(identity)?.job;
     const same = (job) => job.event === event && job.taskId === taskId;
     // Mentions each carry their own comment; other events need one run.
-    if (event === "mention" || !(queue.some(same) || (run && same(run))))
-        queue.push({ event, taskId, values, source });
+    const pending = starting.get(identity);
+    if (event === "mention" || !(queue.some(same) || (run && same(run)) ||
+        (pending && !pending.cancelled && same(pending.job))))
+      queue.push({ event, taskId, values, source });
     queues.set(identity, queue);
     void next(identity);
     return true;
@@ -412,6 +448,9 @@ export function createAgentLauncher({
     if (queue)
       for (let i = queue.length - 1; i >= 0; i--)
         if (taskWork.has(queue[i].event) && queue[i].taskId === task.id) queue.splice(i, 1);
+    const pending = starting.get(identity);
+    if (pending && taskWork.has(pending.job.event) && pending.job.taskId === task.id)
+      pending.cancelled = true;
     const run = running.get(identity);
     if (run && taskWork.has(run.job.event) && run.job.taskId === task.id) {
       run.cancelled = true;
@@ -493,6 +532,8 @@ export function createAgentLauncher({
    * again when the service opens.
    */
   function stop() {
+    if (stopping) return;
+    stopping = true;
     const interrupted = [];
     for (const [identity, run] of running) {
       run.cancelled = true;
@@ -518,11 +559,15 @@ export function createAgentLauncher({
         `TasknBoard quit while ${name} was working on this. It starts again when TasknBoard opens.`,
       );
     }
+    for (const [identity, pending] of starting) {
+      if (!pending.cancelled && running.get(identity)?.job !== pending.job)
+        interrupted.push({ identity, ...pending.job });
+      pending.cancelled = true;
+    }
     for (const [identity, queue] of queues)
       for (const job of queue) interrupted.push({ identity, ...job });
     running.clear();
     queues.clear();
-    busy.clear();
     if (enabled)
       try {
         store.setSettings({
@@ -534,7 +579,7 @@ export function createAgentLauncher({
   }
   /** Call when the service opens: starts the runs it stopped when it quit. */
   function resume() {
-    if (!enabled) return;
+    if (!enabled || stopping) return;
     let saved = [];
     try {
       saved = JSON.parse(store.setting(interruptedKey) || "[]");

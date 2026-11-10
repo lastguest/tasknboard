@@ -5,7 +5,8 @@ A small-team task manager, with humans and coding agents using one application c
 ## Boundaries
 
 React/Vite → HTTP adapter → commands + domain validation → SQLite.
-MCP stdio → same commands locally OR authenticated HTTP commands remotely.
+Streamable HTTP MCP → application dispatcher → same commands and SQLite.
+The CLI uses HTTP MCP. The embedded app uses MCP tools and resources.
 No business rules in React or MCP. Node 24 SQLite, WAL, versioned migrations,
 transactional writes, per-task optimistic concurrency, auditable events.
 One workspace per database/server, with separate boards. Each board owns a task
@@ -13,28 +14,51 @@ prefix and number sequence. Each task belongs to one board. No external AI servi
 
 ## Persistence modes
 
-Local: web UI and local service, one SQLite file; MCP opens that same absolute
-file (separate processes, SQLite serializes transactions). Works without internet.
-Centralized: one service is the writer authority; agent stdio bridges use
-TASKNBOARD_SERVER_URL and personal TASKNBOARD_TOKEN. Browser authenticates with a human
-bearer token in sessionStorage. No offline replica or silent fallback when disconnected.
-Desktop: Tauri starts the bundled Node service on an available loopback port.
-The webview loads the interface from that service, so assets and API calls share
-one origin. The service uses SQLite in the application data directory.
-The Rust host owns the service lifecycle. Domain rules stay in the existing Node core.
-The packaged runtime removes the need for a separate Node installation.
+Local: one service owns one SQLite database. HTTP and MCP share `server/application.mjs`.
+The browser, desktop, CLI, and embedded app all reach this authority.
+Centralized: the same service accepts configured human and agent bearer tokens.
+Browser authentication stays in sessionStorage. Clients never use an offline database fallback.
+Desktop: a native supervisor runs the bundled Node service on an available loopback port.
+The service publishes `runtime.json` with its URL, process ID, instance ID, and credential helper path.
+The descriptor contains no secret. SQLite stays in the application data directory.
+The desktop window loads its assets from the app bundle.
+Its native adapter reads the current descriptor for each command and adds the credential.
+The browser keeps its HTTP transport, and the embedded app keeps its MCP transport.
+Desktop and embedded clients poll the workspace revision to detect outages and recovery.
+A per-user LaunchAgent on macOS or logon task on Windows keeps the service resident after the desktop window closes.
+The native credential store holds the service secret.
+Signed local credentials identify agents or the embedded app. MCP sessions bind to the presented credential.
+The service rejects actor roles from request arguments. The packaged runtime requires no separate Node installation.
+
 iOS: the Tauri shell is a client for a centralized server. A bundled setup page
 saves one HTTPS server origin, checks that it responds, and loads it in the webview.
 The webview stays on that origin and opens other links in the system browser.
 The shell injects `window.tasknboardShell.changeServer()`. Settings uses it to
 return to the setup page. Remote pages have no Tauri IPC access.
 
-CLI: `server/client.mjs` owns the choice between the local store and the
-authenticated HTTP API. MCP and the terminal client both use it. The CLI is an
-Ink interface in `cli/`: pure command planning (`commands.ts`), a line editor
-(`editor.ts`), and the view (`App.tsx`). It holds no business rules. Each write
-sends the last read version, and the CLI never retries a rejected write.
-Task text is stripped of control characters before it reaches the terminal.
+CLI: `server/client.mjs` uses Streamable HTTP MCP and never opens SQLite.
+`server/runtime.mjs` reads the resident descriptor and invokes its native credential helper.
+`TASKNBOARD_RUNTIME_FILE` and `TASKNBOARD_CREDENTIAL_HELPER` select explicit local paths.
+`TASKNBOARD_SERVER_URL` and `TASKNBOARD_TOKEN` select an explicit service and credential.
+Missing credentials or an unavailable service produce an error. There is no database fallback.
+The Ink interface keeps command planning, line editing, and rendering in `cli/`.
+Each write sends the last read version. The CLI never retries a rejected write.
+Task text loses control characters before it reaches the terminal.
+
+The embedded app resource is `ui://tasknboard/app-v1.html`.
+`npm run build:app-ui` bundles the interface into `dist-app/index.html`; desktop packaging includes it.
+The frame uses MCP interface tools rather than direct loopback HTTP requests.
+Interface tools act as the human user. Model tools use the app principal for reads.
+The interface creates a task-specific chat session before model writes.
+Those writes require its `workSessionId`, owned lease, and current task version.
+
+The [local Codex connection](contracts/codex-onboarding.md) requires one plugin installation.
+The plugin starts the bundled stdio bridge. The bridge calls `--service-attach` and resolves the current resident descriptor and app credential.
+SDK transports relay original MCP messages to the resident HTTP endpoint.
+The bridge owns no database or domain rules. Closing it closes only its MCP session.
+The plugin contains paths, with no fixed port, credential, or remote app reference.
+The local connection requires no domain, OAuth provider, hosted gateway, or tunnel client.
+Settings installs the plugin and exposes its enabled state, service restart, and disable controls.
 
 ## Agent lifecycle
 
@@ -65,11 +89,9 @@ them. Shared servers return no settings and start no agents.
 Implemented: task CRUD (archive rather than delete), filters, board/list,
 keyboard shortcuts, persisted comments/events, MCP tools, lease coordination,
 version conflicts, minimal actor tokens, live updates, backup export.
-Not implemented: organization membership UI, OAuth/SSO, remote Streamable HTTP
-MCP endpoint, granular per-project roles, offline replica sync, external
+Not implemented: organization membership UI, OAuth/SSO, granular per-project roles, offline replica sync, external
 notifications (email, push), general attachments (only description images are stored), enforced
 dependencies (task links do not block lane changes), lane transitions beyond the four roles.
-Remote MCP currently means a local stdio bridge to the shared authenticated API.
 For public deployment, terminate HTTPS and configure tokens. Token rotation is
 by process configuration. Database must be on local disk, not NFS.
 
@@ -143,7 +165,7 @@ The UI loads WebMCP validation only when the browser exposes
 The [live updates contract](contracts/live-updates.md) replaces browser
 polling. `GET /api/stream` sends an event when the database changes.
 One change feed per server reads the SQLite data version, so writes from
-local MCP and CLI processes count too. The stream carries no data: the
+HTTP MCP and CLI commands count too. The stream carries no data: the
 client reads again with the normal commands. The stream closes while the
 document is hidden and reopens with an immediate refresh.
 

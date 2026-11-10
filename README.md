@@ -6,7 +6,7 @@ Website: [lastguest.github.io/tasknboard](https://lastguest.github.io/tasknboard
 
 ![Stand-up mode showing the team board](docs/images/tasknboard-standup-team.png)
 
-React + Vite, Node.js, SQLite, a Tauri desktop shell, and an MCP stdio server. One application core owns validation, leases, optimistic concurrency and activity events. No cloud AI dependency.
+React + Vite, Node.js, SQLite, a Tauri desktop shell, and a Streamable HTTP MCP endpoint. One application core owns validation, leases, optimistic concurrency and activity events. No cloud AI dependency.
 
 ## Run locally
 
@@ -99,8 +99,13 @@ Your workspace database stays in the application support directory.
 
 The Tauri app builds for macOS on Apple Silicon and Windows x64.
 It includes the interface, the service, and a Node runtime.
-The installed app does not require Node or a separate server process.
-The shell starts its service on an available loopback port and stops it when the app exits.
+The installed app includes Node and installs a per-user resident service.
+The service owns SQLite and listens on an available loopback port.
+It continues to run after the desktop window closes.
+The window loads its interface from the app bundle and reconnects when the resident port changes.
+Unsaved drafts stay open during a resident restart.
+macOS uses a LaunchAgent. Windows uses a task that starts at user logon.
+Use **Settings → Connect to Codex → Disable service** to stop and disable it.
 On macOS, desktop data stays in `~/Library/Application Support/app.tasknboard.desktop/tasknboard.sqlite`, outside the app bundle. On Windows, it stays in `%APPDATA%\app.tasknboard.desktop\tasknboard.sqlite`.
 The desktop workspace is separate from `data/tasknboard.sqlite` used by the web development server.
 
@@ -175,7 +180,7 @@ After you replace the key, users must install the next build manually once.
 Use `npm run dev` for the ordinary web interface with hot reload.
 
 The desktop app uses the same command validation, SQLite store, and task interface as the web app.
-For local MCP access, set `TASKNBOARD_DB` to the desktop database's absolute path.
+Local MCP and CLI clients connect to the resident service. They never open the desktop database.
 WebMCP tools register only when the embedded webview supports the native browser API.
 
 ## iOS app
@@ -238,7 +243,8 @@ npm run cli -- help
 ```
 
 After the build, `npm link` installs the `tasknboard` command on your PATH.
-Local mode opens `TASKNBOARD_DB` (default `data/tasknboard.sqlite`) as the human `you`.
+Local mode reads the resident `runtime.json` descriptor and obtains authentication from its native credential helper.
+`TASKNBOARD_RUNTIME_FILE` and `TASKNBOARD_CREDENTIAL_HELPER` select explicit local paths.
 Scripted writes require `TASKNBOARD_AGENT_ID` when stdin is not a terminal.
 Set `TASKNBOARD_AGENT_ROLE` to `worker` or `architect` to select an agent role.
 If you omit the role, the CLI keeps the stored role.
@@ -246,6 +252,8 @@ Humans can change agent roles on the **Agents** page.
 Humans can also use `update_profile` with `agentId` and `role`.
 Agents cannot grant or revoke roles.
 To use a shared server, set `TASKNBOARD_SERVER_URL` and a human or agent `TASKNBOARD_TOKEN`.
+The desktop client reports missing credentials or an unavailable service. It never opens SQLite.
+The source CLI built with `npm run build:cli` also supports an explicit local database through `TASKNBOARD_DB` when no service is configured.
 The rules are the same as for MCP: HTTPS is required, except on loopback.
 
 In the board, type text to filter tasks and press Enter to open the selected task.
@@ -280,7 +288,8 @@ access and does not change shell files or the user PATH. Settings shows the
 required PATH setup if the app cannot find the installed command on its PATH.
 
 The helper uses the app's bundled Node runtime and CLI. By default it opens the
-desktop workspace. `TASKNBOARD_DB` or `TASKNBOARD_SERVER_URL` overrides that default.
+resident desktop service through its runtime descriptor and native credential helper.
+Set both `TASKNBOARD_SERVER_URL` and `TASKNBOARD_TOKEN` to select another service.
 Run `tasknboard help` for commands. Keep the app at its installation path after
 installing the helper. An existing different file is never overwritten; move it
 before installing again. Web and mobile Settings show that installation requires
@@ -373,24 +382,53 @@ For source runs, build the CLI with `npm run build:cli` before using the Pi skil
 The desktop app includes the CLI. Windows Pi sessions use the PowerShell tool with `--file` or `--stdin`, as shown in the helper.
 Keep JSON out of the Windows helper arguments, including in PowerShell sessions.
 
-Configure your MCP client with the following, replacing **both** paths with absolute paths. Give concurrent agents distinct identities.
+Configure your MCP client with the service URL from Settings. Keep its token in secret storage.
+Give concurrent agents distinct authenticated identities.
 
 ```json
 {
   "mcpServers": {
     "tasknboard": {
-      "command": "node",
-      "args": ["/absolute/path/tasknboard/server/mcp.mjs"],
-      "env": {
-        "TASKNBOARD_DB": "/absolute/path/tasknboard/data/tasknboard.sqlite",
-        "TASKNBOARD_AGENT_ID": "codex"
-      }
+      "url": "http://127.0.0.1:4310/mcp",
+      "bearer_token_env_var": "TASKNBOARD_TOKEN"
     }
   }
 }
 ```
 
-The UI service and local MCP process must open the **same SQLite file**. Local agent identity is trusted process configuration; it is not an authentication boundary against a malicious local user with database access.
+The resident port can change. Copy its current URL rather than assuming port 4310.
+The native credential store holds the local service secret. The helper derives signed credentials for local agents.
+MCP sessions bind to their authenticated credential. Request arguments cannot change the authenticated role.
+
+### Codex app connection
+
+`npm run build:app-ui` creates `dist-app/index.html` for the embedded MCP app.
+`npm run build` includes this step. Desktop packaging includes the result.
+The app resource uses the same workspace interface through MCP tools.
+It does not connect directly to localhost from the embedded frame.
+
+The [automatic local Codex connection](docs/contracts/codex-onboarding.md) requires one plugin installation.
+Open **Settings → Connect to Codex** and select **Connect to Codex**.
+Open TasknBoard from the Codex sidebar. Restart Codex if the plugin does not appear.
+Users enter no keys, tunnel IDs, connection IDs, or server addresses.
+The local connection requires no registered domain, hosted gateway, or OAuth provider.
+
+Codex starts the bundled stdio bridge when it loads the installed plugin.
+The bridge starts or attaches the resident service and reads its current loopback URL.
+The native helper provides the app credential through the operating system credential store.
+The plugin stores only local paths. The bridge never opens SQLite.
+Closing Codex closes its MCP session while the resident remains available to the desktop and CLI.
+The same bridge resolves a changed descriptor and reconnects after a service restart.
+A failed request reports an error. Subsequent requests reconnect without replaying the failed request.
+
+The workspace belongs to the operating system user. Switching Codex accounts does not change that local workspace.
+Public plugin submission uses a separate hosted endpoint and registration process.
+
+The interface starts chat work for a selected task and returns a `workSessionId`.
+Model writes require that session and use its agent identity, task boundary, lease, and current version.
+Interface tools act as the workspace user. Agents submit work for human review.
+Codex app-server discovery and resource reads passed in an isolated profile.
+Visible Codex interface rendering, native credential access, and Windows execution remain separate proof gates.
 
 Tools:
 
@@ -432,7 +470,7 @@ app without registering tools. No polyfill or extension bridge is installed.
 WebMCP uses the active browser session and its permissions. It acts for that user;
 it does not create a separate coding-agent identity. Shared servers still require
 the token entered in Settings. The token is never included in tool descriptions
-or results. Use the stdio MCP integration for an independent agent with a lease.
+or results. Use the HTTP MCP integration for an independent agent with a lease.
 
 The browser and server validate inputs against the same schemas. Read the current
 version before each write. A conflict requires a fresh read and reconciliation.
@@ -465,34 +503,31 @@ For a shared deployment behind an HTTPS proxy, for example:
 
 Forward the original Host header and terminate HTTPS at the proxy. Set a request/body timeout and rate limit at the proxy. SQLite lives on local persistent disk, not network storage. Browser Settings accepts a human token, retained only in sessionStorage. HTTP is suitable for loopback development only.
 
-Remote agent MCP configuration uses the **same stdio bridge**, pointed at your server:
+Remote agents connect directly to the same Streamable HTTP MCP endpoint:
 
 ```json
 {
   "mcpServers": {
     "tasknboard": {
-      "command": "node",
-      "args": ["/absolute/path/tasknboard/server/mcp.mjs"],
-      "env": {
-        "TASKNBOARD_SERVER_URL": "https://tasknboard.your-domain.example",
-        "TASKNBOARD_TOKEN": "YOUR_AGENT_TOKEN_FROM_SECRET_STORAGE"
-      }
+      "url": "https://tasknboard.your-domain.example/mcp",
+      "bearer_token_env_var": "TASKNBOARD_TOKEN"
     }
   }
 }
 ```
 
-No direct remote Streamable HTTP MCP endpoint is included yet. The bridge requires a local Node installation in the agent environment. Shared mode does not open a local database or silently switch offline.
+The token stays in the client environment or secret storage. The configuration contains no credential or database path.
+Shared clients report connection failures and never switch to a local database.
 
 ## Data and boundaries
 
 - Transactions keep each task mutation and its activity event together.
 - Optimistic task versions reject stale updates.
-- Claims serialize across independent SQLite connections.
-- The server pushes change events, including writes from local MCP and CLI processes, and the visible board refreshes at once. Hidden tabs close the stream. Returning to the tab refreshes immediately. An open editor retains its draft and version.
+- Claims serialize within SQLite transactions.
+- The server pushes change events, including writes through HTTP MCP and the CLI, and the visible board refreshes at once. Hidden tabs close the stream. Returning to the tab refreshes immediately. An open editor retains its draft and version.
 - No offline mutation queue. Disconnected edits fail visibly.
 - Archive hides a task from normal lists without deleting it. No restore UI yet.
-- Settings exports all tasks and activity as JSON. JSON import is not implemented. For full recovery, stop the service and MCP clients and copy the SQLite file, or use SQLite's online backup mechanism. Never copy only a live `.sqlite` file while WAL writes are active.
+- Settings exports all tasks and activity as JSON. JSON import is not implemented. For full recovery, stop the service and MCP clients and copy the SQLite file, or use SQLite's online backup mechanism. Never copy only a live `.sqlite` file while WAL writes are active. See the [recovery drill](docs/RELIABILITY-VERIFICATION.md#verify-database-recovery).
 - Credentials are workspace-wide human/agent roles. No SSO, OAuth, project permissions, invitations or multi-workspace tenancy yet.
 - Task assignees are free text. The server roster records explicit human and agent identities from trusted configuration and authenticated commands. Unknown assignees remain neutral. The roster is not live telemetry.
 - Cards and list rows show counts from persisted comment events. See the [task metadata contract](docs/contracts/task-metadata.md).
@@ -504,7 +539,8 @@ No direct remote Streamable HTTP MCP endpoint is included yet. The bridge requir
 
 `src/` interface and API adapter; `server/domain.mjs` shared schemas;
 `server/store.mjs` transactional commands; `server/http.mjs` HTTP/auth/static files;
-`server/mcp.mjs` MCP adapter; `server/client.mjs` local or remote connection for MCP and the CLI;
+`server/mcp.mjs` MCP adapter; `server/application.mjs` command dispatcher; `server/client.mjs` HTTP MCP client for the CLI;
+`server/runtime.mjs` runtime discovery; `server/local-auth.mjs` local authentication;
 `cli/` terminal client; `tests/` integration and domain coverage;
 `src-tauri/` desktop and iOS host and packaging; `mobile/` iOS server setup page; `docs/ARCHITECTURE.md` decisions and follow-up scope.
 

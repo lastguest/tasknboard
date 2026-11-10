@@ -150,27 +150,16 @@ try {
   const licensesDir = join(resourcesDir, "licenses");
   await mkdir(licensesDir, { recursive: true });
   await copyFile(join(root, "LICENSE"), join(licensesDir, "tasknboard.txt"));
-  for (const dependency of ["zod", "react", "react-dom", "scheduler"]) {
+  for (const dependency of ["zod", "react", "react-dom", "scheduler", "@modelcontextprotocol/sdk", "@modelcontextprotocol/ext-apps", "@openai/mcp-extensions"]) {
     await copyFile(
       join(root, "node_modules", dependency, "LICENSE"),
-      join(licensesDir, `${dependency}.txt`),
+      join(licensesDir, `${dependency.replaceAll("/", "-")}.txt`),
     );
   }
 
   await build({
     entryPoints: [serverEntry],
     outfile: join(resourcesDir, "server.mjs"),
-    bundle: true,
-    platform: "node",
-    format: "esm",
-    target: "node24",
-    external: ["node:*"],
-    sourcemap: false,
-  });
-  await build({
-    entryPoints: [join(root, "server", "mcp.mjs"), join(root, "server", "mcp-worker.mjs")],
-    outdir: resourcesDir,
-    outExtension: { ".js": ".mjs" },
     bundle: true,
     platform: "node",
     format: "esm",
@@ -191,6 +180,16 @@ try {
     jsx: "automatic",
     metafile: true,
   });
+  const bridgeBuild = await build({
+    entryPoints: [join(root, "server", "mcp-bridge.mjs")],
+    outfile: join(resourcesDir, "mcp-bridge.mjs"),
+    bundle: true,
+    packages: "external",
+    platform: "node",
+    format: "esm",
+    target: "node24",
+    metafile: true,
+  });
   await rm(join(resourcesDir, "node_modules"), {
     recursive: true,
     force: true,
@@ -209,7 +208,7 @@ try {
         if (error.code !== "ENOENT") throw error;
       }
     }
-    if (!source) throw new Error(`Missing CLI runtime dependency: ${name}`);
+    if (!source) throw new Error(`Missing desktop runtime dependency: ${name}`);
     if (copied.has(source)) return;
     copied.add(source);
     const destination = join(
@@ -231,7 +230,7 @@ try {
     for (const dependency of Object.keys(dependencies))
       await copyPackage(dependency, source);
   }
-  for (const output of Object.values(cliBuild.metafile.outputs)) {
+  for (const output of [...Object.values(cliBuild.metafile.outputs), ...Object.values(bridgeBuild.metafile.outputs)]) {
     for (const entry of output.imports) {
       if (!entry.external || entry.path.startsWith("node:")) continue;
       const parts = entry.path.split("/");
@@ -244,6 +243,9 @@ try {
 
   await rm(join(resourcesDir, "dist"), { recursive: true, force: true });
   await cp(distDir, join(resourcesDir, "dist"), { recursive: true });
+  await rm(join(resourcesDir, "app"), { recursive: true, force: true });
+  await cp(join(root, "dist-app"), join(resourcesDir, "app"), { recursive: true });
+  await rm(join(resourcesDir, "mcp.mjs"), { force: true });
 
   console.log(`Prepared desktop resources in ${resourcesDir}`);
   console.log(`Verified ${archiveName} against official SHASUMS256.txt.`);

@@ -14,16 +14,18 @@ const hash = (value) =>
 export function createClaudePlugin({
   desktop = process.env.TASKNBOARD_DESKTOP === "1",
   home = process.env.TASKNBOARD_USER_HOME,
-  database = process.env.TASKNBOARD_DB,
-  command = process.execPath,
-  mcpEntry,
+  serverUrl = process.env.TASKNBOARD_SERVER_URL,
+  mcpUrl,
+  runtimeFile = process.env.TASKNBOARD_RUNTIME_FILE,
+  credentialHelper = process.env.TASKNBOARD_CREDENTIAL_HELPER,
+  identity: defaultIdentity,
   platform = process.platform,
   searchPath = process.env.PATH || "",
   run = exec,
 } = {}) {
   let installing = false;
-  async function install(identity) {
-    if (!desktop || !home || !database || !mcpEntry)
+  async function install(identity = defaultIdentity) {
+    if (!desktop || !home || !(serverUrl || mcpUrl || runtimeFile))
       throw failure(
         "PLUGIN_UNSUPPORTED",
         "Install the Claude Code plugin from the TasknBoard desktop app.",
@@ -65,22 +67,35 @@ export function createClaudePlugin({
           "CLAUDE_MISSING",
           "Install the Claude Code CLI and add it to PATH, then restart TasknBoard.",
         );
+      const descriptor =
+        runtimeFile && !serverUrl && !mcpUrl
+          ? JSON.parse(await readFile(runtimeFile, "utf8"))
+          : null;
+      const endpoint = new URL(mcpUrl || serverUrl || descriptor?.mcpUrl);
+      if (
+        endpoint.protocol !== "https:" &&
+        !(
+          endpoint.protocol === "http:" &&
+          ["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname)
+        )
+      )
+        throw failure(
+          "PLUGIN_URL",
+          "MCP credentials require HTTPS except on loopback.",
+        );
+      if (!endpoint.pathname.endsWith("/mcp"))
+        endpoint.pathname = endpoint.pathname.replace(/\/$/, "") + "/mcp";
       const mcp = {
         mcpServers: {
           tasknboard: {
-            command,
-            args: [mcpEntry],
-            env: {
-              TASKNBOARD_DB: database,
-              TASKNBOARD_AGENT_ID: identity,
-              TASKNBOARD_SERVER_URL: "",
-              TASKNBOARD_TOKEN: "",
-            },
+            type: "http",
+            url: endpoint.href,
+            headers: { Authorization: "Bearer ${TASKNBOARD_TOKEN}" },
           },
         },
       };
-      const fingerprint = hash(JSON.stringify(mcp));
-      const marketplace = `tasknboard-${hash(database + "\0" + identity)}`;
+      const fingerprint = hash(JSON.stringify({ mcp, identity }));
+      const marketplace = `tasknboard-${hash(endpoint.href + "\0" + identity)}`;
       const directory = join(home, ".tasknboard", "claude", fingerprint);
       const files = {
         ".claude-plugin/marketplace.json": {
@@ -118,7 +133,18 @@ export function createClaudePlugin({
         const options = {
           timeout: 10000,
           maxBuffer: 1024 * 1024,
-          env: { ...process.env, CLAUDE_CONFIG_DIR: join(home, ".claude") },
+          env: {
+            ...Object.fromEntries(
+              Object.entries(process.env).filter(
+                ([key]) => !key.startsWith("TASKNBOARD_"),
+              ),
+            ),
+            CLAUDE_CONFIG_DIR: join(home, ".claude"),
+            ...(runtimeFile ? { TASKNBOARD_RUNTIME_FILE: runtimeFile } : {}),
+            ...(credentialHelper
+              ? { TASKNBOARD_CREDENTIAL_HELPER: credentialHelper }
+              : {}),
+          },
           windowsHide: true,
         };
         if (windows && executable.endsWith(".cmd")) {

@@ -1,7 +1,8 @@
+import { descriptions } from "./mcp-tools.mjs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { schemas } from "./domain.mjs";
-import { connect } from "./client.mjs";
+import { connect } from "./standalone-client.mjs";
 import { z } from "zod";
 import { SubscribeRequestSchema, UnsubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 const client = connect({
@@ -12,86 +13,6 @@ const client = connect({
       ? { role: process.env.TASKNBOARD_AGENT_ROLE } : {}),
   },
 });
-const descriptions = {
-  create_board: "Create a board as an architect. Set its repository and agent settings.",
-  update_board: "Edit a board as an architect using its current version. policy sets humanCompletionOnly, completionMode, labelCompletionPolicies, autoDispatch and evidence requirements.",
-  create_epic: "Create an epic as an architect. Pass boardId and optional completionPolicy: inherit, human, any_agent, architect, any_agent_other_than_author or auto_on_evidence.",
-  update_epic: "Edit an epic as an architect using its current version. Set completionPolicy to override the board default, or inherit to use it.",
-  archive_epic: "Archive an epic as an architect when it has no open work.",
-  create_lane: "Create a lane as an architect. A Blocked lane can use the in_progress role.",
-  update_lane: "Edit a lane as an architect using its board version.",
-  delete_lane: "Delete a lane as an architect and move its tasks to a lane with the same role.",
-  link_commits: "Link commit SHAs to a task without a pull request. Architects, delegators and delegates can link commits without a claim. Pass via for engineer attribution.",
-  bulk_create_tasks: "Create tasks in one atomic call. Each task includes boardId and optional lane and blockedBy.",
-  bulk_move_tasks: "Move tasks to one lane in one atomic call. Pass each task ID and current version.",
-  claim_tasks: "Claim several tasks in one transaction. Each entry needs its ID and current expectedVersion. Any refusal cancels the batch.",
-  add_comments: "Add several comments in one transaction. Each comment needs an ID and body. Pass via to identify the engineer session.",
-  submit_reviews: "Submit several tasks for human review in one transaction. Pass each current version, summary and optional structured evidence.",
-  undo_task: "Undo your most recent action on a task you created. Available for ten minutes, or while other actors have not changed the task. Read get_task.undo eligibility first. The undo adds an audit event.",
-  reorder_task: "Move a task to a manual position inside its lane using its current version. Read task positions from list_tasks.",
-  critical_path: "Read the open blocker chain for a goal task. Returns dependency edges and task context; changes no data.",
-  list_activity: "Read task activity for the last requested hours, optionally scoped to a board. Use it for a stand-up by agent.",
-  list_milestones: "List milestones and their exit criteria, optionally scoped to a board. Milestones group tasks without replacing epics.",
-  create_milestone: "Create a milestone with a title and exit criteria as a human or architect.",
-  update_milestone: "Edit a milestone and its exit criteria using its current expectedVersion as a human or architect.",
-  archive_milestone: "Archive a milestone using its current expectedVersion as a human or architect.",
-  set_label_color: "Set a label colour from the epic palette. The colour applies across boards.",
-  delegate_task: "Record external work without a lease. Pass delegatedTo to keep the task in progress and prevent duplicate automatic runs.",
-  reject_task: "Reject and archive a task, preserving its lane and releasing its claim and delegation. Humans and architects can use this action. Pass an optional reason.",
-  request_changes: "Return a task in review to in progress with a required reason. Architects and humans can use this action.",
-  list_notifications: "Read human review feedback. Pass after to resume from a sequence. Subscribe to tasknboard://notifications for push updates.",
-  list_boards:
-    "List boards with their task prefixes and lanes. Each lane has a role: todo, in_progress, in_review or done. Use a board ID when creating a task or filtering tasks.",
-  workspace_info:
-    "Read workspace identity, authenticated actor and lease duration.",
-  list_tasks:
-    "Find active tasks by default. Pass archived:true for archived tasks, delegated:true for delegations, fields:[...] to select fields, or compact:true for small rows. Use offset and limit for pages. Filter by board, role, lane, epic or saved view. Read the task before you claim it.",
-  list_views:
-    "List saved views: named task filters and display settings that people share with the workspace. Pass a view's ID to list_tasks to get its tasks.",
-  list_epics:
-    "List epics (projects that group tasks) with task counts per lane role. Architects manage epics. Pass boardId to filter one board.",
-  list_labels:
-    "List the labels used by non-archived tasks, with how many tasks carry each.",
-  rename_label:
-    "Rename a label on every non-archived task (merging into an existing label), or remove it with to: \"\". Saved views follow a rename. Changed tasks get a new version, even when claimed; re-read before writing them.",
-  get_task:
-    "Read full task context, version, claim, links and activity. completionPolicy gives the effective mode and its source. autoCompletion gives eligibility and the reason while evidence waits.",
-  get_tasks: "Read full context for up to one hundred task IDs in one call.",
-  find_similar_tasks:
-    "Find tasks similar to a planned title and optional context. Pass includeArchived:true or includeDone:true to search finished work too. Results include scores, best first. Call before create_task; pass excludeId to check an existing task.",
-  create_task:
-    "Create a task on the explicit boardId from list_boards, with instructions and acceptance criteria, optionally inside an existing epic. Pass an initial lane and blockedBy task IDs, or use the first todo lane. Call find_similar_tasks first. If a result is the same work, do not create a task: use the existing one, and link related work to it with link_task type duplicates.",
-  update_task:
-    "Update a task using expectedVersion. Delegators and delegates can post delegated progress without a claim. A todo move parks claimed work. Read get_task.completionPolicy before completion: human, any_agent, architect, any_agent_other_than_author or auto_on_evidence. Label overrides precede epic overrides and board defaults. Automatic evidence completion needs artifacts and every linked commit on the configured default branch. Set branch, briefPath and resultPath for traceability.",
-  claim_task:
-    "Acquire a task in a todo or in_progress lane for 15 minutes. A todo task moves to the board's first in_progress lane. Your own active claim returns the current task without lease renewal, even after a stale version retry. Another actor's active claim fails with lease details. A new claim requires the current version.",
-  heartbeat:
-    "Extend your owned lease by 15 minutes. Returns a NEW task version; use it in subsequent writes.",
-  release_task: "Release an active or expired claim as its owner or an architect. Use the current expectedVersion. The task keeps its lane.",
-  archive_task:
-    "Archive a task with its current expectedVersion. Architects can archive tasks; workers can archive only tasks they created. Workers cannot archive another actor's active claim. Archiving clears the lease and delegation, hides the task from active lists, and keeps its history.",
-  restore_task:
-    "Restore an archived task with its current expectedVersion. Architects can restore tasks; workers can restore only tasks they created. The task returns to its saved lane with no lease or delegation. Read get_task first.",
-  add_comment:
-    "Append progress, a question, or a reply to any task, claimed or not. No expectedVersion is required. Pass via to identify the engineer session.",
-  set_standup_notes:
-    "Set highlight and blocker notes for stand-up (500 chars each). Empty strings clear notes. Agents require their own active claim; humans may annotate without changing a claim. Returns a new task version.",
-  link_task:
-    "Link your claimed task to another task: relates, blocks, blocked_by, duplicates, or duplicated_by. Two tasks have at most one link. Links inform; they do not block lane changes. Returns a new task version.",
-  unlink_task:
-    "Remove the link between your claimed task and target, in either direction. Returns a new task version.",
-  link_pull_requests:
-    "Link one or many GitHub pull requests to your claimed task. Pass each as a URL (https://github.com/owner/repo/pull/123) or owner/repo#123. Already-linked ones are skipped; at most 20 per task. Returns a new task version.",
-  unlink_pull_request:
-    "Remove one linked GitHub pull request (URL or owner/repo#123) from your claimed task. Returns a new task version.",
-  update_profile:
-    "Set your own display name and uploaded avatar. Set useGravatar to enable Gravatar. Omit gravatarEmail to keep the saved address; an empty email clears it when useGravatar is false. Enabling Gravatar requires an email. The email appears only in your own profile response. Your actor ID does not change.",
-  upload_image:
-    "Store a PNG, JPEG, WebP, or GIF (data URL, up to 5 MB) and get a /files/ URL to embed in a Markdown description as ![alt](url). Inline ![alt](data:image/...) in any text is stored the same way automatically.",
-  upload_artifact: "Upload a raster image, text log or JSON report as a base64 dataUrl with its title. Use the returned URL in submit_review.artifacts.",
-  submit_review:
-    "Submit review with summary, artifacts:[{title,url}], commitRange and verifiedBy:[{agent,checks}]. Pass via for engineer attribution. Delegators and delegates need no claim. The effective completionPolicy selects who can approve. auto_on_evidence completes only with artifacts and linked commits verified on the configured origin/HEAD default branch. Otherwise it keeps review and returns autoCompletion.reason. The commit scanner retries evidence after later merges.",
-};
 const server = new McpServer(
   { name: "tasknboard", version: "0.1.0" },
   {

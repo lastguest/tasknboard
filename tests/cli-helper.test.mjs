@@ -16,7 +16,7 @@ import { createCliHelper } from "../server/cli-helper.mjs";
 const exec = promisify(execFile);
 
 test(
-  "CLI helper installs once, reports PATH, and preserves database overrides",
+  "CLI helper installs once, reports PATH, and preserves service overrides",
   { skip: process.platform === "win32" },
   async (t) => {
     const home = await mkdtemp(join(tmpdir(), "tasknboard-helper-'"));
@@ -26,15 +26,17 @@ test(
     await symlink(process.execPath, join(resources, "node"));
     await writeFile(
       join(resources, "cli.mjs"),
-      "console.log(JSON.stringify({db:process.env.TASKNBOARD_DB,args:process.argv.slice(2)}))",
+      "console.log(JSON.stringify({runtime:process.env.TASKNBOARD_RUNTIME_FILE,helper:process.env.TASKNBOARD_CREDENTIAL_HELPER,args:process.argv.slice(2)}))",
     );
-    const database = join(home, "workspace.sqlite");
+    const runtimeFile = join(home, "runtime.json");
+    const credentialHelper = join(home, "TasknBoard");
     const helper = createCliHelper({
       desktop: true,
       platform: "darwin",
       home,
       resources,
-      database,
+      runtimeFile,
+      credentialHelper,
       searchPath: join(home, ".local/bin"),
     });
     assert.equal((await helper.status()).installed, false);
@@ -53,23 +55,25 @@ test(
         ).stdout,
       );
     assert.deepEqual(await run({}), {
-      db: database,
+      runtime: runtimeFile,
+      helper: credentialHelper,
       args: ["list_tasks", '{"title":"hello world"}'],
     });
     assert.equal(
-      (await run({ TASKNBOARD_DB: "/explicit.sqlite" })).db,
-      "/explicit.sqlite",
+      (await run({ TASKNBOARD_RUNTIME_FILE: "/explicit.json" })).runtime,
+      "/explicit.json",
     );
     assert.equal(
-      (await run({ TASKNBOARD_SERVER_URL: "http://127.0.0.1:4310" })).db,
-      undefined,
+      (await run({ TASKNBOARD_CREDENTIAL_HELPER: "/explicit-helper" })).helper,
+      "/explicit-helper",
     );
     const absent = createCliHelper({
       desktop: true,
       platform: "darwin",
       home,
       resources,
-      database,
+      runtimeFile,
+      credentialHelper,
       searchPath: "/usr/bin",
     });
     assert.equal((await absent.status()).onPath, false);
@@ -108,6 +112,7 @@ test(
     const home = await mkdtemp(join(tmpdir(), "tasknboard-helper-http-"));
     await symlink(process.execPath, join(home, "node"));
     await writeFile(join(home, "cli.mjs"), "console.log('fixture')");
+    const secret = "test-helper-service-secret-32-characters";
     const child = spawn(
       process.execPath,
       [new URL("../server/http.mjs", import.meta.url).pathname],
@@ -122,6 +127,9 @@ test(
           TASKNBOARD_USER_HOME: home,
           TASKNBOARD_RESOURCES: home,
           TASKNBOARD_DB: join(home, "test.sqlite"),
+          TASKNBOARD_LOCAL_SECRET: secret,
+          TASKNBOARD_RUNTIME_FILE: join(home, "runtime.json"),
+          TASKNBOARD_CREDENTIAL_HELPER: join(home, "TasknBoard"),
         },
         stdio: ["pipe", "pipe", "pipe"],
       },
@@ -136,47 +144,100 @@ test(
     const [line] = await once(lines, "line");
     const { url } = JSON.parse(line);
     const endpoint = `${url}/api/cli-helper`;
-    assert.equal((await (await fetch(endpoint)).json()).installed, false);
+    assert.equal(
+      (
+        await (
+          await fetch(endpoint, {
+            headers: { Authorization: `Bearer ${secret}` },
+          })
+        ).json()
+      ).installed,
+      false,
+    );
     assert.equal(
       (
         await fetch(endpoint, {
           method: "POST",
-          headers: { Origin: "https://untrusted.example" },
+          headers: {
+            Origin: "https://untrusted.example",
+            Authorization: `Bearer ${secret}`,
+          },
         })
       ).status,
       403,
     );
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: { Origin: url },
+      headers: { Origin: url, Authorization: `Bearer ${secret}` },
     });
     assert.equal(response.status, 200);
     const installed = await response.json();
     assert.equal(installed.installed, true);
     await writeFile(installed.path, "unrelated");
-    const conflict = await fetch(endpoint, { method: "POST" });
+    const conflict = await fetch(endpoint, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${secret}` },
+    });
     assert.equal(conflict.status, 409);
     assert.match((await conflict.json()).message, /already exists/);
     lines.close();
   },
 );
 
-test("Windows helper runs with non-ASCII paths", { skip: process.platform !== "win32" }, async (t) => {
-  const { copyFile } = await import("node:fs/promises");
-  const home = await mkdtemp(join(tmpdir(), "tasknboard-é-"));
-  t.after(() => rm(home, { recursive: true, force: true }));
-  const resources = join(home, "app resources é");
-  await mkdir(resources);
-  await copyFile(process.execPath, join(resources, "node.exe"));
-  await writeFile(join(resources, "cli.mjs"), "console.log(JSON.stringify({db:process.env.TASKNBOARD_DB}))");
-  const database = join(home, "données.sqlite");
-  const helper = createCliHelper({ desktop: true, platform: "win32", home, resources, database, searchPath: join(home, ".local", "bin") });
-  const installed = await helper.install();
-  assert.equal(installed.installed, true);
-  const { stdout } = await exec(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `""${installed.path}""`], {
-    env: { ...process.env, TASKNBOARD_DB: "", TASKNBOARD_SERVER_URL: "" },
-    // cmd /s /c needs the outer quotes as written; Node would escape them.
-    windowsVerbatimArguments: true,
+test(
+  "Windows helper runs with non-ASCII paths",
+  { skip: process.platform !== "win32" },
+  async (t) => {
+    const { copyFile } = await import("node:fs/promises");
+    const home = await mkdtemp(join(tmpdir(), "tasknboard-é-"));
+    t.after(() => rm(home, { recursive: true, force: true }));
+    const resources = join(home, "app resources é");
+    await mkdir(resources);
+    await copyFile(process.execPath, join(resources, "node.exe"));
+    await writeFile(
+      join(resources, "cli.mjs"),
+      "console.log(JSON.stringify({runtime:process.env.TASKNBOARD_RUNTIME_FILE,helper:process.env.TASKNBOARD_CREDENTIAL_HELPER}))",
+    );
+    const runtimeFile = join(home, "données.json");
+    const credentialHelper = join(home, "TasknBoard.exe");
+    const helper = createCliHelper({
+      desktop: true,
+      platform: "win32",
+      home,
+      resources,
+      runtimeFile,
+      credentialHelper,
+      searchPath: join(home, ".local", "bin"),
+    });
+    const installed = await helper.install();
+    assert.equal(installed.installed, true);
+    const { stdout } = await exec(
+      process.env.ComSpec || "cmd.exe",
+      ["/d", "/s", "/c", `""${installed.path}""`],
+      {
+        env: {
+          ...process.env,
+          TASKNBOARD_RUNTIME_FILE: "",
+          TASKNBOARD_CREDENTIAL_HELPER: "",
+        },
+        // cmd /s /c needs the outer quotes as written; Node would escape them.
+        windowsVerbatimArguments: true,
+      },
+    );
+    assert.equal(JSON.parse(stdout.trim()).runtime, runtimeFile);
+  },
+);
+
+test("a database path cannot make a legacy helper available", async () => {
+  const helper = createCliHelper({
+    desktop: true,
+    platform: "darwin",
+    home: "/tmp",
+    resources: "/tmp",
+    database: "/tmp/stale.sqlite",
+    runtimeFile: undefined,
+    credentialHelper: undefined,
   });
-  assert.equal(JSON.parse(stdout.trim()).db, database);
+  assert.equal((await helper.status()).supported, false);
+  await assert.rejects(helper.install(), { code: "CLI_UNSUPPORTED" });
 });

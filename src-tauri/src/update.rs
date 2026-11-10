@@ -52,7 +52,10 @@ fn install(app: &AppHandle, update: &Update) {
             return;
         }
     };
-    crate::desktop::stop_service(app);
+    if let Err(error) = crate::desktop::stop_service(app) {
+        crate::desktop::show_error(&format!("The resident service could not stop: {error}"));
+        return;
+    }
     // On Windows, a successful install starts the installer and exits this process.
     if let Err(error) = update.install(bytes) {
         crate::desktop::show_error(&format!("The update could not be installed: {error}"));

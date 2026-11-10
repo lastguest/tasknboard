@@ -1,3 +1,4 @@
+import { embeddedApp, embeddedSelection, workspaceChanged } from "./embedded";
 import { AppVersion } from "./AppUpdates";
 import { ConnectionHelpers } from "./ConnectionHelpers";
 import { AgentLogs } from "./AgentLogs";
@@ -9,7 +10,7 @@ import {
   type AgentSettingsInfo,
 } from "./AgentSettings";
 import { isMcpStatus, type McpStatus } from "./connection-helpers";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Assignee, Board, RoleIcon } from "./Board";
 import {
   ContextMenu,
@@ -18,7 +19,6 @@ import {
   type MenuState,
 } from "./ContextMenu";
 import {
-  Settings,
   ShortcutHelp,
   TaskEditor,
   describeError,
@@ -31,10 +31,11 @@ import {
   command,
   errorOf,
   loadTasks,
-  subscribeChanges,
+  nativeWorkspace,
   taskNumber,
   token,
 } from "./api";
+import { subscribeChanges } from "./workspace-connection";
 import { Standup } from "./Standup";
 import { Milestones, RunningNow } from "./PlanningPanels";
 import { canCompleteTask } from "./completion";
@@ -46,8 +47,8 @@ import {
 } from "./Epics";
 import { type Toast, Toasts } from "./Toasts";
 import { InboxPage } from "./Inbox";
-import { PullRequestsPage, parsePullRef, pullHash, type PullRef } from "./PullRequests";
-import type { SettingsPage } from "./Dialogs";
+import { parsePullRef, pullHash, type PullRef } from "./PullRequests";
+import type { SettingsPage } from "./Settings";
 import {
   DisplayOptions,
   FavoriteButton,
@@ -97,6 +98,9 @@ import {
   type WorkspaceInfo,
 } from "./types";
 
+const PullRequestsPage = lazy(() => import("./PullRequestsPage"));
+const Settings = lazy(() => import("./Settings"));
+
 type View =
   | "board"
   | "mine"
@@ -132,6 +136,7 @@ const viewTitles: Record<Exclude<View, "epic" | "saved">, string> = {
 const overviews: View[] = ["inbox", "agents", "epics", "views", "pulls"];
 const SELECTED_BOARD_KEY = "tasknboard.selectedBoardId";
 const readSelectedBoardId = () => {
+  if (embeddedSelection().boardId) return embeddedSelection().boardId!;
   const linkedBoard = new URLSearchParams(location.search).get("board");
   if (linkedBoard && /^BOARD-\d+$/.test(linkedBoard)) return linkedBoard;
   try {
@@ -199,6 +204,11 @@ export default function App() {
   const [tabs, setTabs] = useState<TaskTab[]>([]);
   /** The task ID of the active tab; empty for the page tab. */
   const [activeTab, setActiveTab] = useState("");
+  useEffect(() => {
+    const app = embeddedApp();
+    if (!app?.getHostCapabilities()?.updateModelContext) return;
+    void app.updateModelContext({ structuredContent: { boardId: selectedBoardId || null, taskId: activeTab || null } }).catch(() => {});
+  }, [selectedBoardId, activeTab]);
   // Archiving closes a tab after an await, so read the latest tabs here.
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
@@ -240,6 +250,11 @@ export default function App() {
   const [pending, setPending] = useState(new Map<string, string>());
   const [moveError, setMoveError] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
+  useEffect(() => {
+    const hostError = (event: Event) => setToasts(previous => [...previous, { id: Date.now(), title: String((event as CustomEvent).detail), tone: "error" as const }].slice(-3));
+    workspaceChanged.addEventListener("hosterror", hostError);
+    return () => workspaceChanged.removeEventListener("hosterror", hostError);
+  }, []);
   /** Leaving a saved view drops its filters so they don't follow you around. */
   const setView = (next: View) => {
     if (view === "saved" && next !== "saved") {
@@ -390,6 +405,13 @@ export default function App() {
   );
 
   useEffect(() => {
+    if (!embeddedApp()) return;
+    const selected = () => { const id = embeddedSelection().boardId; if (id) selectBoard(id); };
+    workspaceChanged.addEventListener("selection", selected);
+    return () => workspaceChanged.removeEventListener("selection", selected);
+  }, [selectBoard]);
+
+  useEffect(() => {
     const context = (document as Document & { modelContext?: ModelContext })
       .modelContext;
     if (!context) return;
@@ -413,7 +435,7 @@ export default function App() {
     return () => controller.abort();
   }, [refresh]);
 
-  // The server pushes change events; the stream is closed while the tab is hidden.
+  // Browser tabs pause while hidden. A native WebKit window can report hidden at launch.
   const [streamEpoch, setStreamEpoch] = useState(0);
   useEffect(() => {
     let stream: AbortController | null = null;
@@ -425,19 +447,22 @@ export default function App() {
     const open = () => {
       void refresh();
       stream = new AbortController();
-      void subscribeChanges(changed, stream.signal);
+      void subscribeChanges(changed, stream.signal, error => {
+        setSync(s => ({ ...s, loaded: true, connected: false, error }));
+      });
     };
     const close = () => {
       stream?.abort();
       stream = null;
       window.clearTimeout(debounce);
     };
+    const visible = () => nativeWorkspace() || !document.hidden;
     const onVisibilityChange = () => {
-      if (document.hidden) close();
+      if (!visible()) close();
       else if (!stream) open();
     };
 
-    if (!document.hidden) open();
+    if (visible()) open();
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
@@ -2136,14 +2161,16 @@ export default function App() {
                 onMarkRead={() => void markInboxRead()}
               />
             ) : view === "pulls" ? (
-              <PullRequestsPage
-                target={pullTarget}
-                tasks={tasks}
-                onTarget={openPull}
-                onOpenTask={openTask}
-                onSettings={openGitHubSettings}
-                settingsClosed={settingsClosed}
-              />
+              <Suspense fallback={<p role="status">Loading pull requests…</p>}>
+                <PullRequestsPage
+                  target={pullTarget}
+                  tasks={tasks}
+                  onTarget={openPull}
+                  onOpenTask={openTask}
+                  onSettings={openGitHubSettings}
+                  settingsClosed={settingsClosed}
+                />
+              </Suspense>
             ) : view === "epics" ? (
               <EpicsPage
                 epics={activeEpics}
@@ -2492,17 +2519,19 @@ export default function App() {
         />
       )}
       {settings && (
-        <Settings
-          actor={actor}
-          connected={sync.connected}
-          initialPage={settingsPage}
-          onClose={() => {
-            setSettings(false);
-            setSettingsPage(undefined);
-            setSettingsClosed((n) => n + 1);
-          }}
-          onReconnect={reconnect}
-        />
+        <Suspense fallback={null}>
+          <Settings
+            actor={actor}
+            connected={sync.connected}
+            initialPage={settingsPage}
+            onClose={() => {
+              setSettings(false);
+              setSettingsPage(undefined);
+              setSettingsClosed((n) => n + 1);
+            }}
+            onReconnect={reconnect}
+          />
+        </Suspense>
       )}
       {epicDialog && (
         <EpicEditor
@@ -2577,50 +2606,22 @@ function AgentsPage({
   const [mcpError, setMcpError] = useState("");
   useEffect(() => {
     const controller = new AbortController();
-    const bearer = token.get();
-    void fetch("/api/mcp-config", {
-      headers: bearer ? { Authorization: `Bearer ${bearer}` } : {},
-      signal: AbortSignal.any([
-        controller.signal,
-        AbortSignal.timeout(15000),
-      ]),
+    const request = embeddedApp() || nativeWorkspace()
+      ? command<unknown>("mcp-config", {}, controller.signal)
+      : fetch("/api/mcp-config", {
+          headers: token.get() ? { Authorization: `Bearer ${token.get()}` } : {},
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
+        }).then(async response => {
+          let body;
+          try { body = await response.json(); }
+          catch { throw new ApiError(`The workspace service returned an unexpected response (${response.status}).`, "BAD_RESPONSE", response.status); }
+          if (!response.ok) throw new ApiError(body.message || "MCP configuration request failed.", body.code || "HTTP_ERROR", response.status);
+          return body;
+        });
+    void request.then(body => {
+      if (!isMcpStatus(body)) throw new ApiError("The workspace returned an invalid MCP configuration.", "BAD_RESPONSE", 0);
+      return body;
     })
-      .then(async (response) => {
-        let body: unknown;
-        try {
-          body = await response.json();
-        } catch {
-          throw new ApiError(
-            `The workspace service returned an unexpected response (${response.status}).`,
-            "BAD_RESPONSE",
-            response.status,
-          );
-        }
-        if (!response.ok) {
-          const error =
-            body && typeof body === "object" && !Array.isArray(body)
-              ? (body as Record<string, unknown>)
-              : {};
-          throw new ApiError(
-            typeof error.message === "string"
-              ? error.message
-              : `MCP configuration request failed (${response.status}).`,
-            typeof error.code === "string"
-              ? error.code
-              : response.status === 401
-                ? "UNAUTHORIZED"
-                : "HTTP_ERROR",
-            response.status,
-          );
-        }
-        if (!isMcpStatus(body))
-          throw new ApiError(
-            "The workspace service returned an unexpected MCP configuration.",
-            "BAD_RESPONSE",
-            response.status,
-          );
-        return body;
-      })
       .then(setMcpStatus)
       .catch((error) => {
         if (!controller.signal.aborted) setMcpError(errorOf(error).message);

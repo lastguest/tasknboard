@@ -18,9 +18,22 @@ serde_json = "1"
 tauri-plugin-opener = "2"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 rfd = "0.15"
 dunce = "1"
 tauri-plugin-updater = "2"
+keyring = "4.2"
+fs2 = "0.4"
+uuid = { version = "1", features = ["v4"] }
+ctrlc = { version = "3", features = ["termination"] }
+base64 = "0.22"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

@@ -10,7 +10,7 @@ const entry = {
 const runtime = {
   mode: "local",
   platform: "darwin",
-  config: { mcpServers: { tasknboard: entry } },
+  config: { mcpServers: { tasknboard: { url: "http://127.0.0.1:4310/mcp", bearer_token_env_var: "TASKNBOARD_TOKEN" } } },
   cli: { ...entry, args: ["/Apps/Task Board/cli.mjs"] },
 };
 
@@ -25,15 +25,11 @@ test("OpenCode gets its native configuration and Pi gets an agent CLI skill", ()
   const openCode = JSON.parse(
     connectionHelper("opencode", runtime, "opencode-2").text,
   );
-  assert.deepEqual(openCode.mcp.tasknboard.command, [
-    entry.command,
-    ...entry.args,
-  ]);
-  assert.equal(openCode.mcp.tasknboard.type, "local");
-  assert.equal(
-    openCode.mcp.tasknboard.environment.TASKNBOARD_AGENT_ID,
-    "opencode-2",
-  );
+  assert.equal(openCode.mcp.tasknboard.type, "remote");
+  assert.equal(openCode.mcp.tasknboard.url, runtime.config.mcpServers.tasknboard.url);
+  assert.equal(openCode.mcp.tasknboard.headers.Authorization, "Bearer {env:TASKNBOARD_TOKEN}");
+  assert.equal(openCode.mcp.tasknboard.oauth, false);
+  assert.equal(openCode.mcp.tasknboard.command, undefined);
   const pi = connectionHelper("pi", runtime, "pi-2");
   assert.match(pi.text, /^---\nname: tasknboard\n/);
   assert.ok(pi.text.includes("/Apps/Task Board/cli.mjs"));

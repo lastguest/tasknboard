@@ -21,14 +21,15 @@ export function createCliHelper({
   desktop = process.env.TASKNBOARD_DESKTOP === "1",
   home = process.env.TASKNBOARD_USER_HOME,
   resources = process.env.TASKNBOARD_RESOURCES,
-  database = process.env.TASKNBOARD_DB,
+  runtimeFile = process.env.TASKNBOARD_RUNTIME_FILE,
+  credentialHelper = process.env.TASKNBOARD_CREDENTIAL_HELPER,
   searchPath = process.env.PATH || "",
   platform = process.platform,
 } = {}) {
   const supported =
     desktop &&
     ["darwin", "win32"].includes(platform) &&
-    Boolean(home && resources && database);
+    Boolean(home && resources && runtimeFile && credentialHelper);
   const windows = platform === "win32";
   const directory = supported ? join(home, ".local", "bin") : null;
   const path = directory
@@ -38,8 +39,8 @@ export function createCliHelper({
   const cli = resources && join(resources, "cli.mjs");
   function launcher() {
     if (windows)
-      return `@echo off\r\nsetlocal DisableDelayedExpansion\r\nfor /f "tokens=2 delims=:" %%P in ('chcp') do set "tasknboardCodePage=%%P"\r\nchcp 65001 >nul\r\nif not defined TASKNBOARD_DB if not defined TASKNBOARD_SERVER_URL set ${batchQuote(`TASKNBOARD_DB=${database}`)}\r\n${batchQuote(node)} --disable-warning=ExperimentalWarning ${batchQuote(cli)} %*\r\nset "tasknboardExit=%errorlevel%"\r\nchcp %tasknboardCodePage% >nul\r\nexit /b %tasknboardExit%\r\n`;
-    return `#!/bin/sh\n# TasknBoard CLI helper\nif [ -z "\${TASKNBOARD_DB:-}" ] && [ -z "\${TASKNBOARD_SERVER_URL:-}" ]; then\n  export TASKNBOARD_DB=${shellQuote(database)}\nfi\nexec ${shellQuote(node)} --disable-warning=ExperimentalWarning ${shellQuote(cli)} "$@"\n`;
+      return `@echo off\r\nsetlocal DisableDelayedExpansion\r\nfor /f "tokens=2 delims=:" %%P in ('chcp') do set "tasknboardCodePage=%%P"\r\nchcp 65001 >nul\r\nif not defined TASKNBOARD_RUNTIME_FILE set ${batchQuote(`TASKNBOARD_RUNTIME_FILE=${runtimeFile}`)}\r\nif not defined TASKNBOARD_CREDENTIAL_HELPER set ${batchQuote(`TASKNBOARD_CREDENTIAL_HELPER=${credentialHelper}`)}\r\n${batchQuote(node)} --disable-warning=ExperimentalWarning ${batchQuote(cli)} %*\r\nset "tasknboardExit=%errorlevel%"\r\nchcp %tasknboardCodePage% >nul\r\nexit /b %tasknboardExit%\r\n`;
+    return `#!/bin/sh\n# TasknBoard CLI helper\nif [ -z "\${TASKNBOARD_RUNTIME_FILE:-}" ]; then\n  export TASKNBOARD_RUNTIME_FILE=${shellQuote(runtimeFile)}\nfi\nif [ -z "\${TASKNBOARD_CREDENTIAL_HELPER:-}" ]; then\n  export TASKNBOARD_CREDENTIAL_HELPER=${shellQuote(credentialHelper)}\nfi\nexec ${shellQuote(node)} --disable-warning=ExperimentalWarning ${shellQuote(cli)} "$@"\n`;
   }
   async function exists(file) {
     try {

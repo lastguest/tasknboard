@@ -4,6 +4,7 @@
   "version": "0.3.0",
   "identifier": "app.tasknboard.desktop",
   "build": {
+    "frontendDist": "../dist",
     "beforeDevCommand": { "script": "npm run desktop:prepare", "wait": true },
     "beforeBuildCommand": "npm run desktop:prepare"
   },

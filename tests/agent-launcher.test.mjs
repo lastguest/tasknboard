@@ -5,6 +5,8 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { createStore } from "../server/store.mjs";
+import { authenticateLocal } from "../server/local-auth.mjs";
+const serviceSecret = "test-service-secret-32-characters";
 import {
   createAgentLauncher,
   failureReason,
@@ -30,7 +32,7 @@ const waitFor = async (condition, message) => {
   assert.ok(condition(), message);
 };
 
-async function fixture(t, { client = "claude" } = {}) {
+async function fixture(t, { client = "claude", beforeEnvironment = async () => {} } = {}) {
   const home = await mkdtemp(join(tmpdir(), "tnb-launch-"));
   const store = createStore(":memory:");
   t.after(async () => {
@@ -63,10 +65,16 @@ async function fixture(t, { client = "claude" } = {}) {
     store,
     desktop: true,
     home,
+    connection: () => ({ url: "http://127.0.0.1:4310", secret: serviceSecret }),
+    runtimeFile: join(home, "runtime.json"),
+    credentialHelper: join(home, "TasknBoard"),
     searchPath: bin,
     spawn,
     // The user's environment, as the desktop host and login shell provide it.
-    environment: async () => ({ USER: "someone", PATH: bin, FROM_PROFILE: "yes" }),
+    environment: async () => {
+      await beforeEnvironment();
+      return { USER: "someone", PATH: bin, FROM_PROFILE: "yes", TASKNBOARD_TOKEN: serviceSecret, TASKNBOARD_LOCAL_SECRET: serviceSecret, TASKNBOARD_DB: "/stale.sqlite" };
+    },
   });
   const [board] = store.execute("list_boards", {}, human).boards;
   const withFolder = store.execute(
@@ -535,6 +543,10 @@ test("runs get a copy of the user's environment, not the service's", async (t) =
   assert.equal(env.FROM_PROFILE, "yes");
   // The service's own variables, such as its port, stay out of the agent's shell.
   assert.equal(env.TASKNBOARD_DB, undefined);
+  assert.equal(env.TASKNBOARD_LOCAL_SECRET, undefined);
+  assert.notEqual(env.TASKNBOARD_TOKEN, serviceSecret);
+  assert.deepEqual(authenticateLocal(env.TASKNBOARD_TOKEN, serviceSecret), { id: "bot", kind: "agent" });
+  assert.equal(env.TASKNBOARD_SERVER_URL, "http://127.0.0.1:4310");
   assert.equal(env.PORT, undefined);
 });
 
@@ -628,6 +640,9 @@ test("quitting records the stopped run, releases its claim, and starts it again 
     store,
     desktop: true,
     home,
+    connection: () => ({ url: "http://127.0.0.1:4310", secret: serviceSecret }),
+    runtimeFile: join(home, "runtime.json"),
+    credentialHelper: join(home, "TasknBoard"),
     searchPath: join(home, "bin"),
     environment: async () => ({ PATH: join(home, "bin") }),
     spawn: (command, args, options) => {
@@ -679,4 +694,41 @@ test("a task reassigned while another run starts still waits its turn", async (t
   await waitFor(() => calls.length >= 2);
   assert.equal(calls.length, 2);
   assert.match(calls[1].args[1], new RegExp(second.id));
+});
+
+test("reassignment cancels a starting job and leaves the next assignment queued", async (t) => {
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const { store, launcher, calls, board } = await fixture(t, {
+    beforeEnvironment: () => { entered.resolve(); return release.promise; },
+  });
+  const first = store.execute("create_task", { boardId: board.id, title: "First", assignee: "bot" }, human);
+  const second = store.execute("create_task", { boardId: board.id, title: "Second", assignee: "bot" }, human);
+  launcher.runTask(first);
+  await entered.promise;
+  launcher.runTask(second);
+  const reassigned = store.execute("update_task", {
+    id: first.id, expectedVersion: first.version, patch: { assignee: "you" },
+  }, human);
+  launcher.changed(first, reassigned);
+  release.resolve();
+  await waitFor(() => calls.length === 1, "the second assignment starts");
+  assert.match(calls[0].args[1], new RegExp(second.id));
+  assert.ok(!events(store, first.id).includes("agent_started"));
+});
+
+test("shutdown cancels startup and preserves the interrupted assignment", async (t) => {
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const { store, launcher, calls, board } = await fixture(t, {
+    beforeEnvironment: () => { entered.resolve(); return release.promise; },
+  });
+  const task = store.execute("create_task", { boardId: board.id, title: "Interrupted", assignee: "bot" }, human);
+  launcher.runTask(task);
+  await entered.promise;
+  launcher.stop();
+  release.resolve();
+  await settle();
+  assert.equal(calls.length, 0);
+  assert.deepEqual(JSON.parse(store.setting("agent_runs.interrupted")).map(job => job.taskId), [task.id]);
 });

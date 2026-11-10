@@ -22,9 +22,8 @@ test("client helpers switch formats, copy current identity, and report clipboard
         config: {
           mcpServers: {
             tasknboard: {
-              command: "/Applications/TasknBoard/node",
-              args: ["/Applications/TasknBoard/mcp.mjs"],
-              env: { TASKNBOARD_DB: "/Workspace/My tasks.sqlite" },
+              url: "http://127.0.0.1:4310/mcp",
+              bearer_token_env_var: "TASKNBOARD_TOKEN",
             },
           },
         },
@@ -113,9 +112,8 @@ test("client helpers switch formats, copy current identity, and report clipboard
   const config = JSON.parse(
     await page.evaluate(() => (window as any).copiedHelper),
   );
-  expect(config.mcp.tasknboard.environment.TASKNBOARD_AGENT_ID).toBe(
-    "opencode",
-  );
+  expect(config.mcp.tasknboard.url).toBe("http://127.0.0.1:4310/mcp");
+  expect(config.mcp.tasknboard.headers.Authorization).toBe("Bearer {env:TASKNBOARD_TOKEN}");
   await clients.getByRole("radio", { name: /^Pi/ }).check();
   await expect(section.getByLabel("pi connection helper")).toContainText(
     "/Applications/TasknBoard/cli.mjs",

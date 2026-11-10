@@ -1,151 +1,10 @@
-use std::{
-    env,
-    io::{BufRead, BufReader},
-    path::PathBuf,
-    process::{Child, Command, Stdio},
-    sync::{mpsc, Arc, Mutex},
-    thread,
-    time::{Duration, Instant},
-};
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
+use crate::service::{self, Paths};
+use serde::Serialize;
+use std::{path::PathBuf, time::Duration};
 use tauri::{
     webview::{DownloadEvent, NewWindowResponse},
-    AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, WebviewUrl, WebviewWindowBuilder,
 };
-
-#[derive(serde::Deserialize)]
-struct Ready {
-    url: String,
-}
-
-struct Service(Arc<Mutex<Option<Child>>>);
-
-impl Service {
-    fn stop(&self) {
-        let Some(mut child) = self.0.lock().unwrap().take() else {
-            return;
-        };
-        // EOF also stops the service if this host crashes or is forcibly killed.
-        drop(child.stdin.take());
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => return,
-                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return;
-                }
-            }
-        }
-    }
-}
-
-impl Drop for Service {
-    fn drop(&mut self) {
-        self.stop();
-    }
-}
-
-fn start_service(app: &tauri::App) -> Result<(Service, tauri::Url), Box<dyn std::error::Error>> {
-    let resources = if cfg!(debug_assertions) {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources")
-    } else {
-        app.path().resource_dir()?.join("resources")
-    };
-    // Node's main-module resolver rejects Windows verbatim drive paths.
-    let resources = dunce::simplified(&resources).to_path_buf();
-    let data = app.path().app_data_dir()?;
-    std::fs::create_dir_all(&data)?;
-    let node = resources.join(if cfg!(windows) { "node.exe" } else { "node" });
-    let service_script = resources.join("server.mjs");
-    let mut command = Command::new(node);
-    #[cfg(windows)]
-    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    command.arg(service_script)
-        .current_dir(&data)
-        .env_clear()
-        .env("HOST", "127.0.0.1")
-        .env("PORT", "0")
-        .env("TASKNBOARD_DESKTOP", "1")
-        .env("TASKNBOARD_USER_HOME", app.path().home_dir()?)
-        .env("TASKNBOARD_RESOURCES", &resources)
-        .env("PATH", env::var_os("PATH").unwrap_or_default())
-        .env("TASKNBOARD_DB", data.join("tasknboard.sqlite"))
-        .env("TASKNBOARD_STATIC_DIR", resources.join("dist"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    // The public OAuth client ID can be embedded when packaging the desktop app.
-    if let Some(client_id) = env::var("TASKNBOARD_GITHUB_CLIENT_ID")
-        .ok()
-        .or_else(|| option_env!("TASKNBOARD_GITHUB_CLIENT_ID").map(str::to_owned))
-    {
-        command.env("TASKNBOARD_GITHUB_CLIENT_ID", client_id);
-    }
-    // The service runs with a cleared environment, but agent CLIs it starts
-    // need the user's own: Claude Code finds its macOS keychain login by USER.
-    // The service keeps this copy for those runs only.
-    let user_env: std::collections::BTreeMap<String, String> = env::vars_os()
-        .map(|(key, value)| {
-            (key.to_string_lossy().into_owned(), value.to_string_lossy().into_owned())
-        })
-        .filter(|(key, _)| !key.starts_with("TASKNBOARD_"))
-        .collect();
-    command.env("TASKNBOARD_USER_ENV", serde_json::to_string(&user_env)?);
-    #[cfg(windows)]
-    {
-        let system_root = env::var_os("SystemRoot")
-            .or_else(|| env::var_os("WINDIR"))
-            .ok_or("SystemRoot is unavailable")?;
-        command.env("SystemRoot", &system_root).env("WINDIR", system_root);
-        for name in ["TEMP", "TMP", "USERPROFILE"] {
-            if let Some(value) = env::var_os(name) {
-                command.env(name, value);
-            }
-        }
-    }
-    let mut child = command.spawn()?;
-    let stdout = child.stdout.take().ok_or("Service stdout is unavailable")?;
-    let stderr = child.stderr.take().ok_or("Service stderr is unavailable")?;
-    let service = Service(Arc::new(Mutex::new(Some(child))));
-    let diagnostics = Arc::new(Mutex::new(String::new()));
-    let captured = Arc::clone(&diagnostics);
-    thread::spawn(move || {
-        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            eprintln!("{line}");
-            let mut log = captured.lock().unwrap();
-            if log.len() < 16_384 {
-                log.push_str(&format!("{line}\n"));
-            }
-        }
-    });
-    let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let mut lines = BufReader::new(stdout).lines();
-        let _ = sender.send(lines.next().transpose());
-        for line in lines.map_while(Result::ok) {
-            eprintln!("{line}");
-        }
-    });
-    let line = receiver
-        .recv_timeout(Duration::from_secs(15))?
-        .map_err(|error| format!("Could not read service readiness: {error}"))?
-        .ok_or_else(|| {
-            format!(
-                "Workspace service exited during startup. {}",
-                diagnostics.lock().unwrap()
-            )
-        })?;
-    let ready: Ready = serde_json::from_str(&line)?;
-    let url: tauri::Url = ready.url.parse()?;
-    if url.scheme() != "http" || url.host_str() != Some("127.0.0.1") || url.port().is_none() {
-        return Err("Workspace service reported an invalid address".into());
-    }
-    Ok((service, url))
-}
 
 pub(crate) fn show_error(message: &str) {
     eprintln!("TasknBoard: {message}");
@@ -165,13 +24,16 @@ async fn pick_folder(start: Option<String>) -> Option<String> {
         dialog = dialog.set_directory(start);
     }
     let folder = dialog.pick_folder().await?;
-    Some(dunce::simplified(folder.path()).to_string_lossy().into_owned())
+    Some(
+        dunce::simplified(folder.path())
+            .to_string_lossy()
+            .into_owned(),
+    )
 }
 
-pub(crate) fn stop_service(app: &AppHandle) {
-    if let Some(service) = app.try_state::<Service>() {
-        service.stop();
-    }
+pub(crate) fn stop_service(_app: &AppHandle) -> Result<(), String> {
+    let paths = crate::service::Paths::current().map_err(|error| error.to_string())?;
+    crate::service::stop_managed(&paths).map_err(|error| error.to_string())
 }
 
 fn open_artifact(app: &AppHandle, url: &tauri::Url) {
@@ -180,24 +42,139 @@ fn open_artifact(app: &AppHandle, url: &tauri::Url) {
     }
 }
 
+struct Workspace {
+    paths: Paths,
+    client: reqwest::Client,
+    credential: String,
+}
+
+#[derive(Serialize)]
+struct WorkspaceResponse {
+    status: u16,
+    text: String,
+}
+
+impl Workspace {
+    fn new(paths: Paths, credential: String) -> Result<Self, reqwest::Error> {
+        // The updater also uses ring. Set it before constructing the first client.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .retry(reqwest::retry::never())
+            .connect_timeout(Duration::from_secs(2))
+            .build()?;
+        Ok(Self {
+            paths,
+            client,
+            credential,
+        })
+    }
+
+    async fn request(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+    ) -> Result<WorkspaceResponse, String> {
+        if name.is_empty()
+            || name.len() > 64
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte == b'_' || byte == b'-')
+        {
+            return Err("Invalid workspace command.".into());
+        }
+        let runtime = service::read_runtime(&self.paths)
+            .map_err(|_| "The workspace service is unavailable.")?;
+        let address: tauri::Url = runtime
+            .url
+            .parse()
+            .map_err(|_| "Invalid workspace address.")?;
+        let port = address.port().ok_or("Invalid workspace port.")?;
+        let timeout = if matches!(name, "service-connect" | "export-file" | "pick-folder") {
+            130
+        } else {
+            15
+        };
+        let url = format!("http://127.0.0.1:{port}/api/{name}");
+        let request = if matches!(name, "mcp-config" | "mcp-status") {
+            self.client.get(url)
+        } else {
+            self.client.post(url).json(&args)
+        };
+        let response = request
+            .bearer_auth(&self.credential)
+            .timeout(Duration::from_secs(timeout))
+            .send()
+            .await
+            .map_err(|_| {
+                "The workspace request failed. Read the current state before retrying a write."
+            })?;
+        let status = response.status().as_u16();
+        let text = response
+            .text()
+            .await
+            .map_err(|_| "The workspace response was interrupted.")?;
+        Ok(WorkspaceResponse { status, text })
+    }
+}
+
+#[tauri::command]
+async fn workspace_command(
+    workspace: tauri::State<'_, Workspace>,
+    name: String,
+    args: serde_json::Value,
+) -> Result<WorkspaceResponse, String> {
+    workspace.request(&name, args).await
+}
+
+fn connect_workspace() -> Result<Workspace, Box<dyn std::error::Error>> {
+    let paths = Paths::current()?;
+    service::attach(&paths)?;
+    Ok(Workspace::new(paths, service::credential()?)?)
+}
+
 pub fn run() {
+    // Resolve service and credential failures before the macOS event loop starts.
+    // Returning these errors from setup can panic in tao's native event callback.
+    let workspace = match connect_workspace() {
+        Ok(workspace) => workspace,
+        Err(error) => {
+            show_error(&format!(
+                "Could not connect to the TasknBoard service: {error}"
+            ));
+            std::process::exit(1);
+        }
+    };
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![crate::update::app_version, crate::update::check_for_updates, crate::open_external_url, pick_folder])
+        .manage(workspace)
+        .invoke_handler(tauri::generate_handler![
+            crate::update::app_version,
+            crate::update::check_for_updates,
+            crate::open_external_url,
+            pick_folder,
+            workspace_command
+        ])
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            let (service, url) = start_service(app)?;
-            let origin = url.origin();
-            let blob_prefix = format!("blob:{}/", url.origin().ascii_serialization());
             let navigation_handle = app.handle().clone();
             let window_handle = app.handle().clone();
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                .initialization_script("window.tasknboardDesktop = true;")
                 .title("TasknBoard")
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(720.0, 520.0)
                 .disable_drag_drop_handler()
                 .on_navigation(move |destination| {
-                    if destination.origin() == origin || destination.as_str().starts_with(&blob_prefix) {
+                    if matches!(
+                        (destination.scheme(), destination.host_str()),
+                        ("tauri", Some("localhost")) | ("http", Some("tauri.localhost"))
+                    ) || destination.as_str().starts_with("blob:tauri://localhost/")
+                        || destination
+                            .as_str()
+                            .starts_with("blob:http://tauri.localhost/")
+                    {
                         true
                     } else {
                         // WKWebView checks navigation before its new-window callback.
@@ -209,56 +186,133 @@ pub fn run() {
                     open_artifact(&window_handle, &url);
                     NewWindowResponse::Deny
                 })
-                .on_download(|_, event| {
-                    match event {
-                        DownloadEvent::Requested { destination, .. } => {
-                            let filename = destination.file_name().and_then(|name| name.to_str()).unwrap_or("tasknboard-export.json");
-                            if let Some(path) = rfd::FileDialog::new().set_file_name(filename).save_file() {
-                                *destination = path;
-                                true
-                            } else { false }
-                        }
-                        DownloadEvent::Finished { success: false, .. } => {
-                            show_error("The export could not be saved.");
+                .on_download(|_, event| match event {
+                    DownloadEvent::Requested { destination, .. } => {
+                        let filename = destination
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("tasknboard-export.json");
+                        if let Some(path) =
+                            rfd::FileDialog::new().set_file_name(filename).save_file()
+                        {
+                            *destination = path;
                             true
+                        } else {
+                            false
                         }
-                        _ => true,
                     }
+                    DownloadEvent::Finished { success: false, .. } => {
+                        show_error("The export could not be saved.");
+                        true
+                    }
+                    _ => true,
                 })
                 .build()?;
-            let child = Arc::clone(&service.0);
-            app.manage(service);
             crate::update::watch(app.handle().clone());
-            let handle = app.handle().clone();
-            thread::spawn(move || loop {
-                thread::sleep(Duration::from_millis(500));
-                let ended = {
-                    let mut guard = child.lock().unwrap();
-                    let Some(process) = guard.as_mut() else { return };
-                    match process.try_wait() {
-                        Ok(Some(status)) => Some(format!("The workspace service stopped ({status}). Restart TasknBoard to reconnect.")),
-                        Err(error) => Some(format!("Could not monitor the workspace service: {error}")),
-                        Ok(None) => None,
-                    }
-                };
-                if let Some(message) = ended {
-                    show_error(&message);
-                    handle.exit(1);
-                    return;
-                }
-            });
             Ok(())
         })
         .build(tauri::generate_context!());
     match app {
-        Ok(app) => app.run(|handle, event| {
-            if matches!(event, tauri::RunEvent::Exit) {
-                stop_service(handle);
-            }
-        }),
+        Ok(app) => app.run(|_, _| {}),
         Err(error) => {
             show_error(&format!("Could not start TasknBoard: {error}"));
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        fs,
+        io::{BufRead, BufReader, Write},
+        net::TcpListener,
+        thread,
+        time::Instant,
+    };
+
+    #[test]
+    fn workspace_requests_follow_the_resident_descriptor_after_an_outage() {
+        let data = std::env::temp_dir().join(format!("tasknboard-ipc-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&data).unwrap();
+        let runtime = data.join("runtime.json");
+        let credential = "native-adapter-fixture";
+        let workspace = Workspace::new(
+            Paths {
+                data: data.clone(),
+                resources: data.clone(),
+                executable: data.clone(),
+                home: data.clone(),
+            },
+            credential.into(),
+        )
+        .unwrap();
+        let request = || {
+            tauri::async_runtime::block_on(
+                workspace.request("workspace-revision", serde_json::json!({})),
+            )
+        };
+
+        // Keep both listeners bound so the operating system cannot reuse the first port.
+        let first = TcpListener::bind("127.0.0.1:0").unwrap();
+        let second = TcpListener::bind("127.0.0.1:0").unwrap();
+        for (listener, instance) in [(first, "before"), (second, "after")] {
+            assert!(request().is_err());
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            fs::write(
+                &runtime,
+                serde_json::to_vec(&serde_json::json!({
+                    "url": url, "mcpUrl": format!("{url}/mcp"), "instanceId": instance, "pid": 1
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let response = thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let (mut stream, _) = loop {
+                    match listener.accept() {
+                        Ok(connection) => break connection,
+                        Err(err)
+                            if err.kind() == std::io::ErrorKind::WouldBlock
+                                && Instant::now() < deadline =>
+                        {
+                            thread::sleep(Duration::from_millis(10))
+                        }
+                        Err(err) => panic!("Fixture connection failed: {err}"),
+                    }
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let headers: Vec<_> = BufReader::new(&stream)
+                    .lines()
+                    .map(Result::unwrap)
+                    .take_while(|line| !line.is_empty())
+                    .collect();
+                assert_eq!(headers[0], "POST /api/workspace-revision HTTP/1.1");
+                assert!(headers.iter().any(|line| {
+                    line.eq_ignore_ascii_case(&format!("authorization: Bearer {credential}"))
+                }));
+                let body = serde_json::json!({ "instanceId": instance }).to_string();
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .unwrap();
+            });
+            let result = request().unwrap();
+            response.join().unwrap();
+            assert_eq!(result.status, 200);
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&result.text).unwrap()["instanceId"],
+                instance
+            );
+            fs::remove_file(&runtime).unwrap();
+        }
+        fs::remove_dir(data).unwrap();
     }
 }

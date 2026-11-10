@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { command, errorOf } from "./api";
+import { command, errorOf, downloadText } from "./api";
 import { useAgentSettings } from "./AgentSettings";
 import { BrandLogo } from "./BrandLogos";
 import {
@@ -75,15 +75,9 @@ export function ConnectionHelpers({
       setInstalling(false);
     }
   }
-  function download() {
-    const url = URL.createObjectURL(
-      new Blob([helper.text], { type: "text/markdown;charset=utf-8" }),
-    );
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "SKILL.md";
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  async function download() {
+    try { await downloadText("SKILL.md", "text/markdown;charset=utf-8", helper.text); }
+    catch (error) { setCopyError(errorOf(error).message); }
   }
   return (
     <div className="connection-helper">

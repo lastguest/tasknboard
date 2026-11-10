@@ -1,5 +1,6 @@
+import { isEmbedded } from "./embedded";
 import { useEffect, useState } from "react";
-import { command, errorOf, token } from "./api";
+import { command, errorOf, nativeWorkspace, token } from "./api";
 import { displayName, usePeople } from "./People";
 
 type Connection = {
@@ -22,12 +23,16 @@ export function McpConnections() {
     async function refresh() {
       try {
         const bearer = token.get();
-        const response = await fetch("/api/mcp-status", {
+        const body = nativeWorkspace() || isEmbedded()
+          ? await command<Status>("mcp-status", {}, controller.signal)
+          : await fetch("/api/mcp-status", {
           headers: bearer ? { Authorization: `Bearer ${bearer}` } : {},
           signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
+        }).then(async response => {
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.message || "The MCP status request failed.");
+          return result;
         });
-        const body = await response.json();
-        if (!response.ok) throw new Error(body.message || "The MCP status request failed.");
         if (!body || typeof body.supported !== "boolean" || !Array.isArray(body.connections) ||
           !body.connections.every((connection: Connection) => connection &&
             typeof connection.id === "string" && typeof connection.identity === "string" &&

@@ -1,3 +1,4 @@
+import { isEmbedded } from "./embedded";
 import { useEffect, useId, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { laneLimit } from "../server/domain.mjs";
@@ -312,9 +313,9 @@ export function BoardEditor({
     setPicking(true);
     setPickError("");
     try {
-      const folder = await invoke<string | null>("pick_folder", {
-        start: normalizedRepository || null,
-      });
+      const folder = isEmbedded()
+        ? (await command<{ path: string | null }>("pick_folder")).path
+        : await invoke<string | null>("pick_folder", { start: normalizedRepository || null });
       if (folder) setRepository(folder);
     } catch (cause) {
       setPickError(`Could not open the folder picker: ${String(cause)}`);
@@ -551,7 +552,7 @@ export function BoardEditor({
               aria-describedby={`${repositoryId}-hint${attempted && repositoryError ? ` ${repositoryId}-error` : ""}`}
               onChange={(event) => setRepository(event.target.value)}
             />
-            {desktopApp() && (
+            {(desktopApp() || isEmbedded()) && (
               <button
                 type="button"
                 className="secondary"

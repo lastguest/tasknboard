@@ -1,4 +1,8 @@
+import { invoke } from "@tauri-apps/api/core";
 import type { Task } from "./types";
+import { embeddedApp, workspaceChanged } from "./embedded";
+
+export const nativeWorkspace = () => window.tasknboardDesktop === true;
 
 const TOKEN_KEY = "tasknboard-token";
 
@@ -26,12 +30,30 @@ export async function command<T>(
   name: string,
   args: unknown = {},
   signal?: AbortSignal,
-  timeoutMs = 15000,
+  timeoutMs = ["pick_folder", "export_file", "service-connect"].includes(name) ? 130000 : 15000,
 ): Promise<T> {
+  const app = embeddedApp();
+  if (app) {
+    const result = await app.callServerTool({ name: `ui_${name.replaceAll("-", "_")}`, arguments: args as Record<string, unknown> }, { signal, timeout: timeoutMs });
+    if (result.isError) {
+      const block = result.content.find(item => item.type === "text");
+      let error: { message?: string; code?: string; status?: number; details?: Record<string, unknown> } = {};
+      try { error = JSON.parse(block?.type === "text" ? block.text : "{}"); } catch { /* Preserve a useful error for malformed results. */ }
+      throw new ApiError(error.message || "The workspace command failed.", error.code || "TOOL_ERROR", error.status || 0, error.details);
+    }
+    if (!result._meta || !("result" in result._meta)) throw new ApiError("The workspace returned an invalid tool result.", "BAD_RESPONSE", 0);
+    if (!/^(list_|get_|find_|search_|workspace_|read_|agent_configs$|agent_logs$|export_workspace$|pick_folder$|export_file$|.*(?:status|config)$)/.test(name.replaceAll("-", "_"))) workspaceChanged.dispatchEvent(new Event("change"));
+    return result._meta.result as T;
+  }
   const bearer = token.get();
   let res: Response;
   try {
-    res = await fetch(`/api/${name}`, {
+    if (nativeWorkspace()) {
+      signal?.throwIfAborted();
+      const result = await invoke<{ status: number; text: string }>("workspace_command", { name, args });
+      signal?.throwIfAborted();
+      res = new Response(result.text, { status: result.status });
+    } else res = await fetch(`/api/${name}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -45,7 +67,7 @@ export async function command<T>(
   } catch (e) {
     if (signal?.aborted) throw e;
     throw new ApiError(
-      "Can't reach the workspace service. Nothing was saved.",
+      "Cannot reach the workspace service. A write can complete before a connection fails. Read the current state before retrying.",
       "NETWORK",
       0,
     );
@@ -68,73 +90,6 @@ export async function command<T>(
       value.details,
     );
   return value as T;
-}
-
-/**
- * Follows the server's change stream until `signal` aborts. Calls `onChange`
- * when the stream opens, on each change event, and when an open stream is
- * lost: each time the loaded data may be stale. Reconnects with a backoff
- * from 1 s to 30 s. EventSource cannot send the bearer header, so this reads
- * the stream with fetch.
- */
-export async function subscribeChanges(
-  onChange: () => void,
-  signal: AbortSignal,
-) {
-  let delay = 1000;
-  while (!signal.aborted) {
-    // The server pings every 25 s; silence means a dead connection.
-    const idle = new AbortController();
-    let timer = 0;
-    const alive = () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => idle.abort(), 60000);
-    };
-    let opened = false;
-    try {
-      const bearer = token.get();
-      alive();
-      const res = await fetch("/api/stream", {
-        headers: bearer ? { Authorization: `Bearer ${bearer}` } : {},
-        signal: AbortSignal.any([signal, idle.signal]),
-      });
-      if (res.ok && res.body) {
-        opened = true;
-        delay = 1000;
-        onChange();
-        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-        let buffer = "";
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          alive();
-          buffer += value;
-          const blocks = buffer.split("\n\n");
-          buffer = blocks.pop() ?? "";
-          if (blocks.some((b) => b.split("\n").includes("event: change")))
-            onChange();
-        }
-      }
-    } catch {
-      // A failed or dropped stream reconnects below.
-    } finally {
-      window.clearTimeout(timer);
-    }
-    if (signal.aborted) return;
-    if (opened) onChange();
-    await new Promise<void>((resolve) => {
-      const wait = window.setTimeout(resolve, delay);
-      signal.addEventListener(
-        "abort",
-        () => {
-          window.clearTimeout(wait);
-          resolve();
-        },
-        { once: true },
-      );
-    });
-    delay = Math.min(delay * 2, 30000);
-  }
 }
 
 export const errorOf = (e: unknown) =>
@@ -163,4 +118,26 @@ export async function loadTasks(boardId: string, archived = false) {
     if (!page.tasks.length) break;
   } while (offset < total);
   return [...byId.values()].sort((a, b) => taskNumber(a.id) - taskNumber(b.id));
+}
+
+/** Export through the host in embedded mode, or the browser download action. */
+export async function downloadText(name: string, mime: string, text: string) {
+  const app = embeddedApp();
+  if (app) {
+    if (app.getHostCapabilities()?.downloadFile) {
+      const result = await app.downloadFile({ contents: [{ type: "resource", resource: { uri: `file:///${encodeURIComponent(name)}`, mimeType: mime, text } }] });
+      if (result.isError) throw new ApiError("The host cancelled the export.", "EXPORT_CANCELLED", 0);
+    } else {
+      const bytes = new TextEncoder().encode(text);
+      let binary = "";
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      const result = await command<{ saved: boolean }>("export_file", { name, mime, data: btoa(binary) });
+      if (!result.saved) throw new ApiError("The export was cancelled.", "EXPORT_CANCELLED", 0);
+    }
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const link = document.createElement("a");
+  link.href = url; link.download = name; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

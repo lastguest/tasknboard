@@ -1,101 +1,88 @@
-import { createStore } from "./store.mjs";
-import { dbPath, localActor } from "./config.mjs";
-import { createChangeFeed } from "./changes.mjs";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { resolveConnection } from "./runtime.mjs";
 
-/**
- * Connects to the workspace named by the environment. A remote server uses
- * TASKNBOARD_SERVER_URL and TASKNBOARD_TOKEN; otherwise the local SQLite file
- * runs commands as `actor`, the local human by default. Both modes return the
- * same command results.
- */
-export function connect({ actor = localActor, env = process.env, database = dbPath } = {}) {
-  const remote = env.TASKNBOARD_SERVER_URL;
-  if (!remote) {
-    const store = createStore(database);
-    store.registerActors([actor]);
-    const changes = createChangeFeed(store);
-    return {
-      mode: "local",
-      target: database,
-      execute: async (name, args = {}) => store.execute(name, args, actor),
-      subscribe: (listener) => changes.subscribe(listener),
-      close: () => { changes.stop(); store.close(); },
-    };
-  }
-  const url = new URL(remote);
-  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  if (url.protocol !== "https:" && !(loopback && url.protocol === "http:"))
-    throw new Error(
-      "Remote credentials require HTTPS (HTTP allowed only on loopback)",
-    );
-  if (!env.TASKNBOARD_TOKEN)
-    throw new Error("A remote server requires TASKNBOARD_TOKEN");
-  const base = remote.replace(/\/$/, "");
-  const subscriptions = new Set();
-  return {
-    mode: "remote",
-    target: base,
-    async execute(name, args = {}) {
-      let res;
+/** Every CLI operation reaches the resident service. This module never opens SQLite. */
+export function connect({ actor, env = process.env } = {}) {
+  let connection;
+  let closed = false;
+  const initialize = () =>
+    (connection ??= (async () => {
+      const resolved = await resolveConnection({ actor, env });
+      const client = new Client({ name: "tasknboard-cli", version: "0.1.0" });
+      const transport = new StreamableHTTPClientTransport(resolved.url, {
+        requestInit: { headers: { Authorization: `Bearer ${resolved.token}` } },
+        reconnectionOptions: { maxRetries: 0 },
+      });
       try {
-        res = await fetch(`${base}/api/${name}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${env.TASKNBOARD_TOKEN}`,
-          },
-          body: JSON.stringify(args),
-          signal: AbortSignal.timeout(15000),
-        });
-      } catch (error) {
+        await client.connect(transport);
+      } catch {
+        await client.close();
         throw Object.assign(
-          new Error(`Can't reach ${base}: ${error.message}`),
+          new Error(
+            "Cannot connect to the TasknBoard MCP service. Check service status and credentials.",
+          ),
+          { code: "SERVICE_UNAVAILABLE" },
+        );
+      }
+      return { client, transport };
+    })());
+  return {
+    mode: env.TASKNBOARD_SERVER_URL ? "remote" : "local",
+    target: env.TASKNBOARD_SERVER_URL || "resident service",
+    async execute(name, args = {}) {
+      if (closed)
+        throw Object.assign(new Error("The MCP connection is closed."), {
+          code: "CONNECTION_CLOSED",
+        });
+      const attempt = initialize();
+      const { client } = await attempt.catch(error => {
+        if (connection === attempt) connection = undefined;
+        throw error;
+      });
+      let result;
+      try {
+        result = await client.callTool({ name, arguments: args });
+      } catch (error) {
+        if (connection === attempt) {
+          connection = undefined;
+          await client.close().catch(() => {});
+        }
+        throw Object.assign(
+          new Error(
+            `The MCP request failed: ${error.message}. A write may have completed; read its state before retrying.`,
+          ),
           { code: "NETWORK" },
         );
       }
-      const output = await res.json();
-      if (!res.ok)
-        throw Object.assign(new Error(output.message), { code: output.code, details: output.details });
-      return output;
-    },
-    subscribe(listener) {
-      const controller = new AbortController();
-      subscriptions.add(controller);
-      void (async () => {
-        let delay = 1000;
-        while (!controller.signal.aborted) {
-          try {
-            const response = await fetch(`${base}/api/stream`, {
-              headers: { Authorization: `Bearer ${env.TASKNBOARD_TOKEN}` },
-              signal: controller.signal,
-            });
-            if (!response.ok || !response.body) throw new Error("Change stream unavailable");
-            delay = 1000;
-            listener();
-            const decoder = new TextDecoder();
-            let buffer = "";
-            for await (const chunk of response.body) {
-              buffer += decoder.decode(chunk, { stream: true });
-              let end;
-              while ((end = buffer.indexOf("\n\n")) >= 0) {
-                const event = buffer.slice(0, end);
-                buffer = buffer.slice(end + 2);
-                if (event.includes("event: change")) listener();
-              }
-            }
-          } catch {
-            if (controller.signal.aborted) break;
-          }
-          await new Promise((resolve) => {
-            const done = () => { clearTimeout(timer); controller.signal.removeEventListener("abort", done); resolve(); };
-            const timer = setTimeout(done, delay);
-            controller.signal.addEventListener("abort", done, { once: true });
-          });
-          delay = Math.min(delay * 2, 30000);
+      if (result.isError) {
+        let error;
+        try {
+          error = JSON.parse(
+            result.content?.find((item) => item.type === "text")?.text || "{}",
+          );
+        } catch {
+          error = {};
         }
-      })();
-      return () => { controller.abort(); subscriptions.delete(controller); };
+        throw Object.assign(
+          new Error(error.message || "The MCP command failed."),
+          { code: error.code || "ERROR", status: error.status, details: error.details },
+        );
+      }
+      return (
+        result.structuredContent ??
+        JSON.parse(result.content.find((item) => item.type === "text").text)
+      );
     },
-    close: () => { for (const controller of subscriptions) controller.abort(); subscriptions.clear(); },
+    async close() {
+      closed = true;
+      if (!connection) return;
+      const active = await connection.catch(() => null);
+      if (!active) return;
+      const { client, transport } = active;
+      if (transport.sessionId)
+        await transport.terminateSession().catch(() => {});
+      await client.close();
+    },
   };
 }

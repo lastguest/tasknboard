@@ -1,32 +1,39 @@
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
-import { resolve, extname, sep } from "node:path";
+import { readFile, mkdir, writeFile, rename, unlink } from "node:fs/promises";
+import { resolve, dirname, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { createApplication, commandSchemas } from "./application.mjs";
+import { createMcpEndpoint } from "./mcp-endpoint.mjs";
+import { authenticateLocal } from "./local-auth.mjs";
+import { runtimeFile as defaultRuntimeFile } from "./runtime.mjs";
 import { createStore } from "./store.mjs";
 import { createCliHelper } from "./cli-helper.mjs";
 import { createClaudePlugin } from "./claude-plugin.mjs";
 import { createCodexPlugin } from "./codex-plugin.mjs";
+import { createCodexAppPlugin } from "./codex-app-plugin.mjs";
 import { createAgentLauncher } from "./agent-launcher.mjs";
 import { createAgentLogs } from "./agent-logs.mjs";
-import { listMcpConnections, restartMcpConnection } from "./mcp-control.mjs";
-import {
-  agentClients,
-  agentEvents,
-  defaultConfig,
-  listConfigs,
-  writeConfig,
-} from "./agent-config.mjs";
 import { createGitHub } from "./github.mjs";
-import { createChangeFeed } from "./changes.mjs";
 import { createCommitLinks } from "./commit-links.mjs";
-import { readTaskFiles, responseUrls } from "./task-files.mjs";
-import { readTaskCommitSummary } from "./commit-links.mjs";
+import { responseUrls } from "./task-files.mjs";
+import { createChangeFeed } from "./changes.mjs";
 import { imageDataUrlLimit } from "./domain.mjs";
 import { dbPath, localActor, tokensFromEnvironment } from "./config.mjs";
 const host = process.env.HOST || "127.0.0.1",
   port = Number(process.env.PORT || 4310);
-const desktop = process.env.TASKNBOARD_DESKTOP === "1";
+const resident = process.env.TASKNBOARD_RESIDENT === "1";
+const desktop = resident || process.env.TASKNBOARD_DESKTOP === "1";
+const secret = process.env.TASKNBOARD_LOCAL_SECRET || "";
+if (resident && secret.length < 24)
+  throw new Error("The resident service requires its native credential.");
+const instanceId = randomUUID();
+const runtimeFile = desktop
+  ? defaultRuntimeFile(process.env)
+  : process.env.TASKNBOARD_RUNTIME_FILE;
+const credentialHelper = process.env.TASKNBOARD_CREDENTIAL_HELPER;
+let serviceUrl;
+const connection = () => ({ url: serviceUrl, secret });
 const tokens = tokensFromEnvironment();
 if (
   !["127.0.0.1", "localhost", "::1"].includes(host) &&
@@ -35,26 +42,33 @@ if (
   throw new Error("Remote binding requires TASKNBOARD_TOKENS");
 const store = createStore(dbPath),
   root = resolve(process.env.TASKNBOARD_STATIC_DIR || "dist");
-const mcpEntry =
-  desktop && process.env.TASKNBOARD_RESOURCES
-    ? resolve(process.env.TASKNBOARD_RESOURCES, "mcp.mjs")
-    : fileURLToPath(new URL("./mcp.mjs", import.meta.url));
 const cliEntry =
   desktop && process.env.TASKNBOARD_RESOURCES
     ? resolve(process.env.TASKNBOARD_RESOURCES, "cli.mjs")
     : fileURLToPath(new URL("../dist-cli/tasknboard.mjs", import.meta.url));
 const github = createGitHub(store);
 const changes = createChangeFeed(store);
-const cliHelper = createCliHelper();
-const codexPlugin = createCodexPlugin({ mcpEntry });
-const claudePlugin = createClaudePlugin({ mcpEntry, database: dbPath });
+const cliHelper = createCliHelper({ desktop, runtimeFile, credentialHelper });
+const codexPlugin = createCodexPlugin({
+  desktop,
+  runtimeFile,
+  credentialHelper,
+});
+const codexAppPlugin = createCodexAppPlugin();
+const claudePlugin = createClaudePlugin({
+  desktop,
+  runtimeFile,
+  credentialHelper,
+});
 // Agents run on this machine only for a local workspace, as plugins do.
 const launcher = createAgentLauncher({
   store,
   desktop: desktop && !Object.keys(tokens).length,
+  connection,
+  runtimeFile,
+  credentialHelper,
 });
-// Runs that the last quit stopped start again.
-launcher.resume();
+
 const agentLogs = createAgentLogs({
   home: launcher.enabled ? process.env.TASKNBOARD_USER_HOME : "",
   running: launcher.runningLogs,
@@ -67,171 +81,50 @@ const commitLinks = createCommitLinks(store, {
     console.error(`Commit scan failed for ${repository}: ${error.message}`),
 });
 commitLinks.start();
-const httpError = (code, message, status) =>
-  Object.assign(new Error(message), { code, status });
-async function dispatchAssignedTask(task, actor) {
-  if (
-    !task.assignee ||
-    task.archived ||
-    !["todo", "in_progress"].includes(task.role) ||
-    task.delegatedTo ||
-    task.lease?.expiresAt > Date.now()
-  )
-    return null;
-  const { connections } = await listMcpConnections(dbPath);
-  if (
-    connections.some(
-      (connection) =>
-        connection.identity === task.assignee &&
-        connection.state === "connected",
-    )
-  ) {
-    store.recordEvent(
-      task.id,
-      actor,
-      "dispatch_requested",
-      JSON.stringify({ to: task.assignee }),
-    );
-    changes.check();
-    return { started: [task.assignee], notified: true };
+const application = createApplication({
+  database: dbPath,
+  store,
+  github,
+  launcher,
+  changes,
+  agentLogs,
+  cliHelper,
+  codexPlugin,
+  codexAppPlugin,
+  claudePlugin,
+  shared: Object.keys(tokens).length > 0,
+  instanceId,
+  connection,
+  runtimeFile,
+  credentialHelper,
+  cliEntry,
+  appRoot: resolve(
+    process.env.TASKNBOARD_APP_DIR ||
+      (process.env.TASKNBOARD_RESOURCES
+        ? resolve(process.env.TASKNBOARD_RESOURCES, "app")
+        : "dist-app"),
+  ),
+});
+const authenticate = (value) => authenticateLocal(value, secret, tokens);
+const mcp = createMcpEndpoint({
+  application,
+  schemas: commandSchemas,
+  authenticate,
+});
+async function body(req, limit) {
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of req) {
+    bytes += chunk.length;
+    if (bytes > limit)
+      throw Object.assign(new Error("Request too large"), { status: 413 });
+    chunks.push(chunk);
   }
-  return launcher.runTask(task) ? { started: [task.assignee] } : null;
-}
-/** Agent settings live on this machine, like the plugins that use them. */
-async function agentCommand(name, args, actor) {
-  if (actor.kind !== "human")
-    throw httpError(
-      "FORBIDDEN",
-      "Only a person can manage agent settings.",
-      403,
-    );
-  const shared = Object.keys(tokens).length > 0;
-  if (!args || typeof args !== "object" || Array.isArray(args))
-    throw httpError("VALIDATION", "Send a JSON object.", 400);
-  const roster = () =>
-    store
-      .execute("workspace_info", {}, actor)
-      .actors.filter((a) => a.kind === "agent")
-      .map((a) => a.id);
-  if (name === "agent-configs") {
-    const agents = shared ? {} : listConfigs(store);
-    return {
-      mode: shared ? "shared" : "local",
-      autoStart: launcher.enabled,
-      clients: Object.entries(agentClients).map(([id, c]) => ({
-        id,
-        name: c.name,
-        executable: c.executable,
-        model: c.model,
-        profile: {
-          label: c.profile.label,
-          flag: c.profile.flag,
-          hint: c.profile.hint,
-        },
-      })),
-      events: agentEvents.map(
-        ({ id, label, description, placeholders, prompt }) => ({
-          id,
-          label,
-          description,
-          placeholders,
-          hasPrompt: prompt !== null,
-        }),
-      ),
-      defaults: defaultConfig(),
-      agents: Object.fromEntries(
-        Object.entries(agents).map(([id, config]) => [
-          id,
-          { config, ...launcher.status(id) },
-        ]),
-      ),
-    };
+  try {
+    return JSON.parse(bytes ? Buffer.concat(chunks, bytes).toString("utf8") : "{}");
+  } catch {
+    throw Object.assign(new Error("Invalid JSON"), { status: 400 });
   }
-  if (shared)
-    throw httpError(
-      "AGENTS_UNSUPPORTED",
-      "Configure agents from the local TasknBoard desktop app.",
-      400,
-    );
-  if (name === "agent-config-save") {
-    if (Object.keys(args).some((key) => !["identity", "config"].includes(key)))
-      throw httpError("VALIDATION", "Provide only identity and config.", 400);
-    return {
-      identity: args.identity,
-      config: writeConfig(store, args.identity, args.config),
-    };
-  }
-  if (args.event === "task_assigned") {
-    if (
-      typeof args.taskId !== "string" ||
-      Object.keys(args).some((key) => !["event", "taskId"].includes(key))
-    )
-      throw httpError(
-        "VALIDATION",
-        "Provide event and taskId to run an assigned task.",
-        400,
-      );
-    const task = store.execute("get_task", { id: args.taskId }, actor);
-    if (
-      task.archived ||
-      !["todo", "in_progress"].includes(task.role) ||
-      task.delegatedTo ||
-      task.lease?.expiresAt > Date.now()
-    )
-      throw httpError(
-        "AGENT_NOT_READY",
-        "Use an active, unclaimed task without external delegation.",
-        409,
-      );
-    const dispatched = await dispatchAssignedTask(task, actor);
-    if (!dispatched)
-      throw httpError(
-        "AGENT_NOT_READY",
-        "The task needs an enabled agent, an open work lane, and no active claim or external dispatch.",
-        409,
-      );
-    return dispatched;
-  }
-  if (args.event !== "standup" || Object.keys(args).length !== 1)
-    throw httpError(
-      "VALIDATION",
-      "event: Send standup, or task_assigned with taskId.",
-      400,
-    );
-  const identities = new Set([...roster(), ...Object.keys(listConfigs(store))]);
-  return { started: launcher.standup([...identities]) };
-}
-/** A task's agent runs, and one run's log: `{ taskId, identity?, file? }`. */
-async function agentLogsCommand(args, actor) {
-  if (actor.kind !== "human")
-    throw httpError("FORBIDDEN", "Only a person can read agent logs.", 403);
-  if (
-    !args ||
-    typeof args !== "object" ||
-    Array.isArray(args) ||
-    typeof args.taskId !== "string" ||
-    Object.keys(args).some(
-      (key) => !["taskId", "identity", "file"].includes(key),
-    )
-  )
-    throw httpError(
-      "VALIDATION",
-      "Provide taskId, and identity and file to read one log.",
-      400,
-    );
-  if (!agentLogs.root) return { available: false, runs: [] };
-  const runs = await agentLogs.list(args.taskId);
-  const chosen =
-    args.identity !== undefined || args.file !== undefined
-      ? { identity: String(args.identity), file: String(args.file) }
-      : runs[0];
-  return {
-    available: true,
-    runs,
-    log: chosen
-      ? await agentLogs.read(args.taskId, chosen.identity, chosen.file)
-      : null,
-  };
 }
 const json = (res, status, value) => {
   res.writeHead(status, {
@@ -246,7 +139,7 @@ const server = createServer(async (req, res) => {
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https: http:; img-src 'self' data: https: http:; frame-ancestors 'none'",
+      "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com https://gravatar.com; frame-ancestors 'none'",
     );
     const requestHost = req.headers.host || "";
     const allowedHosts = (
@@ -267,38 +160,58 @@ const server = createServer(async (req, res) => {
       return;
     }
     const url = new URL(req.url, `http://${requestHost}`);
+    if (url.pathname === "/healthz") {
+      json(res, 200, {
+        instanceId,
+        pid: process.pid,
+        url: serviceUrl,
+        mcpUrl: serviceUrl + "/mcp",
+      });
+      return;
+    }
+    if (url.pathname === "/mcp") {
+      await mcp.handle(
+        req,
+        res,
+        req.method === "POST" ? await body(req, 30_000_000) : undefined,
+      );
+      return;
+    }
     if (url.pathname.startsWith("/api/")) {
-      let actor = localActor;
-      if (Object.keys(tokens).length) {
-        const presented =
-          req.headers.authorization?.replace(/^Bearer /, "") || "";
-        const key = Object.keys(tokens).find(
-          (k) =>
-            Buffer.byteLength(k) === Buffer.byteLength(presented) &&
-            timingSafeEqual(Buffer.from(k), Buffer.from(presented)),
-        );
-        if (!key) {
-          json(res, 401, {
-            code: "UNAUTHORIZED",
-            message: "Enter your workspace access token in Settings.",
-          });
-          return;
-        }
-        actor = tokens[key];
+      const actor =
+        secret || Object.keys(tokens).length
+          ? authenticate(
+              req.headers.authorization?.replace(/^Bearer /, "") || "",
+            )
+          : localActor;
+      if (!actor) {
+        json(res, 401, {
+          code: "UNAUTHORIZED",
+          message: "Enter your workspace access token in Settings.",
+        });
+        return;
+      }
+      if (actor.kind === "app") {
+        json(res, 403, {
+          code: "FORBIDDEN",
+          message: "Use the MCP app interface.",
+        });
+        return;
       }
       if (url.pathname === "/api/cli-helper") {
-        if (actor.kind !== "human") {
-          json(res, 403, {
-            code: "FORBIDDEN",
-            message: "Only a person can manage the CLI helper.",
-          });
-        } else if (req.method === "GET") {
-          json(res, 200, await cliHelper.status());
-        } else if (req.method === "POST") {
-          json(res, 200, await cliHelper.install());
-        } else {
+        if (!["GET", "POST"].includes(req.method)) {
           json(res, 405, { message: "Use GET or POST" });
+          return;
         }
+        json(
+          res,
+          200,
+          await application.execute(
+            req.method === "GET" ? "cli-helper-status" : "cli-helper-install",
+            {},
+            actor,
+          ),
+        );
         return;
       }
       if (url.pathname === "/api/stream") {
@@ -323,62 +236,12 @@ const server = createServer(async (req, res) => {
         });
         return;
       }
-      if (url.pathname === "/api/mcp-config") {
+      if (["/api/mcp-config", "/api/mcp-status"].includes(url.pathname)) {
         if (req.method !== "GET") {
           json(res, 405, { message: "Use GET" });
-        } else if (actor.kind !== "human") {
-          json(res, 403, {
-            code: "FORBIDDEN",
-            message: "Only a person can view MCP configuration.",
-          });
-        } else if (Object.keys(tokens).length) {
-          json(res, 200, { mode: "shared" });
-        } else {
-          json(res, 200, {
-            mode: "local",
-            platform: process.platform,
-            config: {
-              mcpServers: {
-                tasknboard: {
-                  command: process.execPath,
-                  args: [mcpEntry],
-                  env: {
-                    TASKNBOARD_DB: dbPath,
-                    TASKNBOARD_AGENT_ID: "codex",
-                  },
-                },
-              },
-            },
-            cli: {
-              command: process.execPath,
-              // Agents parse stderr as JSON, so Node's SQLite warning must stay off it.
-              args: ["--disable-warning=ExperimentalWarning", cliEntry],
-              env: {
-                TASKNBOARD_DB: dbPath,
-                TASKNBOARD_AGENT_ID: "pi",
-              },
-            },
-          });
+          return;
         }
-        return;
-      }
-      if (url.pathname === "/api/mcp-status") {
-        if (req.method !== "GET") {
-          json(res, 405, { message: "Use GET" });
-        } else if (actor.kind !== "human") {
-          json(res, 403, {
-            code: "FORBIDDEN",
-            message: "Only a person can view MCP status.",
-          });
-        } else {
-          json(
-            res,
-            200,
-            Object.keys(tokens).length
-              ? { supported: false, connections: [] }
-              : await listMcpConnections(dbPath),
-          );
-        }
+        json(res, 200, await application.execute(url.pathname.slice(5), {}, actor));
         return;
       }
       if (req.method !== "POST") {
@@ -389,187 +252,15 @@ const server = createServer(async (req, res) => {
         json(res, 415, { message: "JSON required" });
         return;
       }
-      // Image uploads carry a base64 data URL; every other command stays small.
-      const limit =
-        url.pathname === "/api/upload_artifact"
-          ? 12 * 1024 * 1024
-          : url.pathname === "/api/upload_image"
-            ? imageDataUrlLimit + 1024
-            : 2 * 1024 * 1024;
-      let body = "";
-      for await (const chunk of req) {
-        body += chunk;
-        if (Buffer.byteLength(body) > limit) {
-          json(res, 413, { message: "Request too large" });
-          return;
-        }
-      }
-      let args;
-      try {
-        args = JSON.parse(body || "{}");
-      } catch {
-        json(res, 400, { message: "Invalid JSON" });
-        return;
-      }
       const name = url.pathname.slice(5);
-      if (["task-files", "task-commits"].includes(name)) {
-        if (
-          !args ||
-          typeof args !== "object" ||
-          Array.isArray(args) ||
-          typeof args.id !== "string" ||
-          Object.keys(args).some((key) => key !== "id")
-        )
-          throw httpError("VALIDATION", "Provide only the task id.", 400);
-        const task = store.execute("get_task", { id: args.id }, actor);
-        const board = store
-          .execute("list_boards", {}, actor)
-          .boards.find((item) => item.id === task.boardId);
-        if (name === "task-commits" && !board.repository)
-          throw httpError(
-            "REPOSITORY_REQUIRED",
-            "Set the board repository before reading commits.",
-            400,
-          );
-        json(
-          res,
-          200,
-          name === "task-files"
-            ? await readTaskFiles(board.repository, task)
-            : await readTaskCommitSummary(board.repository, task.commits ?? []),
-        );
-        return;
-      }
-      if (name === "mcp-restart") {
-        if (actor.kind !== "human")
-          throw httpError(
-            "FORBIDDEN",
-            "Only a person can restart MCP connections.",
-            403,
-          );
-        if (Object.keys(tokens).length)
-          throw httpError(
-            "MCP_CONTROL_UNSUPPORTED",
-            "Restart MCP connections from the local TasknBoard app.",
-            400,
-          );
-        if (
-          !args ||
-          typeof args !== "object" ||
-          Array.isArray(args) ||
-          Object.keys(args).length !== 1 ||
-          typeof args.id !== "string" ||
-          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-            args.id,
-          )
-        )
-          throw httpError(
-            "VALIDATION",
-            "Provide only a valid MCP connection id.",
-            400,
-          );
-        json(res, 200, await restartMcpConnection(dbPath, args.id));
-        return;
-      }
-      if (name === "codex-plugin") {
-        if (actor.kind !== "human") {
-          json(res, 403, {
-            code: "FORBIDDEN",
-            message: "Only a person can install the Codex plugin.",
-          });
-        } else if (Object.keys(tokens).length) {
-          json(res, 400, {
-            code: "PLUGIN_UNSUPPORTED",
-            message:
-              "Install the Codex plugin from the local TasknBoard desktop app.",
-          });
-        } else if (
-          !args ||
-          typeof args !== "object" ||
-          Array.isArray(args) ||
-          Object.keys(args).some((key) => key !== "identity")
-        ) {
-          json(res, 400, { message: "Provide only the agent identity." });
-        } else {
-          const installed = await codexPlugin.install(args.identity);
-          launcher.register(installed.identity, "codex");
-          json(res, 200, { ...installed, autoStart: true });
-        }
-        return;
-      }
-      if (name === "claude-plugin") {
-        if (actor.kind !== "human") {
-          json(res, 403, {
-            code: "FORBIDDEN",
-            message: "Only a person can install the Claude Code plugin.",
-          });
-        } else if (Object.keys(tokens).length) {
-          json(res, 400, {
-            code: "PLUGIN_UNSUPPORTED",
-            message:
-              "Install the Claude Code plugin from the local TasknBoard desktop app.",
-          });
-        } else if (
-          !args ||
-          typeof args !== "object" ||
-          Array.isArray(args) ||
-          Object.keys(args).some((key) => key !== "identity")
-        ) {
-          json(res, 400, { message: "Provide only the agent identity." });
-        } else {
-          const installed = await claudePlugin.install(args.identity);
-          launcher.register(installed.identity, "claude");
-          json(res, 200, { ...installed, autoStart: true });
-        }
-        return;
-      }
-      if (name === "agent-logs") {
-        json(res, 200, await agentLogsCommand(args, actor));
-        return;
-      }
-      if (
-        ["agent-configs", "agent-config-save", "agent-event"].includes(name)
-      ) {
-        json(res, 200, await agentCommand(name, args, actor));
-        return;
-      }
-      // GitHub commands call out to GitHub, so they run outside the store.
-      const result = await github.execute(name, args, actor);
-      // Agent events compare the task with how it was before a person's edit.
-      const before =
-        actor.kind === "human" &&
-        ["update_task", "request_changes", "reject_task"].includes(name) &&
-        !result
-          ? store.execute("get_task", { id: args.id }, actor)
-          : null;
-      const output = result ?? store.execute(name, args, actor);
-      // A person's edits start agents; agents cannot reassign tasks.
-      if (actor.kind === "human") {
-        if (["update_task", "request_changes", "reject_task"].includes(name))
-          launcher.changed(before, output);
-        if (name === "add_comment")
-          launcher.commented(output, actor, args.body);
-        const assigned =
-          name === "create_task"
-            ? [output]
-            : name === "bulk_create_tasks"
-              ? (output.tasks ?? [])
-              : name === "update_task" && before.assignee !== output.assignee
-                ? [output]
-                : [];
-        if (assigned.length) {
-          const boards = store.execute("list_boards", {}, actor).boards;
-          for (const task of assigned)
-            if (
-              boards.find((board) => board.id === task.boardId)?.policy
-                .autoDispatch
-            )
-              await dispatchAssignedTask(task, actor);
-        }
-      }
-      json(res, 200, responseUrls(output, url.origin));
-      // data_version does not change for this connection's own writes.
-      changes.check();
+      const args = await body(
+        req,
+        name === "upload_artifact" ? 12 * 1024 * 1024
+          : name === "upload_image" ? imageDataUrlLimit + 1024
+          : name === "export-file" ? 30_000_000
+          : 2 * 1024 * 1024,
+      );
+      json(res, 200, responseUrls(await application.execute(name, args, actor), url.origin));
       return;
     }
     if (!["GET", "HEAD"].includes(req.method)) {
@@ -630,29 +321,74 @@ const server = createServer(async (req, res) => {
     if (!e.status) console.error(e);
   }
 });
-server.listen(port, host, () => {
-  const url = `http://${host.includes(":") ? `[${host}]` : host}:${server.address().port}`;
+server.listen(port, host, async () => {
+  serviceUrl = `http://${host.includes(":") ? `[${host}]` : host}:${server.address().port}`;
   if (["127.0.0.1", "localhost", "::1"].includes(host))
-    store.setSettings({ workspace_url: `${url}/` });
-  console.error(`TasknBoard listening on ${url}`);
-  if (desktop) console.log(JSON.stringify({ url }));
+    store.setSettings({ workspace_url: `${serviceUrl}/` });
+  if (runtimeFile) {
+    await mkdir(dirname(runtimeFile), { recursive: true });
+    const temp = runtimeFile + `.${process.pid}.tmp`;
+    await writeFile(
+      temp,
+      JSON.stringify({
+        url: serviceUrl,
+        mcpUrl: serviceUrl + "/mcp",
+        instanceId,
+        pid: process.pid,
+        credentialHelper,
+      }),
+      { mode: 0o600 },
+    );
+    await rename(temp, runtimeFile);
+  }
+  launcher.resume();
+  console.error(`TasknBoard listening on ${serviceUrl}`);
+  if (desktop) console.log(JSON.stringify({ url: serviceUrl }));
 });
 let stopping = false;
-function stop() {
+async function stop() {
   if (stopping) return;
   stopping = true;
+  clearInterval(watchdog);
   launcher.stop();
   changes.stop();
+  await mcp.close();
   server.close(async () => {
     await commitLinks.stop();
+    if (runtimeFile) {
+      try {
+        if (
+          JSON.parse(await readFile(runtimeFile, "utf8")).instanceId ===
+          instanceId
+        )
+          await unlink(runtimeFile);
+      } catch {}
+    }
     store.close();
     process.exit(0);
   });
-  // A renderer or local client must not keep an orphan service alive.
   server.closeAllConnections();
 }
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, stop);
-if (desktop) {
+const watchdog = resident
+  ? setInterval(async () => {
+      if (process.env.TASKNBOARD_SUPERVISOR_PID) {
+        try {
+          process.kill(Number(process.env.TASKNBOARD_SUPERVISOR_PID), 0);
+        } catch {
+          void stop();
+        }
+      }
+      if (process.env.TASKNBOARD_STOP_FILE) {
+        try {
+          await readFile(process.env.TASKNBOARD_STOP_FILE);
+          await unlink(process.env.TASKNBOARD_STOP_FILE);
+          void stop();
+        } catch {}
+      }
+    }, 500)
+  : undefined;
+if (desktop && (!resident || process.env.TASKNBOARD_SUPERVISOR_PID)) {
   process.stdin.resume();
   process.stdin.once("end", stop);
 }

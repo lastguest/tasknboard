@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { delimiter, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { userEnvironment } from "./agent-launcher.mjs";
 
 const exec = promisify(execFile);
 const failure = (code, message, status = 400) =>
@@ -14,16 +15,20 @@ const hash = (value) =>
 export function createCodexPlugin({
   desktop = process.env.TASKNBOARD_DESKTOP === "1",
   home = process.env.TASKNBOARD_USER_HOME,
-  database = process.env.TASKNBOARD_DB,
-  command = process.execPath,
-  mcpEntry,
+  serverUrl = process.env.TASKNBOARD_SERVER_URL,
+  mcpUrl,
+  runtimeFile = process.env.TASKNBOARD_RUNTIME_FILE,
+  credentialHelper = process.env.TASKNBOARD_CREDENTIAL_HELPER,
+  identity: defaultIdentity,
   platform = process.platform,
-  searchPath = process.env.PATH || "",
+  searchPath,
+  environment = () => userEnvironment({ platform, home }),
   run = exec,
 } = {}) {
   let installing = false;
-  async function install(identity) {
-    if (!desktop || !home || !database || !mcpEntry)
+  let resolvedPath;
+  async function install(identity = defaultIdentity) {
+    if (!desktop || !home || !(serverUrl || mcpUrl || runtimeFile))
       throw failure(
         "PLUGIN_UNSUPPORTED",
         "Install the Codex plugin from the TasknBoard desktop app.",
@@ -42,8 +47,11 @@ export function createCodexPlugin({
     installing = true;
     try {
       const windows = platform === "win32";
+      if (searchPath === undefined)
+        resolvedPath ??= environment().then(env => env.PATH || env.Path || "");
+      const cliPath = searchPath ?? await resolvedPath;
       let executable;
-      for (const directory of searchPath
+      for (const directory of cliPath
         .split(windows ? ";" : delimiter)
         .filter(Boolean)) {
         for (const name of windows ? ["codex.exe", "codex.cmd"] : ["codex"]) {
@@ -63,22 +71,34 @@ export function createCodexPlugin({
           "CODEX_MISSING",
           "Install the Codex CLI and add it to PATH, then restart TasknBoard.",
         );
+      const descriptor =
+        runtimeFile && !serverUrl && !mcpUrl
+          ? JSON.parse(await readFile(runtimeFile, "utf8"))
+          : null;
+      const endpoint = new URL(mcpUrl || serverUrl || descriptor?.mcpUrl);
+      if (
+        endpoint.protocol !== "https:" &&
+        !(
+          endpoint.protocol === "http:" &&
+          ["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname)
+        )
+      )
+        throw failure(
+          "PLUGIN_URL",
+          "MCP credentials require HTTPS except on loopback.",
+        );
+      if (!endpoint.pathname.endsWith("/mcp"))
+        endpoint.pathname = endpoint.pathname.replace(/\/$/, "") + "/mcp";
       const mcp = {
         mcpServers: {
           tasknboard: {
-            command,
-            args: [mcpEntry],
-            env: {
-              TASKNBOARD_DB: database,
-              TASKNBOARD_AGENT_ID: identity,
-              TASKNBOARD_SERVER_URL: "",
-              TASKNBOARD_TOKEN: "",
-            },
+            url: endpoint.href,
+            bearer_token_env_var: "TASKNBOARD_TOKEN",
           },
         },
       };
-      const fingerprint = hash(JSON.stringify(mcp));
-      const marketplace = `tasknboard-${hash(database + "\0" + identity)}`;
+      const fingerprint = hash(JSON.stringify({ mcp, identity }));
+      const marketplace = `tasknboard-${hash(endpoint.href + "\0" + identity)}`;
       const directory = join(home, ".tasknboard", "codex", fingerprint);
       const files = {
         ".agents/plugins/marketplace.json": {
@@ -133,7 +153,21 @@ export function createCodexPlugin({
         const options = {
           timeout: 10000,
           maxBuffer: 1024 * 1024,
-          env: { ...process.env, HOME: home, USERPROFILE: home },
+          env: {
+            ...Object.fromEntries(
+              Object.entries(process.env).filter(
+                ([key]) => !key.startsWith("TASKNBOARD_") && key.toUpperCase() !== "PATH",
+              ),
+            ),
+            HOME: home,
+            USERPROFILE: home,
+            CODEX_HOME: join(home, ".codex"),
+            PATH: cliPath,
+            ...(runtimeFile ? { TASKNBOARD_RUNTIME_FILE: runtimeFile } : {}),
+            ...(credentialHelper
+              ? { TASKNBOARD_CREDENTIAL_HELPER: credentialHelper }
+              : {}),
+          },
           windowsHide: true,
         };
         if (windows && executable.endsWith(".cmd")) {
@@ -151,6 +185,7 @@ export function createCodexPlugin({
         }
         return run(executable, args, options);
       };
+      await mkdir(join(home, ".codex"), { recursive: true });
       await invoke(["plugin", "marketplace", "add", directory, "--json"]);
       await invoke(["plugin", "add", `tasknboard@${marketplace}`, "--json"]);
       // The plugin uses a direct SQLite connection and survives desktop restarts.

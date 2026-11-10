@@ -9,6 +9,7 @@ import {
   linkTypes,
   imageBytesLimit,
   pullRequestLimit,
+  parsePullRequest,
   laneRoles,
   laneLimit,
 } from "./domain.mjs";
@@ -387,6 +388,9 @@ export function createStore(path, { clock = Date.now } = {}) {
     }
   });
   if (!db.prepare("PRAGMA table_info(actors)").all().some((column) => column.name === "role")) db.exec("ALTER TABLE actors ADD COLUMN role TEXT NOT NULL DEFAULT 'worker'");
+  db.exec(`CREATE INDEX IF NOT EXISTS tasks_active_by_board
+    ON tasks(json_extract(data, '$.boardId'), number DESC)
+    WHERE COALESCE(json_extract(data, '$.archived'), 0) = 0`);
   const readTransaction = (fn) => {
     db.exec("BEGIN");
     try {
@@ -813,6 +817,13 @@ export function createStore(path, { clock = Date.now } = {}) {
   const taskNumber = (id) =>
     db.prepare("SELECT number FROM tasks WHERE json_extract(data, '$.id')=?").get(id)
       .number;
+  const taskIdentity = (id) => taskNumber(get(id).id);
+  const scopedTask = (id, actor) => {
+    const task = get(id);
+    if (actor.taskRow !== undefined && taskNumber(task.id) !== actor.taskRow)
+      fail("FORBIDDEN", "This chat work session belongs to another task.", 403);
+    return task;
+  };
   /** The same link read from the other task's side. Rows store only the first three. */
   const inverseLink = {
     relates: "relates",
@@ -1314,33 +1325,50 @@ export function createStore(path, { clock = Date.now } = {}) {
           p.epic && p.epic !== "none" ? (findEpic(p.epic)?.id ?? p.epic) : p.epic;
         const q = p.query?.toLowerCase();
         const roles = laneRoleMap();
-        const rows = all().map((t) => withRole(t, roles)).filter(
-          (t) =>
-            Boolean(t.archived) === p.archived &&
-            (!q ||
-              `${t.id} ${t.title} ${t.description}`
-                .toLowerCase()
-                .includes(q)) &&
-            (!p.role || t.role === p.role) &&
-            (!p.lane || t.lane === p.lane) &&
-            (p.assignee === undefined || t.assignee === p.assignee) &&
-            (p.owner === undefined || t.assignee === p.owner) &&
+        const predicates = [p.archived
+          ? "COALESCE(json_extract(data, '$.archived'), 0) = 1"
+          : "COALESCE(json_extract(data, '$.archived'), 0) = 0"];
+        const values = [];
+        for (const [field, value] of [["lane", p.lane], ["assignee", p.assignee], ["assignee", p.owner], ["boardId", p.boardId]]) {
+          if (value === undefined) continue;
+          predicates.push(`json_extract(data, '$.${field}') = ?`);
+          values.push(value);
+        }
+        if (epic) {
+          predicates.push("COALESCE(NULLIF(json_extract(data, '$.epic'), ''), 'none') = ?");
+          values.push(epic);
+        }
+        if (p.role) {
+          predicates.push("json_extract(data, '$.lane') IN (SELECT 'LANE-' || number FROM lanes WHERE role = ?)");
+          values.push(p.role);
+        }
+        const where = predicates.join(" AND ");
+        const select = `SELECT data FROM tasks WHERE ${where} ORDER BY number DESC`;
+        const decode = (row) => withRole(JSON.parse(row.data), roles);
+        let page, total;
+        if (view || q || p.delegated !== undefined || p.label) {
+          // Keep the shared saved-view rules and Unicode search semantics.
+          const matches = db.prepare(select).all(...values).map(decode).filter(t =>
+            (!q || `${t.id} ${t.title} ${t.description}`.toLowerCase().includes(q)) &&
             (p.delegated === undefined || Boolean(t.delegatedTo) === p.delegated) &&
             (!p.label || t.labels.includes(p.label)) &&
-            (!p.boardId || t.boardId === p.boardId) &&
-            (!epic || (t.epic || "none") === epic) &&
             (!view || taskMatchesView(t, view.filters, identity.id)),
-        );
-        const page = rows.slice(p.offset, p.offset + p.limit);
+          );
+          page = matches.slice(p.offset, p.offset + p.limit);
+          total = matches.length;
+        } else {
+          page = db.prepare(`${select} LIMIT ? OFFSET ?`).all(...values, p.limit, p.offset).map(decode);
+          total = db.prepare(`SELECT COUNT(*) AS total FROM tasks WHERE ${where}`).get(...values).total;
+        }
         const counts = commentCounts(page.map((t) => t.id));
         return {
           tasks: page.map((t) => p.fields ? Object.fromEntries(p.fields.map((field) => [field,t[field]])) : p.compact ? { id: t.id, title: t.title, version: t.version, lane: t.lane, role: t.role, epic:t.epic, assignee: t.assignee, labels: t.labels, delegatedTo: t.delegatedTo ?? "", lease:t.lease } : { ...withCommentCount(t, counts.get(t.id) ?? 0),undo:undoInfo(t,identity) }),
-          total: rows.length,
+          total,
         };
       });
     }
     if (command === "get_task")
-      return readTransaction(() => detail(get(p.id),identity));
+      return readTransaction(() => detail(scopedTask(p.id, actor), identity));
     if (command === "find_similar_tasks")
       return readTransaction(() => {
         if (p.boardId) getBoard(p.boardId);
@@ -1736,7 +1764,7 @@ export function createStore(path, { clock = Date.now } = {}) {
         db.prepare("INSERT INTO task_history(task_number,version,actor,sequence,created_at,before_data,fields) VALUES(?,?,?,?,?,?,?)").run(taskNumber(t.id),1,identity.id,db.prepare("SELECT MAX(sequence) AS sequence FROM events WHERE task_id=?").get(t.id).sequence,t.createdAt,null,JSON.stringify(Object.keys(t)));
         return detail(t,identity);
       }
-      const t = get(p.id);
+      const t = scopedTask(p.id, actor);
       const before = structuredClone(t);
       const beforeLinks = db.prepare("SELECT from_number,to_number,kind FROM task_links WHERE from_number=? OR to_number=?").all(taskNumber(t.id),taskNumber(t.id));
       const beforePositions = command === "reorder_task" ? all().filter((task) => task.lane === t.lane && !task.archived).map((task) => ({id:task.id,position:task.position ?? 0})) : null;
@@ -1986,7 +2014,7 @@ export function createStore(path, { clock = Date.now } = {}) {
             a.repository.toLowerCase() === b.repository.toLowerCase() &&
             a.number === b.number;
           if (command === "link_pull_requests") {
-            const added = p.pullRequests.filter(
+            const added = p.pullRequests.map(parsePullRequest).filter(
               (pr, i, list) =>
                 !linked.some(same(pr)) && list.findIndex(same(pr)) === i,
             );
@@ -2004,9 +2032,10 @@ export function createStore(path, { clock = Date.now } = {}) {
             t.pullRequests = [...linked, ...added];
             link = { pullRequests: added.map((pr) => pr.url) };
           } else {
-            const existing = linked.find(same(p.pullRequest));
+            const pr = parsePullRequest(p.pullRequest);
+            const existing = linked.find(same(pr));
             if (!existing)
-              fail("NOT_FOUND", `${t.id} does not link ${p.pullRequest.url}`, 404);
+              fail("NOT_FOUND", `${t.id} does not link ${pr.url}`, 404);
             t.pullRequests = linked.filter((pr) => pr !== existing);
             link = { pullRequests: [existing.url] };
           }
@@ -2122,6 +2151,7 @@ export function createStore(path, { clock = Date.now } = {}) {
     execute,
     boards: allBoards,
     registerActors,
+    taskIdentity,
     recordEvent,
     completeEvidenceTasks,
     image,

@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { chmodSync } from "node:fs";
 import { build } from "esbuild";
 
@@ -15,6 +16,14 @@ await build({
   ...options,
   entryPoints: ["cli/main.tsx"],
   outfile: "dist-cli/tasknboard.mjs",
+  plugins: [{
+    name: "source-cli-connection",
+    setup(build) {
+      build.onResolve({ filter: /^\.\.\/server\/client\.mjs$/ }, () => ({
+        path: fileURLToPath(new URL("../server/source-client.mjs", import.meta.url)),
+      }));
+    },
+  }],
   banner: {
     js: "#!/usr/bin/env -S node --disable-warning=ExperimentalWarning",
   },

@@ -1,10 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { spawn } from "node:child_process";
+import { credentialFor } from "../server/local-auth.mjs";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ResourceUpdatedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createStore } from "../server/store.mjs";
@@ -190,4 +193,98 @@ test("architect MCP receives human feedback through a subscribed resource", asyn
   const resource = await client.readResource({ uri: "tasknboard://notifications" });
   assert.equal(JSON.parse(resource.contents[0].text).items[0].body, "Please update the result");
   await client.unsubscribeResource({ uri: "tasknboard://notifications" });
+});
+
+test("resident app resource, session authentication and chat work use one authority", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "tasknboard-app-mcp-"));
+  const secret = "resident-app-secret-1234567890";
+  const runtime = join(dir,"runtime.json");
+  writeFileSync(join(dir,"index.html"),"<!doctype html><html><body>TasknBoard app</body></html>");
+  const service = spawn(process.execPath,[resolve("server/http.mjs")],{
+    env:{...process.env,PORT:"0",HOST:"127.0.0.1",TASKNBOARD_RESIDENT:"1",TASKNBOARD_LOCAL_SECRET:secret,TASKNBOARD_TOKENS:"",TASKNBOARD_DB:join(dir,"db.sqlite"),TASKNBOARD_RUNTIME_FILE:runtime,TASKNBOARD_APP_DIR:dir,TASKNBOARD_USER_HOME:dir},
+    stdio:["pipe","ignore","pipe"],
+  });
+  const client = new Client({name:"app-test",version:"1"});
+  t.after(async()=>{
+    await client.close(); service.kill();
+    await new Promise(r=>service.exitCode!==null?r():service.once("exit",r));
+    rmSync(dir,{recursive:true,force:true});
+  });
+  await new Promise((resolve,reject)=>{
+    let output="";const timer=setTimeout(()=>reject(new Error("Startup timeout: "+output)),10000);
+    service.stderr.on("data",chunk=>{output+=chunk;if(output.includes("listening")){clearTimeout(timer);resolve();}});
+    service.once("exit",()=>{clearTimeout(timer);reject(new Error("Service exited: "+output));});
+  });
+  const descriptor=JSON.parse(readFileSync(runtime,"utf8"));
+  assert.equal(descriptor.pid,service.pid);
+  assert.ok(!JSON.stringify(descriptor).includes(secret));
+  const token=credentialFor(secret,{id:"codex-app",kind:"app"});
+  const transport=new StreamableHTTPClientTransport(new URL(descriptor.mcpUrl),{requestInit:{headers:{Authorization:`Bearer ${token}`}}});
+  await client.connect(transport);
+  const tools=(await client.listTools()).tools;
+  const opener=tools.find(tool=>tool.name==="open_tasknboard");
+  assert.equal(opener._meta.ui.resourceUri,"ui://tasknboard/app-v1.html");
+  assert.deepEqual(tools.find(tool=>tool.name==="ui_create_task")._meta.ui.visibility,["app"]);
+  assert.deepEqual(tools.find(tool=>tool.name==="update_task")._meta.ui.visibility,["model"]);
+  const resources=await client.listResources();
+  assert.ok(resources.resources.some(resource=>resource.uri===opener._meta.ui.resourceUri));
+  const resource=await client.readResource({uri:opener._meta.ui.resourceUri});
+  assert.equal(resource.contents[0].mimeType,"text/html;profile=mcp-app");
+  assert.match(resource.contents[0].text,/TasknBoard app/);
+  assert.deepEqual(resource.contents[0]._meta.ui.csp.connectDomains,[]);
+  const call=async(name,args={})=>{
+    const result=await client.callTool({name,arguments:args});
+    assert.notEqual(result.isError,true,JSON.stringify(result));
+    return name.startsWith("ui_")?result._meta.result:JSON.parse(result.content[0].text);
+  };
+  const fail=async(name,args,code)=>{
+    const result=await client.callTool({name,arguments:args});
+    assert.equal(result.isError,true,JSON.stringify(result));
+    assert.equal(JSON.parse(result.content[0].text).code,code);
+  };
+  assert.deepEqual(await call("open_tasknboard",{boardId:"BOARD-1"}),{opened:true,boardId:"BOARD-1"});
+  assert.equal((await call("ui_workspace_info")).actor.kind,"human");
+  assert.equal((await call("workspace_info")).actor.kind,"agent");
+  assert.equal((await fetch(descriptor.url+"/api/workspace_info",{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:"{}"})).status,403);
+  const rpc={jsonrpc:"2.0",id:42,method:"tools/list",params:{}};
+  const request=async bearer=>fetch(descriptor.mcpUrl,{method:"POST",headers:{Authorization:`Bearer ${bearer}`,"mcp-session-id":transport.sessionId,"Content-Type":"application/json",Accept:"application/json, text/event-stream"},body:JSON.stringify(rpc)});
+  assert.equal((await request("invalid")).status,401);
+  assert.equal((await request(secret)).status,404);
+  let task=await call("ui_create_task",{title:"Chat ownership",boardId:"BOARD-1"});
+  const other=await call("ui_create_task",{title:"Other task",boardId:"BOARD-1"});
+  await fail("claim_task",{id:task.id,expectedVersion:task.version},"WORK_SESSION_REQUIRED");
+  await fail("ui_start_chat_work",{id:task.id,expectedVersion:task.version+1},"VERSION_CONFLICT");
+  await fail("claim_task",{id:task.id,expectedVersion:task.version,workSessionId:"00000000-0000-4000-8000-000000000000"},"WORK_SESSION_INVALID");
+  const work=await call("ui_start_chat_work",{id:task.id,expectedVersion:task.version});
+  await fail("update_task",{id:other.id,expectedVersion:other.version,workSessionId:work.workSessionId,patch:{title:"Denied"}},"FORBIDDEN");
+  const { boards: [originalBoard] } = await call("ui_list_boards");
+  const oldId = task.id;
+  await call("ui_update_board", {
+    id: originalBoard.id, expectedVersion: originalBoard.version, patch: { prefix: "REN" },
+  });
+  task = await call("get_task", { id: oldId, workSessionId: work.workSessionId });
+  assert.equal(task.id, oldId.replace(/^TNB-/, "REN-"));
+  const reused = await call("ui_create_board", { name: "Reused prefix", prefix: "TNB" });
+  const replacement = await call("ui_create_task", { title: "Unrelated task", boardId: reused.id });
+  assert.equal(replacement.id, oldId);
+  await fail("claim_task", {
+    id: replacement.id, expectedVersion: replacement.version, workSessionId: work.workSessionId,
+  }, "FORBIDDEN");
+  const args=()=>({id:task.id,expectedVersion:task.version,workSessionId:work.workSessionId});
+  task=await call("claim_task",args());
+  assert.equal(task.lease.actor,work.actorId);
+  assert.equal(task.assignee, "");
+  await fail("ui_start_chat_work",{id:task.id,expectedVersion:task.version},"CLAIM_CONFLICT");
+  await fail("heartbeat",{...args(),expectedVersion:1},"VERSION_CONFLICT");
+  const previous=task.version;
+  task=await call("heartbeat",args());
+  assert.ok(task.version>previous);
+  task=await call("update_task",{...args(),patch:{title:"Owned chat work"}});
+  task = await call("link_pull_requests", { ...args(), pullRequests: ["owner/repo#123", "https://github.com/OWNER/REPO/pull/123"] });
+  assert.equal(task.pullRequests.length, 1);
+  task = await call("unlink_pull_request", { ...args(), pullRequest: "OWNER/repo#123" });
+  assert.deepEqual(task.pullRequests, []);
+  task=await call("submit_review",{...args(),summary:"Verified app MCP lease"});
+  assert.equal(task.role,"in_review");assert.equal(task.lease,null);
+  await fail("update_task",{...args(),patch:{title:"After review"}},"LEASE_REQUIRED");
 });

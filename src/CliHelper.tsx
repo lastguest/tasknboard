@@ -1,5 +1,6 @@
+import { isEmbedded } from "./embedded";
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, errorOf, token } from "./api";
+import { ApiError, errorOf, token, command, nativeWorkspace } from "./api";
 
 type CliHelperStatus = {
   supported: boolean;
@@ -27,6 +28,11 @@ function isCliHelperStatus(value: unknown): value is CliHelperStatus {
 }
 
 async function requestCliHelper(method: CliHelperMethod) {
+  if (isEmbedded() || nativeWorkspace()) {
+    const body = await command<unknown>(method === "GET" ? "cli-helper-status" : "cli-helper-install");
+    if (!isCliHelperStatus(body)) throw new ApiError("The workspace returned an invalid CLI helper status.", "BAD_RESPONSE", 0);
+    return body;
+  }
   const bearer = token.get();
   let response: Response;
   try {

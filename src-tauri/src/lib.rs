@@ -3,6 +3,8 @@ mod desktop;
 #[cfg(mobile)]
 mod mobile;
 #[cfg(desktop)]
+mod service;
+#[cfg(desktop)]
 mod update;
 
 use tauri::{AppHandle, Url};
@@ -30,7 +32,11 @@ fn open_external(app: &AppHandle, url: &Url) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(desktop)]
-    desktop::run();
+    {
+        if !service::cli() {
+            desktop::run();
+        }
+    }
     #[cfg(mobile)]
     mobile::run();
 }

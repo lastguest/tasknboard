@@ -471,10 +471,17 @@ test("one-shot commands print JSON and fail with a JSON error", async (t) => {
   delete env.TASKNBOARD_SERVER_URL;
   // Run the executable itself, as the installed `tasknboard` command does.
   // Windows has no shebang: the installed command there calls node.
-  const cli = (...args) =>
-    process.platform === "win32"
-      ? run(process.execPath, ["dist-cli/tasknboard.mjs", ...args], { env })
-      : run("dist-cli/tasknboard.mjs", args, { env });
+  const invoke = async (environment, ...args) => {
+    if (process.platform !== "win32")
+      return run("dist-cli/tasknboard.mjs", args, { env: environment });
+    if (args.length === 2 && args[0] !== "help") {
+      const file = join(directory, "command.json");
+      await writeFile(file, args[1], "utf8");
+      args = [args[0], "--file", file];
+    }
+    return run(process.execPath, ["dist-cli/tasknboard.mjs", ...args], { env: environment });
+  };
+  const cli = (...args) => invoke(env, ...args);
   const createdBoard = JSON.parse((await cli("create_board", '{"name":"Engineering","prefix":"ENG"}')).stdout);
   assert.match(createdBoard.id, /^BOARD-\d+$/);
   const boards = JSON.parse((await cli("list_boards")).stdout);
@@ -508,7 +515,7 @@ test("one-shot commands print JSON and fail with a JSON error", async (t) => {
   delete storedRoleEnv.TASKNBOARD_AGENT_ROLE;
   const storedInfo = JSON.parse((await run(process.execPath, ["dist-cli/tasknboard.mjs", "workspace_info"], { env: storedRoleEnv })).stdout);
   assert.equal(storedInfo.actor.role, "architect");
-  const epic = JSON.parse((await run(process.execPath, ["dist-cli/tasknboard.mjs", "create_epic", JSON.stringify({ boardId: createdBoard.id, title: "Architect plan" })], { env: storedRoleEnv })).stdout);
+  const epic = JSON.parse((await invoke(storedRoleEnv, "create_epic", JSON.stringify({ boardId: createdBoard.id, title: "Architect plan" }))).stdout);
   assert.equal(epic.title, "Architect plan");
   const listed = JSON.parse((await cli("list_tasks", JSON.stringify({ boardId: createdBoard.id }))).stdout);
   assert.deepEqual(listed.tasks.map((t) => t.title), ["From the shell"]);

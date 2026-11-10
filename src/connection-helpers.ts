@@ -20,7 +20,7 @@ export type RuntimeCommand = {
 export type LocalConnection = {
   mode: "local";
   platform: string;
-  config: { mcpServers: { tasknboard: RuntimeCommand } };
+  config: { mcpServers: { tasknboard: { url: string; bearer_token_env_var: string } } };
   cli: RuntimeCommand;
 };
 
@@ -45,7 +45,8 @@ export function isMcpStatus(value: unknown): value is McpStatus {
     record.mode === "local" &&
     typeof record.platform === "string" &&
     commandIsValid(record.cli) &&
-    commandIsValid(record.config?.mcpServers?.tasknboard)
+    typeof record.config?.mcpServers?.tasknboard?.url === "string" &&
+    record.config.mcpServers.tasknboard.bearer_token_env_var === "TASKNBOARD_TOKEN"
   );
 }
 
@@ -61,8 +62,7 @@ export function connectionHelper(
 ) {
   const windows = runtime.platform === "win32";
   const quote = (value: string) => shellQuote(value, windows);
-  const source =
-    client === "pi" ? runtime.cli : runtime.config.mcpServers.tasknboard;
+  const source = runtime.cli;
   const env = {
     ...source.env,
     TASKNBOARD_AGENT_ID: identity,
@@ -101,9 +101,10 @@ export function connectionHelper(
           $schema: "https://opencode.ai/config.json",
           mcp: {
             tasknboard: {
-              type: "local",
-              command: [source.command, ...source.args],
-              environment: env,
+              type: "remote",
+              url: runtime.config.mcpServers.tasknboard.url,
+              oauth: false,
+              headers: { Authorization: "Bearer {env:TASKNBOARD_TOKEN}" },
               enabled: true,
             },
           },
@@ -115,6 +116,7 @@ export function connectionHelper(
       steps: [
         "Copy the configuration below.",
         "Merge it into your project's `opencode.json`.",
+        "Set `TASKNBOARD_TOKEN` through the TasknBoard credential helper before you start OpenCode.",
         "Restart OpenCode and check the connection with `opencode mcp list`.",
       ],
       note: "",

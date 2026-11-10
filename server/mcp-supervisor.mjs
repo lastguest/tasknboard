@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { startMcpControl } from "./mcp-control.mjs";
-import { connect } from "./client.mjs";
+import { connect } from "./standalone-client.mjs";
 import { createTaskKeepAlive } from "./mcp-keep-alive.mjs";
 
 // The host owns this process. Only the adapter worker restarts.

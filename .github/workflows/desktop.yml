@@ -31,8 +31,30 @@ jobs:
         id: package
         run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
+  validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:ui
+      - name: Upload browser test traces
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-test-results
+          path: test-results/
+          if-no-files-found: ignore
+
   windows:
-    needs: version
+    needs: [version, validation]
     runs-on: windows-latest
     timeout-minutes: 30
     env:
@@ -85,33 +107,13 @@ jobs:
         with:
           path: src-tauri/target
           key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
       - name: Test bundled service
         shell: pwsh
         run: |
           $env:TASKNBOARD_TEST_NODE = Join-Path $PWD 'src-tauri/resources/node.exe'
           $env:TASKNBOARD_TEST_SERVICE = Join-Path $PWD 'src-tauri/resources/server.mjs'
           node --test tests/desktop.test.mjs
-      - name: Find the Playwright version
-        id: playwright
-        shell: bash
-        run: echo "version=$(npx playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-      - name: Cache Playwright browsers
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/AppData/Local/ms-playwright
-          key: windows-playwright-${{ steps.playwright.outputs.version }}
-      - name: Test browser workflows
-        run: |
-          npx playwright install chromium
-          npm run test:ui
-      - name: Upload browser test traces
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: browser-test-results
-          path: test-results/
-          if-no-files-found: ignore
-          retention-days: 7
       - name: Install and launch the app
         shell: pwsh
         run: ./tests/windows-smoke.ps1
@@ -126,7 +128,7 @@ jobs:
           retention-days: 30
 
   macos:
-    needs: version
+    needs: [version, validation]
     runs-on: macos-26
     timeout-minutes: 30
     env:
@@ -151,7 +153,6 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
-      - run: npm test
       - name: Restore Rust build cache
         id: rust-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -175,6 +176,7 @@ jobs:
         with:
           path: src-tauri/target
           key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
       - name: Test bundled service
         run: |
           TASKNBOARD_TEST_NODE="$PWD/src-tauri/resources/node" \
@@ -203,8 +205,9 @@ jobs:
   release:
     if: >-
       !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.validation.result == 'success' &&
       (needs.windows.result == 'success' || needs.macos.result == 'success')
-    needs: [version, windows, macos]
+    needs: [version, validation, windows, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

@@ -71,9 +71,17 @@ test("WebMCP validates and executes against the domain, refreshes writes, reject
     body: "Verified",
   });
   assert.ok(commented.version > noted.version);
+  const linked = await call("link_pull_requests", {
+    id: commented.id, expectedVersion: commented.version, pullRequests: ["owner/repo#42"],
+  });
+  assert.equal(linked.pullRequests[0].url, "https://github.com/owner/repo/pull/42");
+  const unlinked = await call("unlink_pull_request", {
+    id: linked.id, expectedVersion: linked.version, pullRequest: "https://github.com/owner/repo/pull/42",
+  });
+  assert.deepEqual(unlinked.pullRequests, []);
   const rejected = await call("reject_task", {
     id: commented.id,
-    expectedVersion: commented.version,
+    expectedVersion: unlinked.version,
     reason: "Work is no longer required",
   });
   assert.equal(rejected.archived, true);

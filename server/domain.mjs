@@ -149,16 +149,8 @@ export function parsePullRequest(value) {
 const pullRequest = z
   .string()
   .max(500)
-  .transform((value, ctx) => {
-    const pr = parsePullRequest(value);
-    if (!pr) {
-      ctx.addIssue({
-        code: "custom",
-        message: "GitHub pull request URL or owner/repo#123 required",
-      });
-      return z.NEVER;
-    }
-    return pr;
+  .refine((value) => parsePullRequest(value) !== null, {
+    message: "GitHub pull request URL or owner/repo#123 required",
   });
 const label = z.string().trim().min(1).max(40);
 const labels = z.array(label)

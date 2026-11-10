@@ -1,5 +1,6 @@
+import { isEmbedded } from "./embedded";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { command, errorOf, type ApiError } from "./api";
+import { command, errorOf, nativeWorkspace, type ApiError } from "./api";
 import { Icon } from "./Icons";
 import { useMentions } from "./Mentions";
 import { findTaskReferences } from "./task-references";
@@ -27,6 +28,29 @@ function safeHref(url: string) {
   }
 }
 
+function WorkspaceImage({ path, alt, title }: { path: string; alt: string; title?: string }) {
+  const viaCommand = isEmbedded() || nativeWorkspace();
+  const [src, setSrc] = useState(viaCommand ? "" : path);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!viaCommand) return;
+    const controller = new AbortController();
+    let objectUrl = "";
+    void command<{ mime: string; data: string }>("read-image", { id: path.slice(7) }, controller.signal).then(image => {
+      if (controller.signal.aborted) return;
+      if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(image.mime) || image.data.length > Math.ceil(5 * 1024 * 1024 / 3) * 4) throw new Error("Invalid workspace image.");
+      const bytes = Uint8Array.from(atob(image.data), char => char.charCodeAt(0));
+      if (bytes.length > 5 * 1024 * 1024) throw new Error("Workspace image exceeds 5 MB.");
+      objectUrl = URL.createObjectURL(new Blob([bytes], { type: image.mime }));
+      setSrc(objectUrl);
+    }).catch(cause => { if (!controller.signal.aborted) setError(errorOf(cause).message); });
+    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [path, viaCommand]);
+  if (error) return <span role="alert">{alt || "Image"}: {error}</span>;
+  if (!src) return <span>{alt || "Loading image…"}</span>;
+  return viaCommand ? <span className="md-image"><img src={src} alt={alt} title={title} loading="lazy" /></span> : <a href={path} target="_blank" rel="noreferrer" className="md-image"><img src={src} alt={alt} title={title} loading="lazy" /></a>;
+}
+
 // ---------------------------------------------------------------- inline
 
 /** Task keys to turn into chips; absent where chips must not appear. */
@@ -48,17 +72,7 @@ const inlineRules: InlineRule[] = [
     render: (m, key) => {
       const [, alt, url, title] = m;
       if (uploadedImage.test(url))
-        return (
-          <a
-            key={key}
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="md-image"
-          >
-            <img src={url} alt={alt} title={title} loading="lazy" />
-          </a>
-        );
+        return <WorkspaceImage key={key} path={url} alt={alt} title={title} />;
       const href = safeHref(url);
       // Remote images are not loaded: they would leak viewers to third parties.
       return href ? (

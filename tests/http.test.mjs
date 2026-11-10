@@ -1,11 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { request } from "node:http";
+import { setTimeout as delay } from "node:timers/promises";
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 test("authenticated HTTP and remote MCP bridge share one authority", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "tasknboard-http-"));
   const dbPath = join(dir, "db.sqlite");
@@ -14,7 +16,8 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   const service = spawn(process.execPath, ["server/http.mjs"], {
     env: {
       ...process.env,
-      PORT: "14319",
+      PORT: "0",
+      TASKNBOARD_RUNTIME_FILE: join(dir,"runtime.json"),
       TASKNBOARD_DB: dbPath,
       TASKNBOARD_TOKENS: JSON.stringify({
         [token]: { id: "reviewer", kind: "human" },
@@ -46,20 +49,21 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
       reject(new Error("Server exited"));
     });
   });
+  const base = JSON.parse(readFileSync(join(dir,"runtime.json"),"utf8")).url;
   assert.equal(
     (
-      await fetch("http://127.0.0.1:14319/api/mcp-config", {
+      await fetch(`${base}/api/mcp-config`, {
         headers: { Authorization: `Bearer ${agentToken}` },
       })
     ).status,
     403,
   );
   assert.equal(
-    (await fetch("http://127.0.0.1:14319/api/mcp-config")).status,
+    (await fetch(`${base}/api/mcp-config`)).status,
     401,
   );
   const sharedMcpResponse = await fetch(
-    "http://127.0.0.1:14319/api/mcp-config",
+    `${base}/api/mcp-config`,
     { headers: { Authorization: `Bearer ${token}` } },
   );
   assert.equal(sharedMcpResponse.status, 200);
@@ -68,7 +72,7 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   assert.ok(!JSON.stringify(sharedMcpStatus).includes(dbPath));
   assert.ok(!JSON.stringify(sharedMcpStatus).includes(process.execPath));
   const post = (cmd, args = {}, bearer = token, extra = {}) =>
-    fetch(`http://127.0.0.1:14319/api/${cmd}`, {
+    fetch(`${base}/api/${cmd}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -141,25 +145,42 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   ]);
   assert.ok(!JSON.stringify(info).includes(token));
   assert.ok(!JSON.stringify(info).includes(agentToken));
-  let task = await (
-    await post("create_task", {
-      boardId: info.boards[0].id,
-      title: "Shared task",
-      labels: ["Product", "UX"],
-    })
-  ).json();
+  async function splitRequest(path, args, headers = {}) {
+    const bytes = Buffer.from(JSON.stringify(args));
+    const accented = bytes.indexOf(Buffer.from("é")) + 1;
+    const emoji = bytes.indexOf(Buffer.from("🌱")) + 2;
+    return new Promise((resolveResponse, reject) => {
+      const req = request(base + path, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...headers },
+      }, res => {
+        const chunks = [];
+        res.on("data", chunk => chunks.push(chunk));
+        res.on("end", () => resolveResponse({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks)) }));
+        res.on("error", reject);
+      });
+      req.on("error", reject);
+      req.write(bytes.subarray(0, accented));
+      void delay(30).then(() => {
+        req.write(bytes.subarray(accented, emoji));
+        return delay(30);
+      }).then(() => req.end(bytes.subarray(emoji)));
+    });
+  }
+  const title = "Café 🌱";
+  const created = await splitRequest("/api/create_task", {
+    boardId: info.boards[0].id, title, labels: ["Product", "UX"],
+  });
+  assert.equal(created.status, 200);
+  assert.equal(created.body.title, title);
+  let task = created.body;
+  const oversized = await post("create_task", { title, description: "é".repeat(1_100_000) });
+  assert.equal(oversized.status, 413);
   const client = new Client({ name: "remote-test", version: "1" });
   t.after(() => client.close());
   await client.connect(
-    new StdioClientTransport({
-      command: process.execPath,
-      args: [resolve("server/mcp.mjs")],
-      env: {
-        ...process.env,
-        TASKNBOARD_SERVER_URL: "http://127.0.0.1:14319",
-        TASKNBOARD_TOKEN: agentToken,
-      },
-      stderr: "pipe",
+    new StreamableHTTPClientTransport(new URL(base+"/mcp"), {
+      requestInit:{headers:{Authorization:`Bearer ${agentToken}`}},
     }),
   );
   const remoteInfo = await client.callTool({
@@ -168,6 +189,18 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   });
   assert.notEqual(remoteInfo.isError, true);
   assert.equal(JSON.parse(remoteInfo.content[0].text).actor.id, "remote-agent");
+  const { transport: agentTransport } = client;
+  const rpcTitle = "MCP café 🌱";
+  const rpc = await splitRequest("/mcp", {
+    jsonrpc: "2.0", id: 500, method: "tools/call",
+    params: { name: "create_task", arguments: { boardId: "BOARD-1", title: rpcTitle } },
+  }, {
+    Authorization: `Bearer ${agentToken}`,
+    Accept: "application/json, text/event-stream",
+    "mcp-session-id": agentTransport.sessionId,
+  });
+  assert.equal(rpc.status, 200);
+  assert.equal(rpc.body.result.structuredContent.title, rpcTitle);
   const claimed = await client.callTool({
     name: "claim_task",
     arguments: { id: task.id, expectedVersion: 1, verbose: true },
@@ -273,13 +306,13 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
   });
   assert.equal(uploaded.status, 200);
   const { url: imageUrl } = await uploaded.json();
-  const file = await fetch(`http://127.0.0.1:14319${imageUrl}`);
+  const file = await fetch(`${base}${imageUrl}`);
   assert.equal(file.status, 200);
   assert.equal(file.headers.get("content-type"), "image/png");
   assert.match(file.headers.get("content-security-policy"), /sandbox/);
   assert.ok(Buffer.from(await file.arrayBuffer()).equals(bigPng));
   assert.equal(
-    (await fetch(`http://127.0.0.1:14319/files/${"0".repeat(32)}`)).status,
+    (await fetch(`${base}/files/${"0".repeat(32)}`)).status,
     404,
   );
   assert.equal(
@@ -305,13 +338,16 @@ test("authenticated HTTP and remote MCP bridge share one authority", async (t) =
 });
 
 test("a local workspace saves agent settings and rejects invalid ones", async (t) => {
+  const secret = "test-resident-launch-secret-32-characters";
   const dir = mkdtempSync(join(tmpdir(), "tasknboard-agents-"));
   const service = spawn(process.execPath, ["server/http.mjs"], {
     env: {
       ...process.env,
-      PORT: "14329",
+      PORT: "0",
+      TASKNBOARD_RUNTIME_FILE: join(dir, "runtime.json"),
       TASKNBOARD_DB: join(dir, "db.sqlite"),
       TASKNBOARD_DESKTOP: "1",
+      TASKNBOARD_LOCAL_SECRET: secret,
       TASKNBOARD_USER_HOME: dir,
     },
     stdio: ["pipe", "ignore", "pipe"],
@@ -329,10 +365,15 @@ test("a local workspace saves agent settings and rejects invalid ones", async (t
     });
     service.once("exit", () => reject(new Error("Server exited")));
   });
+  const base = JSON.parse(readFileSync(join(dir,"runtime.json"),"utf8")).url;
+  const configResponse = await fetch(base+"/api/mcp-config", { headers: { Authorization: `Bearer ${secret}` } });
+  const mcpConfig = await configResponse.json();
+  assert.deepEqual(mcpConfig.config.mcpServers.tasknboard,{url:base+"/mcp",bearer_token_env_var:"TASKNBOARD_TOKEN"});
+  assert.ok(!JSON.stringify(mcpConfig).includes(join(dir,"db.sqlite")));
   const post = async (cmd, args) => {
-    const response = await fetch(`http://127.0.0.1:14329/api/${cmd}`, {
+    const response = await fetch(`${base}/api/${cmd}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
       body: JSON.stringify(args),
     });
     return { status: response.status, body: await response.json() };
