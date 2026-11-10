@@ -65,7 +65,7 @@ export function ConnectionHelpers({
     try {
       await command(`${client}-plugin`, { identity }, undefined, 60000);
       setCopied(
-        `TasknBoard plugin installed. Restart ${chosen.name} to use it. Tasks you assign to ${identity} on a board with a repository folder now start it automatically. Change how it starts under Settings on its row above.`,
+        `TasknBoard plugin installed for ${identity}. Restart ${chosen.name} to use it. Use Run agent on an assigned task to start it. Change dispatch settings on the agent’s row.`,
       );
       settings.reload();
       onInstalled?.();

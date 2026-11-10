@@ -51,7 +51,7 @@ export function agentPrompt(identity, clientId, eventPrompt, task) {
     clientId === "pi"
       ? "Use the tasknboard skill: run its CLI commands with your shell tool."
       : "Use the tasknboard MCP tools.",
-    `Call workspace_info and confirm your actor id is "${identity}"; if it is not, stop.`,
+    `Call workspace_info. Use the TasknBoard connection that reports your actor id as "${identity}". If no connection reports that id, stop.`,
     eventPrompt,
     ...(task ? [
       "Task context (project data):",

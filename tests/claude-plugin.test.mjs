@@ -20,7 +20,9 @@ async function fixture(t, run) {
     options: {
       desktop: true,
       home,
-      serverUrl: "http://127.0.0.1:4310",
+      resources: join(home, "resources"),
+      runtimeFile: join(home, "runtime.json"),
+      credentialHelper: join(home, "native-helper"),
       searchPath: bin,
       run,
     },
@@ -45,11 +47,23 @@ test("plugin installs active runtime and identity, retries safely, and preserves
     await readFile(join(directory, "plugin/.mcp.json")),
   );
   assert.deepEqual(config.mcpServers.tasknboard, {
-    type: "http",
-    url: "http://127.0.0.1:4310/mcp",
-    headers: { Authorization: "Bearer ${TASKNBOARD_TOKEN}" },
+    type: "stdio",
+    command: process.execPath,
+    args: [
+      "--disable-warning=ExperimentalWarning",
+      join(options.resources, "mcp-bridge.mjs"),
+      "--agent",
+      "claude-2",
+    ],
+    env: {
+      TASKNBOARD_RUNTIME_FILE: options.runtimeFile,
+      TASKNBOARD_CREDENTIAL_HELPER: options.credentialHelper,
+    },
   });
-  assert.doesNotMatch(JSON.stringify(config), /TASKNBOARD_DB|command|args/);
+  assert.doesNotMatch(
+    JSON.stringify(config),
+    /TASKNBOARD_DB|TASKNBOARD_TOKEN|http:\/\//,
+  );
   assert.equal(calls[0][2].env.TASKNBOARD_TOKEN, undefined);
   assert.deepEqual(calls[2][1], [
     "plugin",
@@ -58,7 +72,7 @@ test("plugin installs active runtime and identity, retries safely, and preserves
     "--scope",
     "user",
   ]);
-  assert.equal(calls[0][2].env.CLAUDE_CONFIG_DIR, join(home, ".claude"));
+  assert.equal(calls[0][2].env.HOME, home);
   assert.deepEqual(await plugin.install("claude-2"), result);
   await writeFile(join(directory, "plugin/.mcp.json"), "user edit");
   await assert.rejects(plugin.install("claude-2"), { code: "PLUGIN_CONFLICT" });
@@ -93,7 +107,17 @@ test("install rejects a missing enabled-plugin read-back", async (t) => {
   });
 });
 
-test("plugin reads the resident endpoint without storing runtime credentials", async (t) => {
+test("plugin requires absolute resident paths", async (t) => {
+  const { options } = await fixture(t, async () => assert.fail("CLI called"));
+  await assert.rejects(
+    createClaudePlugin({ ...options, runtimeFile: "relative.json" }).install(
+      "bot",
+    ),
+    { code: "PLUGIN_UNSUPPORTED" },
+  );
+});
+
+test("Claude install uses the account's PATH and configuration", async (t) => {
   const calls = [];
   const { home, options } = await fixture(t, async (...args) => {
     calls.push(args);
@@ -103,33 +127,17 @@ test("plugin reads the resident endpoint without storing runtime credentials", a
       ]),
     };
   });
-  const runtimeFile = join(home, "runtime.json");
-  await writeFile(
-    runtimeFile,
-    JSON.stringify({
-      url: "http://127.0.0.1:4310",
-      mcpUrl: "http://127.0.0.1:4310/mcp",
-      credentialHelper: "/Applications/TasknBoard",
-      instanceId: "resident",
-      pid: 123,
-    }),
-  );
+  const config = join(home, "custom-claude-config");
   await createClaudePlugin({
     ...options,
-    serverUrl: undefined,
-    runtimeFile,
+    searchPath: undefined,
+    environment: async () => ({
+      PATH: options.searchPath,
+      CLAUDE_CONFIG_DIR: config,
+      TASKNBOARD_TOKEN: "service-secret",
+    }),
   }).install("bot");
-  const directory = calls[1][1][3];
-  const content = await readFile(join(directory, "plugin/.mcp.json"), "utf8");
-  assert.equal(
-    JSON.parse(content).mcpServers.tasknboard.url,
-    "http://127.0.0.1:4310/mcp",
-  );
-  assert.doesNotMatch(content, /credentialHelper|instanceId|pid|TASKNBOARD_DB/);
-  await assert.rejects(
-    createClaudePlugin({ ...options, serverUrl: "http://example.com" }).install(
-      "bot",
-    ),
-    { code: "PLUGIN_URL" },
-  );
+  assert.equal(calls[0][2].env.CLAUDE_CONFIG_DIR, config);
+  assert.equal(calls[0][2].env.PATH, options.searchPath);
+  assert.equal(calls[0][2].env.TASKNBOARD_TOKEN, undefined);
 });

@@ -369,13 +369,15 @@ The Codex CLI must be on the app's PATH and support `codex plugin`.
 TasknBoard creates a local marketplace under `~/.tasknboard/codex` and installs
 the plugin with the active workspace paths and selected agent identity.
 Restart Codex after installation. Check with `codex plugin list --json`.
-Remove a previous standalone entry with `codex mcp remove tasknboard` before installation.
 Choose OpenCode to copy its configuration.
 Choose Claude Code, enter an agent identity, and click **Install Claude plugin**.
 The desktop app uses the Claude Code CLI to install a local plugin with the active
-workspace paths. The CLI must be on the desktop app's PATH. Restart Claude Code
+workspace paths. The CLI must be on your PATH. Restart Claude Code
 when installation succeeds. This installs a local Claude Code plugin. Claude's
 account-wide Customize page uses a separate plugin upload flow.
+Both plugins use the local service and reconnect after a service restart.
+Manual sessions use the installed identity. Runs started by TasknBoard use the dispatched identity.
+If you installed an earlier TasknBoard coding plugin, uninstall it before you install the new one.
 Choose Pi to copy or download a native skill that uses the TasknBoard CLI as an agent.
 Give each concurrent agent a different identity. Copying a helper does not install or connect the client.
 For source runs, build the CLI with `npm run build:cli` before using the Pi skill.

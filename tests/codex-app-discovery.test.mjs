@@ -129,7 +129,7 @@ function appServer(child) {
 }
 
 test(
-  "installed Codex discovers the local app entrypoints and reads its resource",
+  "installed Codex discovers the local app and agent plugins and reconnects after restart",
   {
     skip:
       process.platform === "win32"
@@ -187,7 +187,7 @@ test(
       `#!/bin/sh\ncase "$1" in\n--service-attach) exit 0 ;;\n--service-credential) printf '%s' '${secret}' ;;\n*) exit 1 ;;\nesac\n`,
       { mode: 0o700 },
     );
-    const resident = spawn(resolve(nodeExecutable), [resolve(serviceEntry)], {
+    const serviceOptions = {
       cwd: home,
       detached: true,
       env: {
@@ -206,11 +206,22 @@ test(
         HOST: "127.0.0.1",
       },
       stdio: ["ignore", "ignore", "pipe"],
-    });
-    children.push(resident);
-    await waitForResident(resident);
-    resident.stderr.resume();
-    const descriptor = JSON.parse(await readFile(runtime, "utf8"));
+    };
+    const start = async () => {
+      const resident = spawn(
+        resolve(nodeExecutable),
+        [resolve(serviceEntry)],
+        serviceOptions,
+      );
+      children.push(resident);
+      await waitForResident(resident);
+      resident.stderr.resume();
+      return {
+        resident,
+        descriptor: JSON.parse(await readFile(runtime, "utf8")),
+      };
+    };
+    const { resident, descriptor } = await start();
     const response = await fetch(descriptor.url + "/api/service-connect", {
       method: "POST",
       headers: {
@@ -228,13 +239,24 @@ test(
     );
     assert.equal(installed.appPlugin.installed, true);
     assert.equal(installed.appPlugin.enabled, true);
+    const agentResponse = await fetch(descriptor.url + "/api/codex-plugin", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + secret,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ identity: "codex-installed" }),
+      signal: AbortSignal.timeout(40000),
+    });
+    const agentPlugin = await agentResponse.json();
+    assert.equal(agentResponse.status, 200, JSON.stringify(agentPlugin));
     await appendFile(
       join(env.CODEX_HOME, "config.toml"),
       `\n[projects.${JSON.stringify(home)}]\ntrust_level = "trusted"\n`,
     );
     const host = spawn("codex", ["app-server", "--listen", "stdio://"], {
       cwd: home,
-      env,
+      env: { ...env, TASKNBOARD_AGENT_ID: "codex-dispatched" },
       detached: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -256,7 +278,7 @@ test(
       sandbox: "read-only",
     });
     const deadline = Date.now() + 20000;
-    let server;
+    let server, agentServer;
     // MCP startup runs asynchronously after thread/start, especially in a bundle.
     while (Date.now() < deadline) {
       const status = await rpc.call(
@@ -267,13 +289,16 @@ test(
       server = status.data.find(
         (entry) => entry.pluginId === installed.appPlugin.pluginId,
       );
-      if (server?.runtimeStatus === "connected") break;
+      agentServer = status.data.find(
+        (entry) => entry.pluginId === `tasknboard@${agentPlugin.marketplace}`,
+      );
+      if (
+        server?.runtimeStatus === "connected" &&
+        agentServer?.runtimeStatus === "connected"
+      )
+        break;
       if (server) {
-        assert.equal(
-          server.runtimeStatus,
-          "starting",
-          "Codex MCP startup failed",
-        );
+        assert.ok(["starting", "connected"].includes(server.runtimeStatus));
       }
       await delay(Math.min(100, Math.max(0, deadline - Date.now())));
     }
@@ -282,6 +307,19 @@ test(
       "Codex did not discover the app plugin within 20 seconds",
     );
     assert.equal(server.runtimeStatus, "connected");
+    assert.equal(agentServer?.runtimeStatus, "connected");
+    assert.ok(agentServer.tools.workspace_info);
+    assert.equal(agentServer.tools.open_tasknboard, undefined);
+    const callAgent = (tool, args = {}) =>
+      rpc.call("mcpServer/tool/call", {
+        threadId: thread.thread.id,
+        server: agentServer.name,
+        tool,
+        arguments: args,
+      });
+    const workspace = await callAgent("workspace_info");
+    assert.equal(workspace.structuredContent?.actor.id, "codex-dispatched");
+    assert.equal(workspace.structuredContent?.actor.kind, "agent");
     const opener = server.tools.open_tasknboard;
     assert.ok(opener, "Codex must expose open_tasknboard");
     assert.deepEqual(opener._meta["openai/ui"].entrypoints, [
@@ -312,5 +350,21 @@ test(
       "https://user-images.githubusercontent.com",
     ]);
     assert.equal(content._meta.ui.prefersBorder, false);
+    const created = await callAgent("create_task", {
+      boardId: "BOARD-1",
+      title: "Codex task before restart",
+    });
+    assert.notEqual(created.isError, true);
+    assert.ok(created.structuredContent.id);
+    await stop(resident);
+    const restarted = await start();
+    assert.notEqual(restarted.descriptor.mcpUrl, descriptor.mcpUrl);
+    const existing = await callAgent("get_task", {
+      id: created.structuredContent.id,
+    });
+    assert.equal(
+      existing.structuredContent?.title,
+      "Codex task before restart",
+    );
   },
 );

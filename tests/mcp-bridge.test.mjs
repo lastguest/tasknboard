@@ -1,16 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile, rm, access } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import { createServer } from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { credentialFor } from "../server/local-auth.mjs";
 import { resolveBridgeConnection } from "../server/mcp-bridge.mjs";
 
-const bridgePath = resolve("server/mcp-bridge.mjs");
+const bridgePath = resolve(process.env.TASKNBOARD_TEST_BRIDGE || "server/mcp-bridge.mjs");
+const servicePath = resolve(process.env.TASKNBOARD_TEST_SERVICE || "server/http.mjs");
+const nodeExecutable = resolve(process.env.TASKNBOARD_TEST_NODE || process.execPath);
+const exec = promisify(execFile);
 const secret = "bridge-resident-secret-1234567890";
 async function fixture(t) {
   const dir = await mkdtemp(join(tmpdir(), "tnb-bridge-"));
@@ -33,8 +37,8 @@ async function fixture(t) {
     for (const service of services) await stop(service);
     await rm(dir, { recursive: true, force: true });
   });
-  const start = async () => {
-    const service = spawn(process.execPath, [resolve("server/http.mjs")], {
+  const start = async (env = {}) => {
+    const service = spawn(nodeExecutable, [servicePath], {
       env: {
         ...process.env,
         PORT: "0",
@@ -47,6 +51,7 @@ async function fixture(t) {
         TASKNBOARD_CREDENTIAL_HELPER: helper,
         TASKNBOARD_APP_DIR: dir,
         TASKNBOARD_USER_HOME: dir,
+        ...env,
       },
       stdio: ["ignore", "ignore", "pipe"],
     });
@@ -71,7 +76,7 @@ async function fixture(t) {
     });
     return { service, descriptor: JSON.parse(await readFile(runtime, "utf8")) };
   };
-  const connect = async (extra = {}) => {
+  const connect = async (extra = {}, args = []) => {
     const client = new Client(
       { name: "bridge-test", version: "1" },
       {
@@ -80,8 +85,8 @@ async function fixture(t) {
     );
     clients.push(client);
     const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [bridgePath],
+      command: nodeExecutable,
+      args: [bridgePath, ...args],
       env: {
         ...process.env,
         TASKNBOARD_SERVER_URL: "",
@@ -177,7 +182,7 @@ test("the bridge preserves initialize capabilities and never retries a failed wr
   });
   await client.connect(
     new StdioClientTransport({
-      command: process.execPath,
+      command: nodeExecutable,
       args: [bridgePath],
       env: {
         ...process.env,
@@ -270,6 +275,92 @@ test(
 );
 
 test(
+  "the same agent bridge follows a restart without using inherited credentials",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const f = await fixture(t);
+    const first = await f.start();
+    const { client } = await f.connect(
+      {
+        TASKNBOARD_AGENT_ID: "",
+        TASKNBOARD_TOKEN: secret,
+        TASKNBOARD_SERVER_URL: "http://127.0.0.1:1/mcp",
+      },
+      ["--agent", "installed-agent"],
+    );
+    const { actor } = await call(client, "workspace_info");
+    assert.equal(actor.id, "installed-agent");
+    assert.equal(actor.kind, "agent");
+    const { tools } = await client.listTools();
+    assert.ok(!tools.some(({ name }) => name === "open_tasknboard" || name.startsWith("ui_")));
+    const task = await call(client, "create_task", {
+      title: "Agent task before restart",
+      boardId: "BOARD-1",
+    });
+    await stop(first.service);
+    const second = await f.start();
+    assert.notEqual(second.descriptor.mcpUrl, first.descriptor.mcpUrl);
+    assert.equal((await call(client, "get_task", { id: task.id })).title, task.title);
+    assert.equal(
+      (await call(client, "create_task", {
+        title: "Agent task after restart",
+        boardId: "BOARD-1",
+      })).title,
+      "Agent task after restart",
+    );
+  },
+);
+
+test(
+  "installed Claude Code connects to the resident before and after a port change",
+  { skip: process.platform === "win32", timeout: 90000 },
+  async (t) => {
+    const f = await fixture(t);
+    const env = {
+      PATH: process.env.PATH,
+      HOME: f.dir,
+      USERPROFILE: f.dir,
+      CLAUDE_CONFIG_DIR: join(f.dir, ".claude"),
+      DISABLE_TELEMETRY: "1",
+      DISABLE_NONESSENTIAL_MODEL_CALLS: "1",
+    };
+    const runClaude = (args) =>
+      exec("claude", args, { cwd: f.dir, env, timeout: 20000 });
+    try {
+      const { stdout } = await runClaude(["--version"]);
+      t.diagnostic(stdout.trim());
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      return t.skip("Claude Code is not installed on PATH");
+    }
+    const settings = {
+      TASKNBOARD_RESOURCES: dirname(bridgePath),
+      TASKNBOARD_USER_ENV: JSON.stringify(env),
+    };
+    const first = await f.start(settings);
+    const response = await fetch(first.descriptor.url + "/api/claude-plugin", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + secret,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ identity: "claude-installed" }),
+      signal: AbortSignal.timeout(40000),
+    });
+    assert.equal(response.status, 200, await response.text());
+    const verify = async () => {
+      const { stdout } = await runClaude(["mcp", "list"]);
+      assert.match(stdout, /plugin:tasknboard:tasknboard[^\n]*Connected/i);
+    };
+    await verify();
+    await stop(first.service);
+    const second = await f.start(settings);
+    assert.notEqual(second.descriptor.mcpUrl, first.descriptor.mcpUrl);
+    await verify();
+  },
+);
+
+test(
   "the same client and a fresh bridge discover a new resident and preserve data",
   { skip: process.platform === "win32" },
   async (t) => {
@@ -343,7 +434,7 @@ test("missing native helper fails on stderr with clean stdout and no database fa
   const dir = await mkdtemp(join(tmpdir(), "tnb-bridge-failure-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const database = join(dir, "must-not-exist.sqlite");
-  const processBridge = spawn(process.execPath, [bridgePath], {
+  const processBridge = spawn(nodeExecutable, [bridgePath], {
     env: {
       ...process.env,
       TASKNBOARD_SERVER_URL: "",

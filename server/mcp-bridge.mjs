@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { resolveConnection, runtimeFile } from "./runtime.mjs";
+import { identityPattern } from "./agent-config.mjs";
 
 const run = promisify(execFile);
 const unavailable = () =>
@@ -17,7 +18,10 @@ const unavailable = () =>
     { code: "SERVICE_UNAVAILABLE" },
   );
 
-export async function resolveBridgeConnection(env = process.env) {
+export async function resolveBridgeConnection(
+  env = process.env,
+  actor = { id: "codex-app", kind: "app" },
+) {
   if (env.TASKNBOARD_SERVER_URL) {
     let url;
     try {
@@ -32,7 +36,7 @@ export async function resolveBridgeConnection(env = process.env) {
       url.password
     )
       throw Object.assign(
-        new Error("The MCP app bridge requires loopback HTTP."),
+        new Error("The TasknBoard MCP bridge requires loopback HTTP."),
         { code: "INSECURE_CONNECTION" },
       );
   } else {
@@ -57,7 +61,7 @@ export async function resolveBridgeConnection(env = process.env) {
       throw unavailable();
     }
   }
-  return resolveConnection({ env, actor: { id: "codex-app", kind: "app" } });
+  return resolveConnection({ env, actor });
 }
 
 /** Relay the original MCP messages. The resident service owns all protocol and domain behavior. */
@@ -66,7 +70,20 @@ export async function startBridge({
   stdin = process.stdin,
   stdout = process.stdout,
   stderr = process.stderr,
+  agentIdentity,
 } = {}) {
+  let actor;
+  if (agentIdentity !== undefined) {
+    const id = env.TASKNBOARD_AGENT_ID || agentIdentity;
+    if (!identityPattern.test(id))
+      throw Object.assign(new Error("Invalid agent identity."), {
+        code: "AGENT_IDENTITY",
+      });
+    actor = { id, kind: "agent" };
+    // The plugin is local. Inherited URL and token values can point at another
+    // service or carry more privileges than this agent.
+    env = { ...env, TASKNBOARD_SERVER_URL: "", TASKNBOARD_TOKEN: "" };
+  }
   const stdio = new StdioServerTransport(stdin, stdout);
   const pending = new Map();
   let http, closing, reconnecting, initializeParams, descriptorStamp;
@@ -161,7 +178,7 @@ export async function startBridge({
     };
     return { transport, initialize };
   };
-  http = createTransport(await resolveBridgeConnection(env)).transport;
+  http = createTransport(await resolveBridgeConnection(env, actor)).transport;
   descriptorStamp = await currentDescriptor();
   const ensureConnection = async () => {
     if (reconnecting) return reconnecting;
@@ -172,7 +189,7 @@ export async function startBridge({
       available = false;
       for (const id of pending.keys()) await fail(id);
       await http.close();
-      const connection = await resolveBridgeConnection(env);
+      const connection = await resolveBridgeConnection(env, actor);
       if (closing) throw unavailable();
       const next = createTransport(connection);
       http = next.transport;
@@ -248,7 +265,12 @@ if (
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
   try {
-    const bridge = await startBridge();
+    const [mode, identity, ...extra] = process.argv.slice(2);
+    if (mode !== undefined && (mode !== "--agent" || !identity || extra.length))
+      throw Object.assign(new Error("Invalid bridge arguments."), {
+        code: "AGENT_IDENTITY",
+      });
+    const bridge = await startBridge({ agentIdentity: identity });
     for (const signal of ["SIGTERM", "SIGINT"])
       process.once(signal, () => {
         void bridge.close();
@@ -256,8 +278,10 @@ if (
   } catch (error) {
     const message =
       error.code === "INSECURE_CONNECTION"
-        ? "The MCP app bridge requires loopback HTTP."
-        : "The TasknBoard resident connection is unavailable. Check the installed service and credential helper.";
+        ? "The TasknBoard MCP bridge requires loopback HTTP."
+        : error.code === "AGENT_IDENTITY"
+          ? "The TasknBoard MCP bridge requires a valid agent identity."
+          : "The TasknBoard resident connection is unavailable. Check the installed service and credential helper.";
     process.stderr.write(message + "\n");
     process.exitCode = 1;
   }

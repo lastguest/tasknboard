@@ -5,6 +5,10 @@ import { delimiter, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { userEnvironment } from "./agent-launcher.mjs";
+import { agentPluginConnection } from "./agent-plugin-connection.mjs";
+import { identityPattern } from "./agent-config.mjs";
+
 const exec = promisify(execFile);
 const failure = (code, message, status = 400) =>
   Object.assign(new Error(message), { code, status });
@@ -14,26 +18,29 @@ const hash = (value) =>
 export function createClaudePlugin({
   desktop = process.env.TASKNBOARD_DESKTOP === "1",
   home = process.env.TASKNBOARD_USER_HOME,
-  serverUrl = process.env.TASKNBOARD_SERVER_URL,
-  mcpUrl,
+  resources = process.env.TASKNBOARD_RESOURCES,
   runtimeFile = process.env.TASKNBOARD_RUNTIME_FILE,
   credentialHelper = process.env.TASKNBOARD_CREDENTIAL_HELPER,
   identity: defaultIdentity,
   platform = process.platform,
-  searchPath = process.env.PATH || "",
+  searchPath,
+  environment = () => userEnvironment({ platform, home }),
   run = exec,
 } = {}) {
   let installing = false;
   async function install(identity = defaultIdentity) {
-    if (!desktop || !home || !(serverUrl || mcpUrl || runtimeFile))
+    const connection = agentPluginConnection({
+      runtimeFile,
+      credentialHelper,
+      resources,
+      identity,
+    });
+    if (!desktop || !home || !connection)
       throw failure(
         "PLUGIN_UNSUPPORTED",
         "Install the Claude Code plugin from the TasknBoard desktop app.",
       );
-    if (
-      typeof identity !== "string" ||
-      !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(identity)
-    )
+    if (typeof identity !== "string" || !identityPattern.test(identity))
       throw failure("PLUGIN_IDENTITY", "Enter a valid agent identity.");
     if (installing)
       throw failure(
@@ -44,8 +51,10 @@ export function createClaudePlugin({
     installing = true;
     try {
       const windows = platform === "win32";
+      const userEnv = searchPath === undefined ? await environment() : {};
+      const cliPath = searchPath ?? userEnv.PATH ?? userEnv.Path ?? "";
       let executable;
-      for (const directory of searchPath
+      for (const directory of cliPath
         .split(windows ? ";" : delimiter)
         .filter(Boolean)) {
         for (const name of windows
@@ -67,35 +76,13 @@ export function createClaudePlugin({
           "CLAUDE_MISSING",
           "Install the Claude Code CLI and add it to PATH, then restart TasknBoard.",
         );
-      const descriptor =
-        runtimeFile && !serverUrl && !mcpUrl
-          ? JSON.parse(await readFile(runtimeFile, "utf8"))
-          : null;
-      const endpoint = new URL(mcpUrl || serverUrl || descriptor?.mcpUrl);
-      if (
-        endpoint.protocol !== "https:" &&
-        !(
-          endpoint.protocol === "http:" &&
-          ["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname)
-        )
-      )
-        throw failure(
-          "PLUGIN_URL",
-          "MCP credentials require HTTPS except on loopback.",
-        );
-      if (!endpoint.pathname.endsWith("/mcp"))
-        endpoint.pathname = endpoint.pathname.replace(/\/$/, "") + "/mcp";
       const mcp = {
         mcpServers: {
-          tasknboard: {
-            type: "http",
-            url: endpoint.href,
-            headers: { Authorization: "Bearer ${TASKNBOARD_TOKEN}" },
-          },
+          tasknboard: { type: "stdio", ...connection },
         },
       };
-      const fingerprint = hash(JSON.stringify({ mcp, identity }));
-      const marketplace = `tasknboard-${hash(endpoint.href + "\0" + identity)}`;
+      const fingerprint = hash(JSON.stringify(mcp));
+      const marketplace = `tasknboard-${fingerprint}`;
       const directory = join(home, ".tasknboard", "claude", fingerprint);
       const files = {
         ".claude-plugin/marketplace.json": {
@@ -135,15 +122,15 @@ export function createClaudePlugin({
           maxBuffer: 1024 * 1024,
           env: {
             ...Object.fromEntries(
-              Object.entries(process.env).filter(
-                ([key]) => !key.startsWith("TASKNBOARD_"),
+              Object.entries(userEnv).filter(
+                ([key]) =>
+                  !key.startsWith("TASKNBOARD_") &&
+                  key.toUpperCase() !== "PATH",
               ),
             ),
-            CLAUDE_CONFIG_DIR: join(home, ".claude"),
-            ...(runtimeFile ? { TASKNBOARD_RUNTIME_FILE: runtimeFile } : {}),
-            ...(credentialHelper
-              ? { TASKNBOARD_CREDENTIAL_HELPER: credentialHelper }
-              : {}),
+            HOME: home,
+            USERPROFILE: home,
+            PATH: cliPath,
           },
           windowsHide: true,
         };

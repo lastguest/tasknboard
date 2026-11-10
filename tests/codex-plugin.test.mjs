@@ -20,7 +20,9 @@ async function fixture(t, run) {
     options: {
       desktop: true,
       home,
-      serverUrl: "http://127.0.0.1:4310",
+      resources: join(home, "resources"),
+      runtimeFile: join(home, "runtime.json"),
+      credentialHelper: join(home, "native-helper"),
       searchPath: bin,
       run,
     },
@@ -41,10 +43,23 @@ test("plugin installs active runtime and identity, retries safely, and preserves
     await readFile(join(directory, "plugin/.mcp.json")),
   );
   assert.deepEqual(config.mcpServers.tasknboard, {
-    url: "http://127.0.0.1:4310/mcp",
-    bearer_token_env_var: "TASKNBOARD_TOKEN",
+    env_vars: ["TASKNBOARD_AGENT_ID"],
+    command: process.execPath,
+    args: [
+      "--disable-warning=ExperimentalWarning",
+      join(options.resources, "mcp-bridge.mjs"),
+      "--agent",
+      "codex-2",
+    ],
+    env: {
+      TASKNBOARD_RUNTIME_FILE: options.runtimeFile,
+      TASKNBOARD_CREDENTIAL_HELPER: options.credentialHelper,
+    },
   });
-  assert.doesNotMatch(JSON.stringify(config), /TASKNBOARD_DB|command|args/);
+  assert.doesNotMatch(
+    JSON.stringify(config),
+    /TASKNBOARD_DB|TASKNBOARD_TOKEN|http:\/\//,
+  );
   assert.equal(calls[0][2].env.TASKNBOARD_TOKEN, undefined);
   assert.deepEqual(calls[1][1], [
     "plugin",
@@ -78,7 +93,13 @@ test("desktop agent installation resolves and passes the user's shell PATH", asy
   assert.equal(reads, 1);
   assert.equal(calls.length, 3);
   for (const [executable, , config] of calls) {
-    assert.equal(executable, join(options.searchPath, process.platform === "win32" ? "codex.exe" : "codex"));
+    assert.equal(
+      executable,
+      join(
+        options.searchPath,
+        process.platform === "win32" ? "codex.exe" : "codex",
+      ),
+    );
     assert.equal(config.env.PATH, options.searchPath);
   }
 });
@@ -121,43 +142,12 @@ test("concurrent installs cannot race Codex configuration writes", async (t) => 
   await pending;
 });
 
-test("plugin reads the resident endpoint without storing runtime credentials", async (t) => {
-  const calls = [];
-  const { home, options } = await fixture(t, async (...args) => {
-    calls.push(args);
-    return {
-      stdout: JSON.stringify([
-        { id: calls[2]?.[1][2], enabled: true, scope: "user" },
-      ]),
-    };
-  });
-  const runtimeFile = join(home, "runtime.json");
-  await writeFile(
-    runtimeFile,
-    JSON.stringify({
-      url: "http://127.0.0.1:4310",
-      mcpUrl: "http://127.0.0.1:4310/mcp",
-      credentialHelper: "/Applications/TasknBoard",
-      instanceId: "resident",
-      pid: 123,
-    }),
-  );
-  await createCodexPlugin({
-    ...options,
-    serverUrl: undefined,
-    runtimeFile,
-  }).install("bot");
-  const directory = calls[0][1][3];
-  const content = await readFile(join(directory, "plugin/.mcp.json"), "utf8");
-  assert.equal(
-    JSON.parse(content).mcpServers.tasknboard.url,
-    "http://127.0.0.1:4310/mcp",
-  );
-  assert.doesNotMatch(content, /credentialHelper|instanceId|pid|TASKNBOARD_DB/);
+test("plugin requires absolute resident paths", async (t) => {
+  const { options } = await fixture(t, async () => assert.fail("CLI called"));
   await assert.rejects(
-    createCodexPlugin({ ...options, serverUrl: "http://example.com" }).install(
+    createCodexPlugin({ ...options, runtimeFile: "relative.json" }).install(
       "bot",
     ),
-    { code: "PLUGIN_URL" },
+    { code: "PLUGIN_UNSUPPORTED" },
   );
 });

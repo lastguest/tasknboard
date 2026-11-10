@@ -78,9 +78,9 @@ export function connectionHelper(
       steps: [
         "Make sure the `claude` CLI is on your PATH.",
         "Install the plugin from this desktop app.",
-        "Restart Claude Code. Tasks you assign to this identity on a board with a repository folder then start it.",
+        "Restart Claude Code. Use Run agent on an assigned task to start it.",
       ],
-      note: "This installs a local Claude Code plugin. Claude’s account-wide Customize page uses a separate upload flow.",
+      note: "The local plugin reconnects when the TasknBoard service restarts. Claude’s account-wide Customize page uses a separate upload flow.",
     };
   if (client === "codex") {
     return {
@@ -89,9 +89,9 @@ export function connectionHelper(
       steps: [
         "Make sure the `codex` CLI is on your PATH.",
         "Install the plugin from this desktop app.",
-        "Restart Codex. Tasks you assign to this identity on a board with a repository folder then start it.",
+        "Restart Codex. Use Run agent on an assigned task to start it.",
       ],
-      note: "The installer removes the older standalone entry. The plugin connects directly to the workspace database and survives desktop restarts.",
+      note: "The installer removes the older standalone entry. The plugin reconnects when the TasknBoard service restarts.",
     };
   }
   if (client === "opencode")
