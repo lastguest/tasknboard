@@ -58,7 +58,7 @@ test("production embedded resource edits and starts chat work through the local 
       calls.push(call);
       if (request.id === undefined) return;
       if (request.method === "ui/initialize") {
-        call.result = { protocolVersion: request.params.protocolVersion, hostInfo: { name: "Resident test host", version: "1" }, hostCapabilities: { serverTools: {}, message: { text: {} }, updateModelContext: { text: {} }, openLinks: {} }, hostContext: { displayMode: "inline" } };
+        call.result = { protocolVersion: request.params.protocolVersion, hostInfo: { name: "Resident test host", version: "1" }, hostCapabilities: { serverTools: {}, message: { text: {} }, updateModelContext: { text: {} }, openLinks: {} }, hostContext: { displayMode: "fullscreen", safeAreaInsets: { top: 0, right: 0, bottom: 64, left: 0 } } };
       } else if (request.method === "tools/call") {
         call.result = await client.callTool(request.params);
       } else {
@@ -74,15 +74,34 @@ test("production embedded resource edits and starts chat work through the local 
     await page.goto(descriptor.url + "/resident-host");
     const ui = page.frameLocator('iframe[title="TasknBoard"]');
     await expect(ui.locator(".workspace-status .identity")).toContainText("you");
+    const footerGap = () => ui.locator("footer").evaluate(
+      footer => window.innerHeight - footer.getBoundingClientRect().bottom,
+    );
+    await expect.poll(footerGap).toBe(64);
+    const setComposerHeight = (bottom: number) =>
+      page.locator('iframe[title="TasknBoard"]').evaluate((iframe: HTMLIFrameElement, bottom) => {
+        iframe.contentWindow!.postMessage({
+          jsonrpc: "2.0",
+          method: "ui/notifications/host-context-changed",
+          params: { safeAreaInsets: { top: 0, right: 0, bottom, left: 0 } },
+        }, "*");
+      }, bottom);
+    await setComposerHeight(180);
+    await expect.poll(footerGap).toBe(180);
     await expect.poll(() => calls.find(call => call.params?.name === "ui_workspace_revision")?.result?._meta?.result?.revision).toMatch(/^\d+:\d+$/);
     const initialRevision = calls.find(call => call.params?.name === "ui_workspace_revision")!.result._meta.result.revision;
     await ui.getByRole("button", { name: "New task", exact: true }).click();
     const dialog = ui.getByRole("dialog", { name: "New task" });
+    await expect.poll(() => dialog.evaluate(
+      element => window.innerHeight - element.getBoundingClientRect().bottom,
+    )).toBeGreaterThanOrEqual(180);
     await dialog.getByLabel("Title", { exact: true }).fill("Resident embedded work");
     await dialog.getByLabel("Context", { exact: true }).fill("Created through production resource and real MCP.");
     await dialog.getByRole("button", { name: "Create task", exact: true }).click();
     const card = ui.getByRole("button", { name: /TNB-\d+: Resident embedded work/ });
     await expect(card).toBeVisible();
+    await setComposerHeight(0);
+    await expect.poll(footerGap).toBe(0);
     await card.click();
     const details = ui.getByRole("region", { name: /Task details/ });
     await details.getByLabel("Title", { exact: true }).fill("Resident embedded work edited");

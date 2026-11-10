@@ -322,6 +322,7 @@ test(
     assert.equal(workspace.structuredContent?.actor.kind, "agent");
     const opener = server.tools.open_tasknboard;
     assert.ok(opener, "Codex must expose open_tasknboard");
+    assert.equal(opener.title, "Tasknboard");
     assert.equal(server.serverInfo?.icons?.[0]?.mimeType, "image/svg+xml");
     const icon = await readFile(join(installed.plugin.path, "plugin/assets/icon.svg"));
     assert.equal(server.serverInfo.icons[0].src, "data:image/svg+xml;base64," + icon.toString("base64"));

@@ -9,7 +9,13 @@ export const workspaceChanged = new EventTarget();
 
 export async function connectEmbedded() {
   const { App } = await import("@modelcontextprotocol/ext-apps");
-  bridge = new App({ name: "TasknBoard", version: __APP_VERSION__ }, {}, { autoResize: false });
+  const app = new App({ name: "TasknBoard", version: __APP_VERSION__ }, {}, { autoResize: false });
+  bridge = app;
+  const updateBottomInset = () => {
+    const bottom = app.getHostContext()?.safeAreaInsets?.bottom ?? 0;
+    document.documentElement.style.setProperty("--host-bottom-inset", `${Math.max(0, bottom)}px`);
+  };
+  app.addEventListener("hostcontextchanged", updateBottomInset);
   bridge.ontoolinput = ({ arguments: args = {} }) => {
     selection = {
       ...(typeof args.boardId === "string" ? { boardId: args.boardId } : {}),
@@ -19,7 +25,8 @@ export async function connectEmbedded() {
     workspaceChanged.dispatchEvent(new Event("selection"));
   };
   bridge.ontoolresult = () => workspaceChanged.dispatchEvent(new Event("change"));
-  await bridge.connect();
+  await app.connect();
+  updateBottomInset();
   document.addEventListener("click", (event) => {
     const link = (event.target as Element).closest?.("a[href]");
     if (!(link instanceof HTMLAnchorElement) || link.getAttribute("href")?.startsWith("#")) return;

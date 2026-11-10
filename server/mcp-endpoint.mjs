@@ -186,7 +186,7 @@ export function createMcpEndpoint({ application, schemas, authenticate }) {
         server,
         "open_tasknboard",
         {
-          title: "Open TasknBoard",
+          title: "Tasknboard",
           description:
             "Use this to open the TasknBoard workspace, optionally selecting a board or task.",
           inputSchema: z
