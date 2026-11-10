@@ -36,10 +36,11 @@ test("local app plugin discovers the resident at connection time and contains no
   assert.equal(manifest.mcpServers, "./.mcp.json");
   for (const field of ["composerIcon", "logo", "logoDark"]) {
     const svg = await readFile(join(result.path, "plugin", manifest.interface[field]), "utf8");
-    assert.match(svg, /^<svg [^>]*viewBox="0 0 512 512"/);
+    assert.match(svg, /^<svg [^>]*viewBox="0 0 24 24"/);
   }
   await assert.rejects(access(join(result.path, "plugin/.app.json")), { code: "ENOENT" });
   assert.doesNotMatch(JSON.stringify({ manifest, mcp }), /127\.0\.0\.1|localhost|bearer_token|TASKNBOARD_TOKEN|tunnel_|asdk_app_|runtimeKey/);
+  assert.deepEqual(calls[1][1], ["plugin", "list", "--marketplace", result.marketplace, "--json"]);
   assert.deepEqual(calls[2][1], ["plugin", "add", result.pluginId, "--json"]);
   assert.equal(calls[0][2].env.CODEX_HOME, join(options.home, ".codex"));
   assert.equal(calls[0][2].env.TASKNBOARD_TOKEN, undefined);

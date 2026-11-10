@@ -5,28 +5,13 @@ import { delimiter, isAbsolute, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { userEnvironment } from "./agent-launcher.mjs";
+import { codexAppIcon } from "./codex-app-icon.mjs";
 
 const exec = promisify(execFile);
 const failure = (code, message, status = 400) =>
   Object.assign(new Error(message), { code, status });
 const hash = (value) =>
   createHash("sha256").update(value).digest("hex").slice(0, 16);
-// The board glyph from the app sidebar, on a square tile like Codex's bundled plugin icons.
-const icon = (background, glyph) => `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 512 512">
-  <mask id="cutout">
-    <rect x="112" y="104" width="288" height="304" fill="#fff"/>
-    <circle cx="176" cy="172" r="30" fill="#000"/>
-    <rect x="148" y="244" width="216" height="28" rx="14" fill="#000"/>
-    <rect x="148" y="300" width="144" height="28" rx="14" fill="#000"/>
-  </mask>
-  <rect width="512" height="512" fill="${background}"/>
-  <rect x="112" y="104" width="288" height="304" rx="44" fill="${glyph}" mask="url(#cutout)"/>
-</svg>
-`;
-const icons = {
-  "plugin/assets/icon.svg": icon("white", "black"),
-  "plugin/assets/icon-dark.svg": icon("black", "white"),
-};
 
 export function createCodexAppPlugin({
   home = process.env.TASKNBOARD_USER_HOME,
@@ -132,7 +117,7 @@ export function createCodexAppPlugin({
           },
         },
       };
-      const fingerprint = hash(JSON.stringify({ mcp, icons }));
+      const fingerprint = hash(JSON.stringify({ mcp, icon: codexAppIcon }));
       const marketplace = `tasknboard-app-${fingerprint}`;
       const directory = join(home, ".tasknboard", "codex-app", fingerprint);
       const files = {
@@ -165,11 +150,11 @@ export function createCodexAppPlugin({
             brandColor: "#9DE3C1",
             composerIcon: "./assets/icon.svg",
             logo: "./assets/icon.svg",
-            logoDark: "./assets/icon-dark.svg",
+            logoDark: "./assets/icon.svg",
           },
         },
         "plugin/.mcp.json": mcp,
-        ...icons,
+        "plugin/assets/icon.svg": codexAppIcon,
       };
       // Immutable, content-addressed files make retries safe without overwriting user edits.
       for (const [name, value] of Object.entries(files)) {
@@ -193,7 +178,7 @@ export function createCodexAppPlugin({
       await invoke(["plugin", "marketplace", "add", directory, "--json"]);
       const pluginId = `tasknboard-app@${marketplace}`;
       const listing = JSON.parse(
-        (await invoke(["plugin", "list", "--json"])).stdout,
+        (await invoke(["plugin", "list", "--marketplace", marketplace, "--json"])).stdout,
       );
       const existing = listing.installed?.find(
         (plugin) => plugin.pluginId === pluginId,
@@ -215,7 +200,7 @@ export function createCodexAppPlugin({
     if (!pluginId) return { installed: false, enabled: false };
     try {
       const listing = JSON.parse(
-        (await invoke(["plugin", "list", "--json"])).stdout,
+        (await invoke(["plugin", "list", "--marketplace", pluginId.split("@")[1], "--json"])).stdout,
       );
       const plugin = listing.installed?.find(
         (entry) => entry.pluginId === pluginId,
